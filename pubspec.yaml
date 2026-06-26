@@ -1,0 +1,57 @@
+name: gifolomora
+description: "Cross-platform glassmorphism GIF editor & maker."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.3.5
+  go_router: ^14.6.3
+  shared_preferences: ^2.3.0
+  path_provider: ^2.1.4
+  path: ^1.9.0
+
+  # Phase 1: file picking + permissions
+  file_picker: ^8.1.2
+  permission_handler: ^11.3.1
+
+  # Phase 1: Android FFmpeg backend.
+  # VERIFY: check pub.dev for current name/version/API before Android build.
+  # If unavailable: remove this line — Windows path works without it.
+  ffmpeg_kit_flutter_new: ^4.2.1
+
+  # Phase 2: video playback for video-to-gif trim UI
+  # media_kit: Windows-solid (PLAN.md recommendation) + Android via same API
+  media_kit: ^1.1.10
+  media_kit_video: ^1.2.4
+  media_kit_libs_video: ^1.0.4
+
+  # Phase 4: Windows custom title bar (desktop-only; guarded with Platform.isWindows)
+  window_manager: ^0.3.9
+
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.4.13
+  riverpod_generator: ^2.4.3
+  custom_lint: ^0.7.5
+  riverpod_lint: ^2.3.13
+
+dependency_overrides:
+  # Local override: same Dart/Android/iOS code but pluginClass:none for Windows
+  # to skip broken Windows native compilation (we use FfmpegProcessBackend on Windows).
+  ffmpeg_kit_flutter_new:
+    path: ./packages/ffmpeg_kit_flutter_new
+
+flutter:
+  uses-material-design: true
