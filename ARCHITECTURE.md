@@ -258,16 +258,3 @@ platforms. After the copy, `FfmpegService.cleanCurrentJob()` removes the temp di
 | `shared_preferences` | 2.5.5 | settings + recents persist |
 | `path_provider` + `path` | 2.1.6 / — | temp dirs, path joins |
 | ffmpeg / ffprobe (Windows) | 8.1.1 | bundled binaries |
-
----
-
-## Phased build order
-
-| Phase | Deliverable | Status |
-|---|---|---|
-| 0 | Skeleton + glass design system + static home | ✅ Complete |
-| 1 | FFmpeg abstraction + Images→GIF end-to-end | ✅ Complete |
-| 2 | Video→GIF + Resize + Crop | ✅ Complete |
-| 3 | Optimize/Compress + Text Overlay + Reverse/Speed (Effects) | ✅ Complete |
-| 4 | Polish (recents, settings, toasts, transitions, Windows glass title bar) | ✅ Complete |
-| 5 | Linux fallback (reuse Windows Process backend) | optional |

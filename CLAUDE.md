@@ -21,10 +21,3 @@ dart run build_runner watch              # codegen watch mode during development
 ## Architecture
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full architecture reference: layer structure, dual-backend FFmpeg design, glass design system, state management, tool screen skeleton, export flow, and platform specifics.
-
-## Current phase
-
-**Phase 0 complete** — glass design system + static home screen. No FFmpeg yet.  
-**Phase 1 next** — FFmpeg abstraction + Images→GIF end-to-end (verify pub.dev packages first, see `PLAN.md` checklist).
-
-See `PLAN.md` for phased roadmap, GIF filter command patterns, and implementation log.

@@ -1,0 +1,46 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:gifolomora/features/home/data/tool_catalog.dart';
+
+void main() {
+  group('toolCatalog', () {
+    test('total of 7 tools', () {
+      expect(toolCatalog.length, equals(7));
+    });
+
+    test('all tool routes are unique', () {
+      final routes = toolCatalog.map((t) => t.route).toSet();
+      expect(routes.length, equals(toolCatalog.length));
+    });
+
+    test('all tools have non-empty id, label, and description', () {
+      for (final tool in toolCatalog) {
+        expect(tool.id, isNotEmpty);
+        expect(tool.label, isNotEmpty);
+        expect(tool.description, isNotEmpty);
+      }
+    });
+
+    test('createTools returns only ToolCategory.create entries', () {
+      expect(createTools.every((t) => t.category == ToolCategory.create), isTrue);
+    });
+
+    test('refineTools returns only ToolCategory.refine entries', () {
+      expect(refineTools.every((t) => t.category == ToolCategory.refine), isTrue);
+    });
+
+    test('createTools + refineTools = full catalog', () {
+      expect(createTools.length + refineTools.length, equals(toolCatalog.length));
+    });
+
+    test('video-to-gif and images-to-gif are create tools', () {
+      final routes = createTools.map((t) => t.route).toSet();
+      expect(routes, containsAll(['/video-to-gif', '/images-to-gif']));
+    });
+
+    test('refine tools include resize, crop, text-overlay, optimize, effects', () {
+      final routes = refineTools.map((t) => t.route).toSet();
+      expect(routes,
+          containsAll(['/resize', '/crop', '/text-overlay', '/optimize', '/effects']));
+    });
+  });
+}

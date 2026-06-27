@@ -25,7 +25,7 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     final allActions = [
       ...?actions,
-      if (Platform.isWindows) const _WindowControls(),
+      if (Platform.isWindows || Platform.isLinux) const _WindowControls(),
     ];
 
     Widget bar = ClipRect(
@@ -54,7 +54,7 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
       ),
     );
 
-    if (Platform.isWindows) {
+    if (Platform.isWindows || Platform.isLinux) {
       bar = DragToMoveArea(child: bar);
     }
 

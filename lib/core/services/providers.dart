@@ -88,7 +88,7 @@ class RecentsNotifier extends AsyncNotifier<List<RecentExport>> {
   Future<void> add(RecentExport item) async {
     await ref.read(recentsServiceProvider).add(item);
     state = AsyncData(
-        [item, ...state.valueOrNull ?? []].take(10).toList());
+        [item, ...state.valueOrNull ?? <RecentExport>[]].take(10).toList());
   }
 
   Future<void> clear() async {

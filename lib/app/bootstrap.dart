@@ -10,7 +10,7 @@ Future<void> bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
 
-  if (Platform.isWindows) {
+  if (Platform.isWindows || Platform.isLinux) {
     await windowManager.ensureInitialized();
     const options = WindowOptions(
       size: Size(1280, 720),
