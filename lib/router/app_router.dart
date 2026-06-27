@@ -5,6 +5,7 @@ import '../features/about/view/about_screen.dart';
 import '../features/settings/view/settings_screen.dart';
 import '../features/images_to_gif/view/images_to_gif_screen.dart';
 import '../features/video_to_gif/view/video_to_gif_screen.dart';
+import '../features/video_studio/view/video_studio_screen.dart';
 import '../features/resize/view/resize_screen.dart';
 import '../features/crop/view/crop_screen.dart';
 import '../features/optimize/view/optimize_screen.dart';
@@ -50,6 +51,11 @@ final appRouter = GoRouter(
       path: '/video-to-gif',
       pageBuilder: (context, state) =>
           _slide(state, const VideoToGifScreen()),
+    ),
+    GoRoute(
+      path: '/video-studio',
+      pageBuilder: (context, state) =>
+          _slide(state, const VideoStudioScreen()),
     ),
     GoRoute(
       path: '/images-to-gif',

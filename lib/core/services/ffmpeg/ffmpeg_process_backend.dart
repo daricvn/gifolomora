@@ -141,6 +141,7 @@ class FfmpegProcessBackend implements FfmpegBackend {
       );
       if (video == null) return null;
 
+      final hasAudio = streams.any((s) => s['codec_type'] == 'audio');
       final format = decoded['format'] as Map? ?? {};
       final durationSec = double.tryParse(format['duration']?.toString() ?? '') ?? 0;
       final fps = _parseFps(video['r_frame_rate']?.toString());
@@ -150,6 +151,7 @@ class FfmpegProcessBackend implements FfmpegBackend {
         width: (video['width'] as num?)?.toInt() ?? 0,
         height: (video['height'] as num?)?.toInt() ?? 0,
         fps: fps,
+        hasAudio: hasAudio,
       );
     } catch (_) {
       return null;

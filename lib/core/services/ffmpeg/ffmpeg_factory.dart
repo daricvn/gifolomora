@@ -13,11 +13,4 @@ abstract final class FfmpegFactory {
       ffprobePath: FfmpegProcessBackend.resolveBin('ffprobe'),
     );
   }
-
-  /// Returns gifsicle binary path if it exists next to the app executable.
-  static String? resolveGifsicle() {
-    if (!Platform.isWindows && !Platform.isLinux) return null;
-    final path = FfmpegProcessBackend.resolveBin('gifsicle');
-    return File(path).existsSync() ? path : null;
-  }
 }

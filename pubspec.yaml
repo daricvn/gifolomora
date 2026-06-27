@@ -36,6 +36,8 @@ dependencies:
   # Phase 4: Windows custom title bar (desktop-only; guarded with Platform.isWindows)
   window_manager: ^0.3.9
 
+  image: ^4.0.0
+
   cupertino_icons: ^1.0.8
 
 dev_dependencies:
@@ -46,6 +48,7 @@ dev_dependencies:
   riverpod_generator: ^2.4.3
   custom_lint: ^0.7.5
   riverpod_lint: ^2.3.13
+  flutter_launcher_icons: ^0.14.3
 
 dependency_overrides:
   # Local override: same Dart/Android/iOS code but pluginClass:none for Windows
@@ -55,3 +58,21 @@ dependency_overrides:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/banner.png
+    - assets/app.png
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/app.png"
+  windows:
+    generate: true
+    image_path: "assets/app.png"
+    icon_size: 256
+  web:
+    generate: false
+  macos:
+    generate: false
+  linux:
+    generate: false

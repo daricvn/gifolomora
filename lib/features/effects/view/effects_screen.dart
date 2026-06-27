@@ -129,7 +129,7 @@ class EffectsScreen extends ConsumerWidget {
                       value: state.speedFactor,
                       min: 0.25,
                       max: 4.0,
-                      divisions: 15,
+                      divisions: 75,
                       displayValue: _speedLabel(state.speedFactor),
                       onChanged: (v) => ctrl.setSpeedFactor(
                         _snapSpeed(v),

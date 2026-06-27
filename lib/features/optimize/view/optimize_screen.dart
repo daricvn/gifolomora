@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/services/providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
 import '../../../core/widgets/common/gradient_scaffold.dart';
@@ -22,7 +21,6 @@ class OptimizeScreen extends ConsumerWidget {
     final state =
         ref.watch(optimizeControllerProvider).valueOrNull ?? const OptimizeState();
     final ctrl = ref.read(optimizeControllerProvider.notifier);
-    final hasGifsicle = ref.read(ffmpegServiceProvider).gifsicleePath != null;
 
     Future<void> doExport() async {
       await ExportBottomSheet.show(
@@ -108,33 +106,17 @@ class OptimizeScreen extends ConsumerWidget {
                     onChanged: (v) => ctrl.setColors(v.round()),
                   ),
                   const SizedBox(height: 8),
-                  if (hasGifsicle) ...[
-                    const Divider(color: AppColors.glassStroke, height: 24),
-                    OptionSlider(
-                      label: 'Lossy',
-                      value: state.lossy.toDouble(),
-                      min: 0,
-                      max: 80,
-                      divisions: 16,
-                      unit: '',
-                      displayValue: state.lossy == 0 ? 'Off' : '${state.lossy}',
-                      onChanged: (v) => ctrl.setLossy(v.round()),
-                    ),
-                  ] else
-                    Row(
-                      children: [
-                        const Icon(Icons.info_outline_rounded,
-                            color: AppColors.textLo, size: 15),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            'Lossy compression requires gifsicle.exe (place next to app)',
-                            style: const TextStyle(
-                                color: AppColors.textLo, fontSize: 12),
-                          ),
-                        ),
-                      ],
-                    ),
+                  const Divider(color: AppColors.glassStroke, height: 24),
+                  OptionSlider(
+                    label: 'Lossy',
+                    value: state.lossy.toDouble(),
+                    min: 0,
+                    max: 80,
+                    divisions: 16,
+                    unit: '',
+                    displayValue: state.lossy == 0 ? 'Off' : '${state.lossy}',
+                    onChanged: (v) => ctrl.setLossy(v.round()),
+                  ),
                 ],
               ),
             ),

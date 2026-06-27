@@ -17,4 +17,18 @@ class ExportService {
     await tempFile.copy(dest.path);
     return dest;
   }
+
+  Future<File?> saveVideo(File tempFile, {String defaultName = 'edited.mp4'}) async {
+    final savePath = await FilePicker.platform.saveFile(
+      dialogTitle: 'Save Video',
+      fileName: defaultName,
+      type: FileType.custom,
+      allowedExtensions: ['mp4'],
+    );
+    if (savePath == null) return null;
+
+    final dest = File(savePath);
+    await tempFile.copy(dest.path);
+    return dest;
+  }
 }

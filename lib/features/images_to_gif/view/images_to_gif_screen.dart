@@ -15,6 +15,19 @@ import '../../_shared/widgets/option_slider.dart';
 import '../controller/images_to_gif_controller.dart';
 import '../widgets/frame_strip.dart';
 
+const _kPositions = [
+  ('Top', 'top'),
+  ('Center', 'center'),
+  ('Bottom', 'bottom'),
+];
+
+const _kFontColors = [
+  ('White', 'white', Color(0xFFF2F4FF)),
+  ('Yellow', 'yellow', Color(0xFFFFE066)),
+  ('Black', 'black', Color(0xFF22242E)),
+  ('Red', 'red', Color(0xFFFF5CAA)),
+];
+
 class ImagesToGifScreen extends ConsumerStatefulWidget {
   const ImagesToGifScreen({super.key});
 
@@ -140,9 +153,30 @@ class _ImagesToGifScreenState extends ConsumerState<ImagesToGifScreen> {
               ),
             ),
 
-            // ── Step 3: Preview / Generate ─────────────────────────────
+            // ── Step 3: Caption ────────────────────────────────────────
             const SizedBox(height: 24),
-            const _SectionHeader(number: 3, title: 'Preview'),
+            const _SectionHeader(
+                number: 3,
+                title: 'Caption',
+                subtitle: 'Optional text drawn on every frame'),
+            const SizedBox(height: 12),
+            _CaptionSection(state: state, ctrl: ctrl),
+
+            // ── Step 4: Optimise GIF ───────────────────────────────────
+            const SizedBox(height: 24),
+            const _SectionHeader(
+                number: 4,
+                title: 'Optimise GIF',
+                subtitle: 'Reduce colors and file size'),
+            const SizedBox(height: 12),
+            _OptimizeSection(
+              state: state,
+              ctrl: ctrl,
+            ),
+
+            // ── Step 5: Preview / Generate ─────────────────────────────
+            const SizedBox(height: 24),
+            const _SectionHeader(number: 5, title: 'Preview'),
             const SizedBox(height: 12),
             if (state.isProcessing)
               _ProgressCard(
@@ -395,6 +429,287 @@ class _ExportBar extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Caption section ───────────────────────────────────────────────────────────
+
+class _CaptionSection extends StatefulWidget {
+  const _CaptionSection({required this.state, required this.ctrl});
+  final ImagesToGifState state;
+  final ImagesToGifController ctrl;
+
+  @override
+  State<_CaptionSection> createState() => _CaptionSectionState();
+}
+
+class _CaptionSectionState extends State<_CaptionSection> {
+  late final TextEditingController _textCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _textCtrl = TextEditingController(text: widget.state.overlayText);
+  }
+
+  @override
+  void dispose() {
+    _textCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.state;
+    final ctrl = widget.ctrl;
+    return GlassContainer(
+      borderRadius: 20,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (s.overlayFontFile == null) ...[
+            Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded,
+                    color: Colors.orange, size: 15),
+                const SizedBox(width: 6),
+                const Expanded(
+                  child: Text(
+                    'No system font found. Text overlay may fail.',
+                    style: TextStyle(color: Colors.orange, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+          ],
+          TextField(
+            controller: _textCtrl,
+            onChanged: ctrl.setOverlayText,
+            style: const TextStyle(color: AppColors.textHi, fontSize: 14),
+            maxLines: 1,
+            decoration: InputDecoration(
+              hintText: 'Leave empty to skip…',
+              hintStyle:
+                  const TextStyle(color: AppColors.textLo, fontSize: 14),
+              filled: true,
+              fillColor: AppColors.glassTint,
+              isDense: true,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: AppColors.glassStroke),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: AppColors.glassStroke),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: AppColors.accentA),
+              ),
+            ),
+          ),
+          if (s.overlayText.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            const Text('Position',
+                style: TextStyle(color: AppColors.textLo, fontSize: 12)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: _kPositions.map((pos) {
+                final selected = pos.$2 == s.overlayPosition;
+                return _Chip(
+                  label: pos.$1,
+                  selected: selected,
+                  onTap: () => ctrl.setOverlayPosition(pos.$2),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 14),
+            OptionSlider(
+              label: 'Font Size',
+              value: s.overlayFontSize.toDouble(),
+              min: 12,
+              max: 96,
+              divisions: 28,
+              unit: 'px',
+              onChanged: (v) => ctrl.setOverlayFontSize(v.round()),
+            ),
+            const SizedBox(height: 12),
+            const Text('Color',
+                style: TextStyle(color: AppColors.textLo, fontSize: 12)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: _kFontColors.map((entry) {
+                final selected = entry.$2 == s.overlayFontColor;
+                return _ColorChip(
+                  label: entry.$1,
+                  color: entry.$3,
+                  selected: selected,
+                  onTap: () => ctrl.setOverlayFontColor(entry.$2),
+                );
+              }).toList(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ── Optimize section ──────────────────────────────────────────────────────────
+
+class _OptimizeSection extends StatelessWidget {
+  const _OptimizeSection({
+    required this.state,
+    required this.ctrl,
+  });
+  final ImagesToGifState state;
+  final ImagesToGifController ctrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassContainer(
+      borderRadius: 20,
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Switch(
+                value: state.doOptimize,
+                onChanged: ctrl.setDoOptimize,
+                activeThumbColor: AppColors.accentB,
+              ),
+              const SizedBox(width: 8),
+              const Text('Optimise output GIF',
+                  style: TextStyle(color: AppColors.textHi, fontSize: 14)),
+            ],
+          ),
+          if (state.doOptimize) ...[
+            const SizedBox(height: 10),
+            OptionSlider(
+              label: 'Colors',
+              value: state.optimizeColors.toDouble(),
+              min: 16,
+              max: 256,
+              divisions: 30,
+              displayValue: '${state.optimizeColors}',
+              onChanged: (v) => ctrl.setOptimizeColors(v.round()),
+            ),
+            const SizedBox(height: 8),
+            OptionSlider(
+              label: 'Lossy',
+              value: state.optimizeLossy.toDouble(),
+              min: 0,
+              max: 80,
+              divisions: 16,
+              displayValue: state.optimizeLossy == 0
+                  ? 'Off'
+                  : '${state.optimizeLossy}',
+              onChanged: (v) => ctrl.setOptimizeLossy(v.round()),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ── Chip widgets ──────────────────────────────────────────────────────────────
+
+class _Chip extends StatelessWidget {
+  const _Chip(
+      {required this.label, required this.selected, required this.onTap});
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.accentA.withValues(alpha: 0.25)
+              : AppColors.glassTint,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? AppColors.accentA : AppColors.glassStroke,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? AppColors.accentB : AppColors.textLo,
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ColorChip extends StatelessWidget {
+  const _ColorChip({
+    required this.label,
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+  final String label;
+  final Color color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.accentA.withValues(alpha: 0.2)
+              : AppColors.glassTint,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? AppColors.accentA : AppColors.glassStroke,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 13,
+              height: 13,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+                border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.3), width: 1),
+              ),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? AppColors.accentB : AppColors.textLo,
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -80,12 +80,14 @@ class FfmpegKitBackend implements FfmpegBackend {
       final video = streams.firstWhereOrNull((s) => s.getType() == 'video');
       if (video == null) return null;
 
+      final hasAudio = streams.any((s) => s.getType() == 'audio');
       final durationSec = double.tryParse(info.getDuration() ?? '') ?? 0;
       return MediaInfo(
         durationMs: (durationSec * 1000).round(),
         width: int.tryParse(video.getWidth()?.toString() ?? '') ?? 0,
         height: int.tryParse(video.getHeight()?.toString() ?? '') ?? 0,
         fps: _parseFps(video.getRealFrameRate()),
+        hasAudio: hasAudio,
       );
     } catch (e, st) {
       Log.e(_tag, 'probe failed for $inputPath', e, st);

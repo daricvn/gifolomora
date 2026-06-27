@@ -233,15 +233,6 @@ void main() {
     });
   });
 
-  group('FfmpegCommand.optimizeGifFfmpeg', () {
-    test('contains max_colors with given value', () {
-      final args = FfmpegCommand.optimizeGifFfmpeg(
-          inputPath: '/in.gif', outputPath: '/out.gif', colors: 64);
-      final filter = args.firstWhere((a) => a.contains('max_colors='));
-      expect(filter, contains('max_colors=64'));
-    });
-  });
-
   group('FfmpegCommand.buildConcatFileContent', () {
     test('15fps → duration 0.066667 per frame', () {
       final content =

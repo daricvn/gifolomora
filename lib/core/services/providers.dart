@@ -28,7 +28,6 @@ final ffmpegServiceProvider = Provider<FfmpegService>(
   (ref) => FfmpegService(
     ref.watch(ffmpegBackendProvider),
     ref.watch(tempFileServiceProvider),
-    gifsicleePath: FfmpegFactory.resolveGifsicle(),
   ),
   name: 'ffmpegServiceProvider',
 );

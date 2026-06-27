@@ -27,10 +27,12 @@ class MediaInfo {
     required this.width,
     required this.height,
     this.fps,
+    this.hasAudio = false,
   });
 
   final int durationMs;
   final int width;
   final int height;
   final double? fps;
+  final bool hasAudio;
 }

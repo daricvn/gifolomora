@@ -6,12 +6,23 @@ import '../../../core/services/ffmpeg/ffmpeg_progress.dart';
 import '../../../core/services/ffmpeg/ffmpeg_service.dart';
 import '../../../core/services/providers.dart';
 import '../../../core/services/recents/recents_service.dart';
+import '../../../core/utils/font_resolver.dart';
 
 class ImagesToGifState {
   const ImagesToGifState({
     this.frames = const [],
     this.fps = 15,
     this.width,
+    // text overlay
+    this.overlayText = '',
+    this.overlayPosition = 'center',
+    this.overlayFontSize = 36,
+    this.overlayFontColor = 'white',
+    this.overlayFontFile,
+    // optimize
+    this.doOptimize = false,
+    this.optimizeColors = 128,
+    this.optimizeLossy = 40,
     this.outputGif,
     this.progress,
     this.isProcessing = false,
@@ -20,18 +31,38 @@ class ImagesToGifState {
 
   final List<File> frames;
   final int fps;
-  final int? width;         // null = keep original
-  final File? outputGif;   // last generated gif in temp
+  final int? width;
+
+  final String overlayText;
+  final String overlayPosition;
+  final int overlayFontSize;
+  final String overlayFontColor;
+  final String? overlayFontFile;
+
+  final bool doOptimize;
+  final int optimizeColors;
+  final int optimizeLossy;
+
+  final File? outputGif;
   final FfmpegProgress? progress;
   final bool isProcessing;
   final String? error;
 
   bool get hasFrames => frames.isNotEmpty;
+  bool get hasText => overlayText.trim().isNotEmpty;
 
   ImagesToGifState copyWith({
     List<File>? frames,
     int? fps,
     Object? width = _sentinel,
+    String? overlayText,
+    String? overlayPosition,
+    int? overlayFontSize,
+    String? overlayFontColor,
+    Object? overlayFontFile = _sentinel,
+    bool? doOptimize,
+    int? optimizeColors,
+    int? optimizeLossy,
     Object? outputGif = _sentinel,
     Object? progress = _sentinel,
     bool? isProcessing,
@@ -41,8 +72,21 @@ class ImagesToGifState {
       frames: frames ?? this.frames,
       fps: fps ?? this.fps,
       width: identical(width, _sentinel) ? this.width : width as int?,
-      outputGif: identical(outputGif, _sentinel) ? this.outputGif : outputGif as File?,
-      progress: identical(progress, _sentinel) ? this.progress : progress as FfmpegProgress?,
+      overlayText: overlayText ?? this.overlayText,
+      overlayPosition: overlayPosition ?? this.overlayPosition,
+      overlayFontSize: overlayFontSize ?? this.overlayFontSize,
+      overlayFontColor: overlayFontColor ?? this.overlayFontColor,
+      overlayFontFile: identical(overlayFontFile, _sentinel)
+          ? this.overlayFontFile
+          : overlayFontFile as String?,
+      doOptimize: doOptimize ?? this.doOptimize,
+      optimizeColors: optimizeColors ?? this.optimizeColors,
+      optimizeLossy: optimizeLossy ?? this.optimizeLossy,
+      outputGif:
+          identical(outputGif, _sentinel) ? this.outputGif : outputGif as File?,
+      progress: identical(progress, _sentinel)
+          ? this.progress
+          : progress as FfmpegProgress?,
       isProcessing: isProcessing ?? this.isProcessing,
       error: identical(error, _sentinel) ? this.error : error as String?,
     );
@@ -53,7 +97,8 @@ class ImagesToGifState {
 
 class ImagesToGifController extends AsyncNotifier<ImagesToGifState> {
   @override
-  Future<ImagesToGifState> build() async => const ImagesToGifState();
+  Future<ImagesToGifState> build() async =>
+      ImagesToGifState(overlayFontFile: FontResolver.resolve());
 
   FfmpegService get _ffmpeg => ref.read(ffmpegServiceProvider);
   ExportService get _export => ref.read(exportServiceProvider);
@@ -91,9 +136,48 @@ class ImagesToGifController extends AsyncNotifier<ImagesToGifState> {
     state = AsyncData(current.copyWith(width: width, outputGif: null));
   }
 
+  void setOverlayText(String text) {
+    final s = state.valueOrNull ?? const ImagesToGifState();
+    state = AsyncData(s.copyWith(overlayText: text, outputGif: null, error: null));
+  }
+
+  void setOverlayPosition(String position) {
+    final s = state.valueOrNull ?? const ImagesToGifState();
+    state = AsyncData(
+        s.copyWith(overlayPosition: position, outputGif: null, error: null));
+  }
+
+  void setOverlayFontSize(int size) {
+    final s = state.valueOrNull ?? const ImagesToGifState();
+    state = AsyncData(
+        s.copyWith(overlayFontSize: size, outputGif: null, error: null));
+  }
+
+  void setOverlayFontColor(String color) {
+    final s = state.valueOrNull ?? const ImagesToGifState();
+    state = AsyncData(
+        s.copyWith(overlayFontColor: color, outputGif: null, error: null));
+  }
+
+  void setDoOptimize(bool value) {
+    final s = state.valueOrNull ?? const ImagesToGifState();
+    state = AsyncData(s.copyWith(doOptimize: value, outputGif: null));
+  }
+
+  void setOptimizeColors(int colors) {
+    final s = state.valueOrNull ?? const ImagesToGifState();
+    state = AsyncData(s.copyWith(optimizeColors: colors, outputGif: null));
+  }
+
+  void setOptimizeLossy(int lossy) {
+    final s = state.valueOrNull ?? const ImagesToGifState();
+    state = AsyncData(s.copyWith(optimizeLossy: lossy, outputGif: null));
+  }
+
   void clearFrames() {
     _ffmpeg.cleanCurrentJob();
-    state = const AsyncData(ImagesToGifState());
+    state = AsyncData(
+        ImagesToGifState(overlayFontFile: FontResolver.resolve()));
   }
 
   Future<void> generate() async {
@@ -108,31 +192,75 @@ class ImagesToGifController extends AsyncNotifier<ImagesToGifState> {
       outputGif: null,
     ));
 
-    final result = await _ffmpeg.imagesToGif(
+    void onProgress(FfmpegProgress p) {
+      final s = state.valueOrNull;
+      if (s != null) state = AsyncData(s.copyWith(progress: p));
+    }
+
+    // Step 1: base GIF from frames
+    final baseResult = await _ffmpeg.imagesToGif(
       frames: current.frames,
       fps: current.fps,
       width: current.width,
-      onProgress: (p) {
-        final s = state.valueOrNull;
-        if (s != null) {
-          state = AsyncData(s.copyWith(progress: p));
-        }
-      },
+      onProgress: onProgress,
     );
 
+    if (baseResult.isErr) {
+      final s = state.valueOrNull ?? const ImagesToGifState();
+      state = AsyncData(s.copyWith(
+          isProcessing: false,
+          progress: null,
+          error: baseResult.error.message));
+      return;
+    }
+
+    File gif = baseResult.value;
+
+    // Step 2: optional text overlay
+    final text = current.overlayText.trim();
+    if (text.isNotEmpty && current.overlayFontFile != null) {
+      final textResult = await _ffmpeg.textOverlay(
+        input: gif,
+        text: text,
+        fontFile: current.overlayFontFile!,
+        fontSize: current.overlayFontSize,
+        fontColor: current.overlayFontColor,
+        position: current.overlayPosition,
+        onProgress: onProgress,
+      );
+      if (textResult.isErr) {
+        final s = state.valueOrNull ?? const ImagesToGifState();
+        state = AsyncData(s.copyWith(
+            isProcessing: false,
+            progress: null,
+            error: 'Text overlay: ${textResult.error.message}'));
+        return;
+      }
+      gif = textResult.value;
+    }
+
+    // Step 3: optional optimize
+    if (current.doOptimize) {
+      final optResult = await _ffmpeg.optimizeGif(
+        input: gif,
+        colors: current.optimizeColors,
+        lossy: current.optimizeLossy,
+        onProgress: onProgress,
+      );
+      if (optResult.isErr) {
+        final s = state.valueOrNull ?? const ImagesToGifState();
+        state = AsyncData(s.copyWith(
+            isProcessing: false,
+            progress: null,
+            error: 'Optimize: ${optResult.error.message}'));
+        return;
+      }
+      gif = optResult.value;
+    }
+
     final s = state.valueOrNull ?? const ImagesToGifState();
-    result.fold(
-      ok: (file) => state = AsyncData(s.copyWith(
-        outputGif: file,
-        isProcessing: false,
-        progress: null,
-      )),
-      err: (err) => state = AsyncData(s.copyWith(
-        isProcessing: false,
-        progress: null,
-        error: err.message,
-      )),
-    );
+    state = AsyncData(
+        s.copyWith(outputGif: gif, isProcessing: false, progress: null));
   }
 
   Future<bool> exportGif() async {

@@ -33,6 +33,15 @@ class ToolEntry {
 const List<ToolEntry> toolCatalog = [
   // ── Create ──────────────────────────────────────────────────────────────
   ToolEntry(
+    id: 'video_studio',
+    label: 'Video Studio',
+    description: 'Crop, resize & speed — export as video or GIF',
+    icon: Icons.movie_creation_rounded,
+    route: '/video-studio',
+    accentColor: Color(0xFFFF8C00),
+    category: ToolCategory.create,
+  ),
+  ToolEntry(
     id: 'video_to_gif',
     label: 'Video → GIF',
     description: 'Turn any clip into a crisp, high-quality GIF',

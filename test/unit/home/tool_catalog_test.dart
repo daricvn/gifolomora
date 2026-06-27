@@ -3,8 +3,8 @@ import 'package:gifolomora/features/home/data/tool_catalog.dart';
 
 void main() {
   group('toolCatalog', () {
-    test('total of 7 tools', () {
-      expect(toolCatalog.length, equals(7));
+    test('total of 8 tools', () {
+      expect(toolCatalog.length, equals(8));
     });
 
     test('all tool routes are unique', () {
