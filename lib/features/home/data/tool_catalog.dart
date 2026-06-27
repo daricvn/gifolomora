@@ -42,15 +42,6 @@ const List<ToolEntry> toolCatalog = [
     category: ToolCategory.create,
   ),
   ToolEntry(
-    id: 'video_to_gif',
-    label: 'Video → GIF',
-    description: 'Turn any clip into a crisp, high-quality GIF',
-    icon: Icons.videocam_rounded,
-    route: '/video-to-gif',
-    accentColor: Color(0xFF6D5DF6),
-    category: ToolCategory.create,
-  ),
-  ToolEntry(
     id: 'images_to_gif',
     label: 'Images → GIF',
     description: 'Stitch a sequence of frames into a smooth loop',

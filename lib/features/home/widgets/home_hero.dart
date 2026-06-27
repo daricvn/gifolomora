@@ -17,7 +17,7 @@ class HomeHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         AspectRatio(
           aspectRatio: _bannerAspect,
@@ -93,7 +93,7 @@ class _DissolvedBanner extends StatelessWidget {
         blendMode: BlendMode.dstIn,
         shaderCallback: horizontal.createShader,
         child: Image.asset(
-          'assets/banner.png',
+          'assets/banner.gif',
           fit: BoxFit.cover,
           filterQuality: FilterQuality.high,
         ),

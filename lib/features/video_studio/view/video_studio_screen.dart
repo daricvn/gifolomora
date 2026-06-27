@@ -12,7 +12,7 @@ import '../../../core/widgets/glass/glass_container.dart';
 import '../../_shared/widgets/file_drop_zone.dart';
 import '../../_shared/widgets/option_slider.dart';
 import '../../_shared/widgets/video_preview.dart';
-import '../../video_to_gif/widgets/video_trim_slider.dart';
+import '../widgets/video_trim_slider.dart';
 import '../controller/video_studio_controller.dart';
 
 const _kPositions = [
@@ -35,18 +35,21 @@ String _fmtMs(int ms) {
 }
 
 const _kVideoExtensions = ['mp4', 'mov', 'mkv', 'avi', 'webm'];
+const _kAllExtensions = [..._kVideoExtensions, 'gif'];
 
-Future<void> _pickVideo(VideoStudioController ctrl) async {
+Future<void> _pickFile(VideoStudioController ctrl) async {
   final result = await FilePicker.platform.pickFiles(
     type: FileType.custom,
-    allowedExtensions: _kVideoExtensions,
+    allowedExtensions: _kAllExtensions,
   );
   final path = result?.files.single.path;
   if (path != null) await ctrl.setInput(File(path));
 }
 
 class VideoStudioScreen extends ConsumerStatefulWidget {
-  const VideoStudioScreen({super.key});
+  const VideoStudioScreen({super.key, this.initialFile});
+
+  final File? initialFile;
 
   @override
   ConsumerState<VideoStudioScreen> createState() => _VideoStudioScreenState();
@@ -60,6 +63,15 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
   void initState() {
     super.initState();
     _previewCtrl = VideoPreviewController();
+    if (widget.initialFile != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ref
+              .read(videoStudioControllerProvider.notifier)
+              .setInput(widget.initialFile!);
+        }
+      });
+    }
   }
 
   @override
@@ -78,10 +90,17 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
     return GradientScaffold(
       appBar: GlassAppBar(
         title: 'Video Studio',
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: AppColors.textHi, size: 20),
-          onPressed: () => Navigator.of(context).maybePop(),
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 16),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: IconButton(
+              iconSize: 20,
+              icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                color: AppColors.textHi),
+            onPressed: () => Navigator.of(context).maybePop(),
+            ),
+          ),
         ),
         actions: [
           if (state.hasInput && !state.isProcessing)
@@ -132,9 +151,9 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
         padding: const EdgeInsets.all(16),
         child: Center(
           child: FileDropZone(
-            hint: 'Tap to select a video',
-            icon: Icons.video_file_rounded,
-            allowedExtensions: _kVideoExtensions,
+            hint: 'Tap to select a video or GIF',
+            icon: Icons.perm_media_rounded,
+            allowedExtensions: _kAllExtensions,
             onFilesSelected: (files) {
               if (files.isNotEmpty) ctrl.setInput(files.first);
             },
@@ -147,39 +166,60 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
       children: [
         _StageBanner(
           state: state,
-          onChangeVideo: state.isProcessing ? null : () => _pickVideo(ctrl),
+          onChangeVideo: state.isProcessing ? null : () => _pickFile(ctrl),
         ),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: Center(
-              child: GlassContainer(
-                borderRadius: 20,
-                padding: EdgeInsets.zero,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(20),
-                  child: VideoPreview(
-                    key: ValueKey(state.sourceFile!.path),
-                    file: state.sourceFile!,
-                    videoWidth: state.sourceWidth,
-                    videoHeight: state.sourceHeight,
-                    speedRate: state.speedFactor,
-                    cropRect: (state.activeTool == StudioTool.crop ||
-                            !state.isCropFull)
-                        ? state.cropNormalized
-                        : null,
-                    interactive: state.activeTool == StudioTool.crop,
-                    onCropChanged: ctrl.setCrop,
-                    controller: _previewCtrl,
-                    onPositionChanged: (ms) =>
-                        setState(() => _positionMs = ms),
-                    trimStartMs: state.trimStartMs,
-                    trimEndMs: state.sourceDurationMs > 0
-                        ? state.effectiveTrimEndMs
-                        : 0,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                double displayScale = 1.0;
+                if (state.sourceWidth > 0 && state.sourceHeight > 0) {
+                  final ar = state.sourceWidth / state.sourceHeight;
+                  final cAR = constraints.maxWidth / constraints.maxHeight;
+                  // Width the video naturally occupies in the preview container
+                  final naturalW = cAR <= ar
+                      ? constraints.maxWidth
+                      : constraints.maxHeight * ar;
+                  final effectiveW =
+                      (state.targetWidth ?? state.sourceWidth).toDouble();
+                  displayScale = (effectiveW / naturalW).clamp(0.1, 1.0);
+                }
+                return Center(
+                  child: AnimatedScale(
+                    scale: displayScale,
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOut,
+                    child: GlassContainer(
+                      borderRadius: 20,
+                      padding: EdgeInsets.zero,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: VideoPreview(
+                          key: ValueKey(state.sourceFile!.path),
+                          file: state.sourceFile!,
+                          videoWidth: state.sourceWidth,
+                          videoHeight: state.sourceHeight,
+                          speedRate: state.speedFactor,
+                          cropRect: (state.activeTool == StudioTool.crop ||
+                                  !state.isCropFull)
+                              ? state.cropNormalized
+                              : null,
+                          interactive: state.activeTool == StudioTool.crop,
+                          onCropChanged: ctrl.setCrop,
+                          controller: _previewCtrl,
+                          onPositionChanged: (ms) =>
+                              setState(() => _positionMs = ms),
+                          trimStartMs: state.trimStartMs,
+                          trimEndMs: state.sourceDurationMs > 0
+                              ? state.effectiveTrimEndMs
+                              : 0,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
           ),
         ),
@@ -355,7 +395,7 @@ class _ToolSelector extends StatelessWidget {
       children: [
         for (final t in tools)
           SizedBox(
-            width: (MediaQuery.of(context).size.width - 44) / 5,
+            width: (MediaQuery.of(context).size.width - 44) / 6,
             child: _ToolButton(
               icon: t.$2,
               label: t.$3,
@@ -860,34 +900,72 @@ class _ResizeChips extends StatelessWidget {
       ('480p', 854),
       ('320p', 480),
     ];
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: presets.map((p) {
-        final selected = p.$2 == targetWidth;
-        final disabled =
-            p.$2 != null && sourceWidth > 0 && p.$2! >= sourceWidth;
-        return ChoiceChip(
-          label: Text(p.$1),
-          selected: selected,
-          onSelected: disabled ? null : (_) => onChanged(p.$2),
-          selectedColor: AppColors.accentA.withValues(alpha: 0.3),
-          backgroundColor: AppColors.glassTint,
-          labelStyle: TextStyle(
-            color: disabled
-                ? AppColors.textLo.withValues(alpha: 0.4)
-                : selected
-                    ? AppColors.accentB
-                    : AppColors.textHi,
-            fontSize: 13,
+    final pct = (targetWidth != null && sourceWidth > 0)
+        ? (targetWidth! / sourceWidth * 100).round()
+        : 100;
+    final sliderPct = pct.clamp(10, 200).toDouble();
+    final resultW = targetWidth ?? (sourceWidth > 0 ? sourceWidth : null);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: presets.map((p) {
+            final selected = p.$2 == targetWidth;
+            final disabled =
+                p.$2 != null && sourceWidth > 0 && p.$2! >= sourceWidth;
+            return ChoiceChip(
+              label: Text(p.$1),
+              selected: selected,
+              onSelected: disabled ? null : (_) => onChanged(p.$2),
+              selectedColor: AppColors.accentA.withValues(alpha: 0.3),
+              backgroundColor: AppColors.glassTint,
+              labelStyle: TextStyle(
+                color: disabled
+                    ? AppColors.textLo.withValues(alpha: 0.4)
+                    : selected
+                        ? AppColors.accentB
+                        : AppColors.textHi,
+                fontSize: 13,
+              ),
+              side: BorderSide(
+                color: selected ? AppColors.accentA : AppColors.glassStroke,
+              ),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            );
+          }).toList(),
+        ),
+        if (sourceWidth > 0) ...[
+          const SizedBox(height: 16),
+          OptionSlider(
+            label: 'Scale',
+            value: sliderPct,
+            min: 10,
+            max: 200,
+            divisions: 38,
+            displayValue: resultW != null ? '$pct% · ${resultW}px' : '$pct%',
+            onChanged: (v) {
+              final p = v.round();
+              if (p == 100) {
+                onChanged(null);
+              } else {
+                onChanged((sourceWidth * p / 100).round());
+              }
+            },
           ),
-          side: BorderSide(
-            color: selected ? AppColors.accentA : AppColors.glassStroke,
+          const Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('10% smaller',
+                  style: TextStyle(color: AppColors.textLo, fontSize: 11)),
+              Text('200% larger',
+                  style: TextStyle(color: AppColors.textLo, fontSize: 11)),
+            ],
           ),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10)),
-        );
-      }).toList(),
+        ],
+      ],
     );
   }
 }
@@ -963,14 +1041,18 @@ class _ActionBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (state.isGif) {
+      final inputIsGif =
+          state.inputFile?.path.toLowerCase().endsWith('.gif') == true;
       return Row(
         children: [
-          _SecondaryButton(
-            icon: Icons.undo_rounded,
-            label: 'Back to video',
-            onTap: ctrl.discardGif,
-          ),
-          const SizedBox(width: 10),
+          if (!inputIsGif) ...[
+            _SecondaryButton(
+              icon: Icons.undo_rounded,
+              label: 'Back to video',
+              onTap: ctrl.discardGif,
+            ),
+            const SizedBox(width: 10),
+          ],
           Expanded(
             child: _PrimaryButton(
               icon: Icons.save_alt_rounded,

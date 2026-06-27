@@ -51,7 +51,7 @@ lib/
                     # + data/tool_catalog.dart (drives the grid)
     _shared/
       widgets/      # FileDropZone, MediaPreview, OptionSlider, ExportBottomSheet
-    <tool>/         # view/ + controller/ (+ widgets/) per tool — 7 tools total
+    <tool>/         # view/ + controller/ (+ widgets/) per tool — 7 tools (Video Studio owns widgets/video_trim_slider.dart)
     about/          # static about screen
     settings/       # default-quality sliders + clear-history
 ```
@@ -197,10 +197,12 @@ options, last generated preview/output, `FfmpegProgress?`, processing flag, and 
 
 | Category | Tools | Home treatment |
 |---|---|---|
-| `create` | Video → GIF, Images → GIF | large featured cards (`FeaturedToolCard`) |
+| `create` | Video Studio, Images → GIF | large featured cards (`FeaturedToolCard`) |
 | `refine` | Resize, Crop, Text Overlay, Optimize, Effects | compact grid (`ToolCard`) |
 
-Routes: `/video-to-gif`, `/images-to-gif`, `/resize`, `/crop`, `/text-overlay`, `/optimize`,
+Video Studio subsumes Video → GIF — crop/resize/speed + GIF export all in one screen.
+
+Routes: `/video-studio`, `/images-to-gif`, `/resize`, `/crop`, `/text-overlay`, `/optimize`,
 `/effects`, plus `/settings` and `/about`. All non-home routes use a fade + 4%-slide transition.
 
 Every tool screen shares the 4-step skeleton:

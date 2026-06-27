@@ -6,7 +6,6 @@ import 'files/export_service.dart';
 import 'files/temp_file_service.dart';
 import 'permissions/permission_service.dart';
 import 'recents/recents_service.dart';
-import 'settings/settings_service.dart';
 
 // ── FFmpeg ─────────────────────────────────────────────────────────────────────
 
@@ -41,30 +40,6 @@ final permissionServiceProvider = Provider<PermissionService>(
   (_) => PermissionService(),
   name: 'permissionServiceProvider',
 );
-
-// ── Settings ───────────────────────────────────────────────────────────────────
-
-final settingsServiceProvider = Provider<SettingsService>(
-  (_) => SettingsService(),
-  name: 'settingsServiceProvider',
-);
-
-final settingsProvider =
-    AsyncNotifierProvider<SettingsNotifier, AppSettings>(
-  SettingsNotifier.new,
-  name: 'settingsProvider',
-);
-
-class SettingsNotifier extends AsyncNotifier<AppSettings> {
-  @override
-  Future<AppSettings> build() =>
-      ref.read(settingsServiceProvider).load();
-
-  Future<void> save(AppSettings s) async {
-    await ref.read(settingsServiceProvider).save(s);
-    state = AsyncData(s);
-  }
-}
 
 // ── Recents ────────────────────────────────────────────────────────────────────
 

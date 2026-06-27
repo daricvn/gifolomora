@@ -3,8 +3,8 @@ import 'package:gifolomora/features/home/data/tool_catalog.dart';
 
 void main() {
   group('toolCatalog', () {
-    test('total of 8 tools', () {
-      expect(toolCatalog.length, equals(8));
+    test('total of 7 tools', () {
+      expect(toolCatalog.length, equals(7));
     });
 
     test('all tool routes are unique', () {
@@ -34,7 +34,7 @@ void main() {
 
     test('video-to-gif and images-to-gif are create tools', () {
       final routes = createTools.map((t) => t.route).toSet();
-      expect(routes, containsAll(['/video-to-gif', '/images-to-gif']));
+      expect(routes, containsAll(['/video-studio', '/images-to-gif']));
     });
 
     test('refine tools include resize, crop, text-overlay, optimize, effects', () {

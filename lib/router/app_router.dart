@@ -1,10 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../features/home/view/home_screen.dart';
 import '../features/about/view/about_screen.dart';
-import '../features/settings/view/settings_screen.dart';
 import '../features/images_to_gif/view/images_to_gif_screen.dart';
-import '../features/video_to_gif/view/video_to_gif_screen.dart';
 import '../features/video_studio/view/video_studio_screen.dart';
 import '../features/resize/view/resize_screen.dart';
 import '../features/crop/view/crop_screen.dart';
@@ -43,19 +42,11 @@ final appRouter = GoRouter(
       pageBuilder: (context, state) => _slide(state, const AboutScreen()),
     ),
     GoRoute(
-      path: '/settings',
-      pageBuilder: (context, state) =>
-          _slide(state, const SettingsScreen()),
-    ),
-    GoRoute(
-      path: '/video-to-gif',
-      pageBuilder: (context, state) =>
-          _slide(state, const VideoToGifScreen()),
-    ),
-    GoRoute(
       path: '/video-studio',
-      pageBuilder: (context, state) =>
-          _slide(state, const VideoStudioScreen()),
+      pageBuilder: (context, state) => _slide(
+        state,
+        VideoStudioScreen(initialFile: state.extra as File?),
+      ),
     ),
     GoRoute(
       path: '/images-to-gif',

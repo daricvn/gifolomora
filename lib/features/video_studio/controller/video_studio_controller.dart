@@ -200,9 +200,10 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
       overlayFontFile: FontResolver.resolve(),
     ));
     final info = await _ffmpeg.probe(file);
+    final isGif = file.path.toLowerCase().endsWith('.gif');
     state = AsyncData(VideoStudioState(
       inputFile: file,
-      stage: EditStage.video,
+      stage: isGif ? EditStage.gif : EditStage.video,
       sourceFile: file,
       sourceInfo: info,
       activeTool: StudioTool.crop,

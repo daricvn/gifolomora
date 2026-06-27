@@ -46,10 +46,16 @@ class ResizeScreen extends ConsumerWidget {
     return GradientScaffold(
       appBar: GlassAppBar(
         title: 'Resize GIF',
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: AppColors.textHi, size: 20),
-          onPressed: () => Navigator.of(context).maybePop(),
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 16),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: IconButton(
+              icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                  color: AppColors.textHi, size: 20),
+              onPressed: () => Navigator.of(context).maybePop(),
+            ),
+          ),
         ),
       ),
       bottomNavigationBar:

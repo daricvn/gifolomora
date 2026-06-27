@@ -54,7 +54,7 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
       ),
     );
 
-    if (Platform.isWindows || Platform.isLinux) {
+    if (Platform.isWindows) {
       bar = DragToMoveArea(child: bar);
     }
 
