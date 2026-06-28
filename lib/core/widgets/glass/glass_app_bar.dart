@@ -28,7 +28,18 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
       if (Platform.isWindows || Platform.isLinux) const _WindowControls(),
     ];
 
-    Widget bar = ClipRect(
+    final toolbar = NavigationToolbar(
+      leading: leading,
+      middle: centerTitle
+          ? _TitleWidget(title: title)
+          : (leading == null ? _TitleWidget(title: title) : null),
+      trailing: allActions.isNotEmpty
+          ? Row(mainAxisSize: MainAxisSize.min, children: allActions)
+          : null,
+      middleSpacing: 16,
+    );
+
+    return ClipRect(
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
         child: Container(
@@ -40,25 +51,23 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
               bottom: BorderSide(color: AppColors.glassStroke, width: 0.5),
             ),
           ),
-          child: NavigationToolbar(
-            leading: leading,
-            middle: centerTitle
-                ? _TitleWidget(title: title)
-                : (leading == null ? _TitleWidget(title: title) : null),
-            trailing: allActions.isNotEmpty
-                ? Row(mainAxisSize: MainAxisSize.min, children: allActions)
-                : null,
-            middleSpacing: 16,
-          ),
+          // DragToMoveArea sits behind toolbar in the Stack so interactive
+          // widgets (back button, window controls) get hit-tested first.
+          // Without this, DragToMoveArea's pan recognizer occasionally wins
+          // the gesture arena and swallows the back button tap.
+          child: Platform.isWindows
+              ? Stack(
+                  children: [
+                    const Positioned.fill(
+                      child: DragToMoveArea(child: SizedBox.expand()),
+                    ),
+                    toolbar,
+                  ],
+                )
+              : toolbar,
         ),
       ),
     );
-
-    if (Platform.isWindows) {
-      bar = DragToMoveArea(child: bar);
-    }
-
-    return bar;
   }
 }
 

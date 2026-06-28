@@ -73,6 +73,7 @@ class _RecentCard extends StatelessWidget {
       child: GestureDetector(
         onTap: () => context.push(item.toolRoute),
         child: GlassContainer(
+          blur: 0.0,
           borderRadius: 16,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Column(

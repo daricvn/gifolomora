@@ -9,7 +9,7 @@
 
 ## Findings (ranked by impact)
 
-### P1 — Too many `BackdropFilter` blur surfaces, some inside scrolling lists
+### P1 — Too many `BackdropFilter` blur surfaces, some inside scrolling lists ✅ DONE
 **Confirmed.** `ARCHITECTURE.md:186-189` sets the rules: cap ~3–6 blur surfaces
 per screen, and **never** put `BackdropFilter` inside a scrolling list.
 
@@ -45,7 +45,7 @@ per-frame `BackdropFilter` raster cost to drop sharply.
 
 ---
 
-### P2 — `GifOptimizer` exhaustive nearest-color search dominates CPU
+### P2 — `GifOptimizer` exhaustive nearest-color search dominates CPU ✅ DONE
 **Confirmed (CPU hot path).**
 [gif_optimizer.dart:114-143](lib/core/services/gif_optimizer.dart#L114-L143).
 Per pixel, on a cache miss, it linearly scans all palette colors
@@ -73,7 +73,7 @@ output bytes within a small tolerance (quality regression guard).
 
 ---
 
-### P3 — `GifOptimizer` palette training: full stacked image + full-pixel walk
+### P3 — `GifOptimizer` palette training: full stacked image + full-pixel walk ✅ DONE
 **Confirmed (memory + CPU).**
 [gif_optimizer.dart:205-226](lib/core/services/gif_optimizer.dart#L205-L226).
 `_buildGlobalPalette` allocates one `img.Image` of `W × (H×N)` then
@@ -92,7 +92,7 @@ lower peak RSS, faster training.
 
 ---
 
-### P4 — `GradientScaffold` blobs repaint full-screen every frame, forever
+### P4 — `GradientScaffold` blobs repaint full-screen every frame, forever ✅ DONE
 **Confirmed.** [gradient_scaffold.dart:34-37](lib/core/widgets/common/gradient_scaffold.dart#L34-L37)
 runs an 8s `AnimationController.repeat(reverse: true)` that never stops; the
 `AnimatedBuilder` rebuilds `_Blobs` (three large `RadialGradient` circles) every

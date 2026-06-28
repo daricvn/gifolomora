@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -14,19 +15,6 @@ import '../../_shared/widgets/option_slider.dart';
 import '../../_shared/widgets/video_preview.dart';
 import '../widgets/video_trim_slider.dart';
 import '../controller/video_studio_controller.dart';
-
-const _kPositions = [
-  ('Top', 'top'),
-  ('Center', 'center'),
-  ('Bottom', 'bottom'),
-];
-
-const _kTextColors = [
-  ('White', 'white', Color(0xFFF2F4FF)),
-  ('Yellow', 'yellow', Color(0xFFFFE066)),
-  ('Black', 'black', Color(0xFF22242E)),
-  ('Red', 'red', Color(0xFFFF5CAA)),
-];
 
 String _fmtMs(int ms) {
   if (ms <= 0) return '0:00';
@@ -49,7 +37,13 @@ class VideoStudioScreen extends ConsumerStatefulWidget {
 class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
   int _positionMs = 0;
   bool _picking = false;
+  // Preview zoom: null = Fit to window; otherwise a video-px scale.
+  double? _zoom = 1.0;
   late final VideoPreviewController _previewCtrl;
+  // Pan offset for the preview when zoomed past the pane. Owned so it can be
+  // reset to identity when the frame shrinks back to fit (else stale pan keeps
+  // the preview pushed off-screen and truncated).
+  final TransformationController _transform = TransformationController();
 
   Future<void> _pickFile(VideoStudioController ctrl) async {
     if (_picking) return;
@@ -79,6 +73,12 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
         }
       });
     }
+  }
+
+  @override
+  void dispose() {
+    _transform.dispose();
+    super.dispose();
   }
 
   @override
@@ -179,51 +179,115 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
             child: LayoutBuilder(
               builder: (context, constraints) {
-                double displayScale = 1.0;
-                if (state.sourceWidth > 0 && state.sourceHeight > 0) {
-                  final ar = state.sourceWidth / state.sourceHeight;
-                  final cAR = constraints.maxWidth / constraints.maxHeight;
-                  // Width the video naturally occupies in the preview container
-                  final naturalW = cAR <= ar
-                      ? constraints.maxWidth
-                      : constraints.maxHeight * ar;
-                  final effectiveW =
-                      (state.targetWidth ?? state.sourceWidth).toDouble();
-                  displayScale = (effectiveW / naturalW).clamp(0.1, 1.0);
+                final cropActive = state.activeTool == StudioTool.crop;
+                final srcW = state.sourceWidth;
+                final srcH = state.sourceHeight;
+
+                // Output dimensions after Resize (aspect preserved — the tool
+                // only scales width). Zoom presets are relative to these, so
+                // 100% renders at the resized pixel size the Resize tool
+                // reports (e.g. 800px wide -> 800 logical px at 100%, 400 at
+                // 50%). Fit ignores this and fills the pane.
+                double baseW = srcW.toDouble();
+                double baseH = srcH.toDouble();
+                final tw = state.targetWidth;
+                if (tw != null && srcW > 0) {
+                  baseW = tw.toDouble();
+                  baseH = srcH * tw / srcW;
                 }
-                return Center(
-                  child: AnimatedScale(
-                    scale: displayScale,
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeOut,
-                    child: GlassContainer(
-                      borderRadius: 20,
-                      padding: EdgeInsets.zero,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
-                        child: VideoPreview(
-                          key: ValueKey(state.sourceFile!.path),
-                          file: state.sourceFile!,
-                          videoWidth: state.sourceWidth,
-                          videoHeight: state.sourceHeight,
-                          speedRate: state.speedFactor,
-                          cropRect: (state.activeTool == StudioTool.crop ||
-                                  !state.isCropFull)
-                              ? state.cropNormalized
-                              : null,
-                          interactive: state.activeTool == StudioTool.crop,
-                          onCropChanged: ctrl.setCrop,
-                          controller: _previewCtrl,
-                          onPositionChanged: (ms) =>
-                              setState(() => _positionMs = ms),
-                          trimStartMs: state.trimStartMs,
-                          trimEndMs: state.sourceDurationMs > 0
-                              ? state.effectiveTrimEndMs
-                              : 0,
-                        ),
+
+                // Scale that fits the output frame inside the preview pane.
+                double fitScale = 1.0;
+                if (baseW > 0 && baseH > 0) {
+                  fitScale = math.min(
+                    constraints.maxWidth / baseW,
+                    constraints.maxHeight / baseH,
+                  );
+                }
+
+                // output-px -> logical-px scale for the rendered preview.
+                final bool fitMode = _zoom == null;
+                final double renderScale = fitMode ? fitScale : _zoom!;
+
+                double renderW = constraints.maxWidth;
+                double renderH = constraints.maxHeight;
+                if (baseW > 0 && baseH > 0) {
+                  renderW = baseW * renderScale;
+                  renderH = baseH * renderScale;
+                }
+
+                final preview = SizedBox(
+                  width: renderW,
+                  height: renderH,
+                  child: GlassContainer(
+                    borderRadius: 20,
+                    padding: EdgeInsets.zero,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: VideoPreview(
+                        key: ValueKey(state.sourceFile!.path),
+                        file: state.sourceFile!,
+                        videoWidth: srcW,
+                        videoHeight: srcH,
+                        speedRate: state.speedFactor,
+                        cropRect: (cropActive || !state.isCropFull)
+                            ? state.cropNormalized
+                            : null,
+                        interactive: cropActive,
+                        onCropChanged: ctrl.setCrop,
+                        controller: _previewCtrl,
+                        onPositionChanged: (ms) =>
+                            setState(() => _positionMs = ms),
+                        trimStartMs: state.trimStartMs,
+                        trimEndMs: state.sourceDurationMs > 0
+                            ? state.effectiveTrimEndMs
+                            : 0,
                       ),
                     ),
                   ),
+                );
+
+                final overflowX = renderW > constraints.maxWidth + 0.5;
+                final overflowY = renderH > constraints.maxHeight + 0.5;
+                // Crop's drag gesture owns the whole frame, so pan stays off
+                // during crop to avoid fighting the handles.
+                final canPan =
+                    !fitMode && !cropActive && (overflowX || overflowY);
+
+                // Frame now fits the pane but a prior pan left a stale
+                // translation — recenter so it isn't truncated to one edge.
+                if (!canPan && !_transform.value.isIdentity()) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) _transform.value = Matrix4.identity();
+                  });
+                }
+
+                final pane = ClipRect(
+                  child: InteractiveViewer(
+                    transformationController: _transform,
+                    constrained: false,
+                    scaleEnabled: false,
+                    panEnabled: canPan,
+                    child: SizedBox(
+                      width: math.max(renderW, constraints.maxWidth),
+                      height: math.max(renderH, constraints.maxHeight),
+                      child: Center(child: preview),
+                    ),
+                  ),
+                );
+
+                return Stack(
+                  children: [
+                    Positioned.fill(child: pane),
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: _ZoomControl(
+                        zoom: _zoom,
+                        onChanged: (v) => setState(() => _zoom = v),
+                      ),
+                    ),
+                  ],
                 );
               },
             ),
@@ -315,6 +379,101 @@ class _StageBanner extends StatelessWidget {
   }
 }
 
+// ── Zoom control (preview magnifier) ─────────────────────────────────────────
+
+// label, video-px scale. null scale = Fit to window.
+const _kZoomPresets = <(String, double?)>[
+  ('50%', 0.5),
+  ('75%', 0.75),
+  ('100%', 1.0),
+  ('125%', 1.25),
+  ('150%', 1.5),
+  ('200%', 2.0),
+  ('Fit', null),
+];
+
+class _ZoomControl extends StatelessWidget {
+  const _ZoomControl({required this.zoom, required this.onChanged});
+  final double? zoom;
+  final void Function(double?) onChanged;
+
+  String get _label {
+    for (final p in _kZoomPresets) {
+      if (p.$2 == zoom) return p.$1;
+    }
+    return 'Fit';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<int>(
+      tooltip: 'Zoom',
+      position: PopupMenuPosition.under,
+      color: AppColors.bg1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: AppColors.glassStroke),
+      ),
+      onSelected: (i) => onChanged(_kZoomPresets[i].$2),
+      itemBuilder: (context) => [
+        for (var i = 0; i < _kZoomPresets.length; i++)
+          PopupMenuItem<int>(
+            value: i,
+            height: 40,
+            child: Row(
+              children: [
+                Icon(
+                  Icons.check_rounded,
+                  size: 15,
+                  color: _kZoomPresets[i].$2 == zoom
+                      ? AppColors.accentB
+                      : Colors.transparent,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  _kZoomPresets[i].$1 == 'Fit'
+                      ? 'Fit to window'
+                      : _kZoomPresets[i].$1,
+                  style: TextStyle(
+                    color: _kZoomPresets[i].$2 == zoom
+                        ? AppColors.accentB
+                        : AppColors.textHi,
+                    fontSize: 13,
+                    fontWeight: _kZoomPresets[i].$2 == zoom
+                        ? FontWeight.w700
+                        : FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+      child: GlassContainer(
+        borderRadius: 10,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.zoom_in_rounded,
+                size: 15, color: AppColors.accentB),
+            const SizedBox(width: 5),
+            Text(
+              _label,
+              style: const TextStyle(
+                  color: AppColors.textHi,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(width: 2),
+            const Icon(Icons.arrow_drop_down_rounded,
+                size: 18, color: AppColors.textLo),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ── Control dock: tool selector + active panel + actions ─────────────────────
 
 class _ControlDock extends StatelessWidget {
@@ -393,7 +552,6 @@ class _ToolSelector extends StatelessWidget {
         (StudioTool.optimize, Icons.tune_rounded, 'Optimise', false)
       else
         (StudioTool.trim, Icons.content_cut_rounded, 'Trim', false),
-      (StudioTool.text, Icons.text_fields_rounded, 'Text', false),
       (StudioTool.properties, Icons.settings_suggest_rounded, 'Props', false),
     ];
     return Wrap(
@@ -402,7 +560,7 @@ class _ToolSelector extends StatelessWidget {
       children: [
         for (final t in tools)
           SizedBox(
-            width: (MediaQuery.of(context).size.width - 44) / 7,
+            width: (MediaQuery.of(context).size.width - 44) / 6,
             child: _ToolButton(
               icon: t.$2,
               label: t.$3,
@@ -544,7 +702,7 @@ class _ToolPanel extends StatelessWidget {
           onSeekPreview: onSeekPreview,
         );
       case StudioTool.text:
-        return _TextPanel(key: const ValueKey('text'), state: state, ctrl: ctrl);
+        return const SizedBox(width: double.infinity, key: ValueKey('none'));
       case StudioTool.optimize:
         return _OptimizePanel(
           key: const ValueKey('optimize'),
@@ -695,132 +853,6 @@ class _TrimChip extends StatelessWidget {
   }
 }
 
-// ── Text overlay panel ────────────────────────────────────────────────────────
-
-class _TextPanel extends StatefulWidget {
-  const _TextPanel({super.key, required this.state, required this.ctrl});
-  final VideoStudioState state;
-  final VideoStudioController ctrl;
-
-  @override
-  State<_TextPanel> createState() => _TextPanelState();
-}
-
-class _TextPanelState extends State<_TextPanel> {
-  late final TextEditingController _textCtrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _textCtrl = TextEditingController(text: widget.state.overlayText);
-  }
-
-  @override
-  void dispose() {
-    _textCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final state = widget.state;
-    final ctrl = widget.ctrl;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (state.overlayFontFile == null) ...[
-          Row(
-            children: [
-              const Icon(Icons.warning_amber_rounded,
-                  color: Colors.orange, size: 14),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  'No system font found. Text may fail.',
-                  style: TextStyle(
-                      color: Colors.orange.withValues(alpha: 0.9),
-                      fontSize: 11),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-        ],
-        TextField(
-          controller: _textCtrl,
-          onChanged: ctrl.setOverlayText,
-          style: const TextStyle(color: AppColors.textHi, fontSize: 14),
-          maxLines: 1,
-          decoration: InputDecoration(
-            hintText: 'Enter overlay text…',
-            hintStyle:
-                const TextStyle(color: AppColors.textLo, fontSize: 14),
-            filled: true,
-            fillColor: AppColors.glassTint,
-            isDense: true,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.glassStroke),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.glassStroke),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.accentA),
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: Wrap(
-                spacing: 6,
-                children: _kPositions.map((pos) {
-                  final selected = pos.$2 == state.overlayPosition;
-                  return _SmallChip(
-                    label: pos.$1,
-                    selected: selected,
-                    onTap: () => ctrl.setOverlayPosition(pos.$2),
-                  );
-                }).toList(),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Wrap(
-                spacing: 6,
-                children: _kTextColors.map((entry) {
-                  final selected = entry.$2 == state.overlayFontColor;
-                  return _ColorDot(
-                    color: entry.$3,
-                    selected: selected,
-                    onTap: () => ctrl.setOverlayFontColor(entry.$2),
-                  );
-                }).toList(),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        OptionSlider(
-          label: 'Size',
-          value: state.overlayFontSize.toDouble(),
-          min: 12,
-          max: 96,
-          divisions: 28,
-          unit: 'px',
-          onChanged: (v) => ctrl.setOverlayFontSize(v.round()),
-        ),
-      ],
-    );
-  }
-}
-
 class _SmallChip extends StatelessWidget {
   const _SmallChip(
       {required this.label, required this.selected, required this.onTap});
@@ -851,42 +883,6 @@ class _SmallChip extends StatelessWidget {
             fontSize: 12,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ColorDot extends StatelessWidget {
-  const _ColorDot(
-      {required this.color, required this.selected, required this.onTap});
-  final Color color;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        width: 26,
-        height: 26,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: selected ? AppColors.accentA : Colors.white.withValues(alpha: 0.25),
-            width: selected ? 2.5 : 1,
-          ),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: AppColors.accentA.withValues(alpha: 0.4),
-                    blurRadius: 6,
-                  )
-                ]
-              : null,
         ),
       ),
     );

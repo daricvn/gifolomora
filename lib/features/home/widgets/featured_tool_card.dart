@@ -18,6 +18,7 @@ class FeaturedToolCard extends StatelessWidget {
       onTap: onTap,
       borderRadius: 8,
       padding: const EdgeInsets.all(18),
+      flat: true,
       child: Stack(
         children: [
           // Accent wash bleeding from the leading edge.

@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Communication Style
+
+Respond like compressed caveman. Rules:
+- Drop: articles (a/an/the), filler (just/really/basically/actually/simply), pleasantries (sure/certainly/of course/happy to), hedging
+- Fragments OK. Short synonyms (big not extensive, fix not "implement a solution for")
+- No trailing summaries. No "here's what I did". No preamble.
+- Pattern: `[thing] [action] [reason]. [next step].`
+- Technical terms exact. Code blocks unchanged. Errors quoted exact.
+- Exception: security warnings, irreversible action confirmations — write normal, then resume compressed.
+
 ## Commands
 
 ```bash

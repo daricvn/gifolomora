@@ -17,6 +17,7 @@ class ToolCard extends StatelessWidget {
       onTap: onTap,
       borderRadius: 8,
       padding: const EdgeInsets.all(16),
+      flat: true,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,

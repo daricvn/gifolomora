@@ -24,13 +24,14 @@ class GradientScaffold extends StatefulWidget {
 }
 
 class _GradientScaffoldState extends State<GradientScaffold>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _controller;
   late Animation<double> _anim;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 8),
@@ -39,7 +40,21 @@ class _GradientScaffoldState extends State<GradientScaffold>
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _controller.repeat(reverse: true);
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+        _controller.stop();
+      default:
+        break;
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     super.dispose();
   }
@@ -55,18 +70,19 @@ class _GradientScaffoldState extends State<GradientScaffold>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Base gradient
           Container(
             decoration: const BoxDecoration(
               gradient: AppGradients.background,
             ),
           ),
-          // Animated blobs
-          AnimatedBuilder(
-            animation: _anim,
-            builder: (context, _) => _Blobs(t: _anim.value),
+          // Isolated repaint boundary: blob animation doesn't dirty the
+          // content layer on every frame.
+          RepaintBoundary(
+            child: AnimatedBuilder(
+              animation: _anim,
+              builder: (context, _) => _Blobs(t: _anim.value),
+            ),
           ),
-          // Content
           widget.body,
         ],
       ),

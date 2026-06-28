@@ -11,6 +11,7 @@ class GlassCard extends StatelessWidget {
     this.padding = const EdgeInsets.all(16),
     this.blur,
     this.opacity = 0.10,
+    this.flat = false,
   });
 
   final Widget child;
@@ -19,11 +20,14 @@ class GlassCard extends StatelessWidget {
   final EdgeInsets padding;
   final double? blur;
   final double opacity;
+  /// When true, skips BackdropFilter. Use inside scroll views to avoid
+  /// re-running the gaussian blur on every frame.
+  final bool flat;
 
   @override
   Widget build(BuildContext context) {
     return GlassContainer(
-      blur: blur,
+      blur: flat ? 0.0 : blur,
       opacity: opacity,
       borderRadius: borderRadius,
       padding: EdgeInsets.zero,

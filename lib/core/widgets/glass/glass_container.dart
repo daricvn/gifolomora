@@ -35,33 +35,42 @@ class GlassContainer extends StatelessWidget {
     final radius = BorderRadius.circular(borderRadius);
     final sigma = _effectiveBlur;
 
+    final decoration = BoxDecoration(
+      color: tint.withValues(alpha: opacity),
+      borderRadius: radius,
+      gradient: gradient,
+      border: border
+          ? Border.all(
+              color: Colors.white.withValues(alpha: 0.18),
+              width: 1,
+            )
+          : null,
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.25),
+          blurRadius: 30,
+          offset: const Offset(0, 12),
+        ),
+      ],
+    );
+
+    // sigma == 0 → flat mode: skip BackdropFilter entirely.
+    // A BackdropFilter with sigma=0 still forces a save layer on every frame.
+    if (sigma <= 0) {
+      return RepaintBoundary(
+        child: ClipRRect(
+          borderRadius: radius,
+          child: Container(padding: padding, decoration: decoration, child: child),
+        ),
+      );
+    }
+
     return RepaintBoundary(
       child: ClipRRect(
         borderRadius: radius,
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-          child: Container(
-            padding: padding,
-            decoration: BoxDecoration(
-              color: tint.withValues(alpha: opacity),
-              borderRadius: radius,
-              gradient: gradient,
-              border: border
-                  ? Border.all(
-                      color: Colors.white.withValues(alpha: 0.18),
-                      width: 1,
-                    )
-                  : null,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.25),
-                  blurRadius: 30,
-                  offset: const Offset(0, 12),
-                ),
-              ],
-            ),
-            child: child,
-          ),
+          child: Container(padding: padding, decoration: decoration, child: child),
         ),
       ),
     );
