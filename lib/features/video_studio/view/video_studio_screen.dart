@@ -37,15 +37,6 @@ String _fmtMs(int ms) {
 const _kVideoExtensions = ['mp4', 'mov', 'mkv', 'avi', 'webm'];
 const _kAllExtensions = [..._kVideoExtensions, 'gif'];
 
-Future<void> _pickFile(VideoStudioController ctrl) async {
-  final result = await FilePicker.platform.pickFiles(
-    type: FileType.custom,
-    allowedExtensions: _kAllExtensions,
-  );
-  final path = result?.files.single.path;
-  if (path != null) await ctrl.setInput(File(path));
-}
-
 class VideoStudioScreen extends ConsumerStatefulWidget {
   const VideoStudioScreen({super.key, this.initialFile});
 
@@ -57,7 +48,23 @@ class VideoStudioScreen extends ConsumerStatefulWidget {
 
 class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
   int _positionMs = 0;
+  bool _picking = false;
   late final VideoPreviewController _previewCtrl;
+
+  Future<void> _pickFile(VideoStudioController ctrl) async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: _kAllExtensions,
+      );
+      final path = result?.files.single.path;
+      if (path != null && mounted) await ctrl.setInput(File(path));
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
 
   @override
   void initState() {
@@ -83,8 +90,7 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
 
     void toast(String msg) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(msg)));
+      _StudioToast.show(context, msg);
     }
 
     return GradientScaffold(
@@ -166,7 +172,7 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
       children: [
         _StageBanner(
           state: state,
-          onChangeVideo: state.isProcessing ? null : () => _pickFile(ctrl),
+          onChangeVideo: state.isProcessing || _picking ? null : () => _pickFile(ctrl),
         ),
         Expanded(
           child: Padding(
@@ -388,6 +394,7 @@ class _ToolSelector extends StatelessWidget {
       else
         (StudioTool.trim, Icons.content_cut_rounded, 'Trim', false),
       (StudioTool.text, Icons.text_fields_rounded, 'Text', false),
+      (StudioTool.properties, Icons.settings_suggest_rounded, 'Props', false),
     ];
     return Wrap(
       spacing: 6,
@@ -395,7 +402,7 @@ class _ToolSelector extends StatelessWidget {
       children: [
         for (final t in tools)
           SizedBox(
-            width: (MediaQuery.of(context).size.width - 44) / 6,
+            width: (MediaQuery.of(context).size.width - 44) / 7,
             child: _ToolButton(
               icon: t.$2,
               label: t.$3,
@@ -541,6 +548,12 @@ class _ToolPanel extends StatelessWidget {
       case StudioTool.optimize:
         return _OptimizePanel(
           key: const ValueKey('optimize'),
+          state: state,
+          ctrl: ctrl,
+        );
+      case StudioTool.properties:
+        return _PropertiesPanel(
+          key: const ValueKey('properties'),
           state: state,
           ctrl: ctrl,
         );
@@ -1026,6 +1039,93 @@ class _OptimizePanel extends StatelessWidget {
   }
 }
 
+// ── Properties panel (fps · loop count · boomerang) ───────────────────────────
+
+class _PropertiesPanel extends StatelessWidget {
+  const _PropertiesPanel({
+    super.key,
+    required this.state,
+    required this.ctrl,
+  });
+  final VideoStudioState state;
+  final VideoStudioController ctrl;
+
+  static const _loops = <(String, int)>[
+    ('∞', 0),
+    ('1', 1),
+    ('2', 2),
+    ('3', 3),
+    ('5', 5),
+    ('10', 10),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        OptionSlider(
+          label: 'Frame rate',
+          value: state.fps.toDouble().clamp(5, 30),
+          min: 5,
+          max: 30,
+          divisions: 25,
+          displayValue: '${state.fps} fps',
+          onChanged: (v) => ctrl.setFps(v.round()),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          state.isGif
+              ? 'Lowering re-times the GIF; you can\'t add frames back.'
+              : 'Higher = smoother but larger.',
+          style: const TextStyle(color: AppColors.textLo, fontSize: 11),
+        ),
+        const SizedBox(height: 14),
+        const Text('Loops',
+            style: TextStyle(
+                color: AppColors.textHi,
+                fontSize: 13,
+                fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final opt in _loops)
+              _SmallChip(
+                label: opt.$1,
+                selected: state.loopCount == opt.$2,
+                onTap: () => ctrl.setLoopCount(opt.$2),
+              ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          state.loopCount == 0
+              ? 'Plays forever'
+              : 'Plays then repeats ${state.loopCount}×',
+          style: const TextStyle(color: AppColors.textLo, fontSize: 11),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Switch(
+              value: state.boomerang,
+              onChanged: ctrl.setBoomerang,
+              activeThumbColor: AppColors.accentB,
+            ),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text('Boomerang — reverse for a seamless loop',
+                  style: TextStyle(color: AppColors.textHi, fontSize: 14)),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 // ── Action bar ───────────────────────────────────────────────────────────────
 
 class _ActionBar extends StatelessWidget {
@@ -1047,12 +1147,39 @@ class _ActionBar extends StatelessWidget {
         children: [
           if (!inputIsGif) ...[
             _SecondaryButton(
-              icon: Icons.undo_rounded,
+              icon: Icons.arrow_back_rounded,
               label: 'Back to video',
               onTap: ctrl.discardGif,
             ),
             const SizedBox(width: 10),
           ],
+          _IconButton(
+            icon: Icons.undo_rounded,
+            tooltip: 'Undo',
+            enabled: ctrl.canUndo,
+            onTap: () {
+              if (!ctrl.undo()) toast('Nothing to undo');
+            },
+          ),
+          const SizedBox(width: 8),
+          _IconButton(
+            icon: Icons.redo_rounded,
+            tooltip: 'Redo',
+            enabled: ctrl.canRedo,
+            onTap: () {
+              if (!ctrl.redo()) toast('Nothing to redo');
+            },
+          ),
+          const SizedBox(width: 10),
+          _SecondaryButton(
+            icon: Icons.auto_fix_high_rounded,
+            label: 'Apply',
+            onTap: () async {
+              final ok = await ctrl.applyEdits();
+              toast(ok ? 'Applied to preview' : 'Nothing to apply');
+            },
+          ),
+          const SizedBox(width: 10),
           Expanded(
             child: _PrimaryButton(
               icon: Icons.save_alt_rounded,
@@ -1163,6 +1290,39 @@ class _SecondaryButton extends StatelessWidget {
   }
 }
 
+class _IconButton extends StatelessWidget {
+  const _IconButton({
+    required this.icon,
+    required this.onTap,
+    required this.enabled,
+    this.tooltip,
+  });
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool enabled;
+  final String? tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    final color =
+        enabled ? AppColors.textHi : AppColors.textLo.withValues(alpha: 0.35);
+    Widget btn = GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 15),
+        decoration: BoxDecoration(
+          color: AppColors.glassTint,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.glassStroke),
+        ),
+        child: Icon(icon, color: color, size: 18),
+      ),
+    );
+    if (tooltip != null) btn = Tooltip(message: tooltip!, child: btn);
+    return Opacity(opacity: enabled ? 1 : 0.6, child: btn);
+  }
+}
+
 class _ErrorCard extends StatelessWidget {
   const _ErrorCard({required this.message});
   final String message;
@@ -1184,6 +1344,128 @@ class _ErrorCard extends StatelessWidget {
                     color: Colors.redAccent, fontSize: 12)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Toast (top-anchored, non-blocking) ───────────────────────────────────────
+//
+// Replaces the default bottom SnackBar, which floated over the action bar
+// (undo / redo / apply / export). This anchors below the app bar instead, so
+// the buttons stay tappable while a message is visible.
+class _StudioToast {
+  _StudioToast._();
+
+  static OverlayEntry? _entry;
+
+  static void show(BuildContext context, String message) {
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return;
+
+    _entry?.remove();
+    _entry = null;
+
+    final topInset = MediaQuery.of(context).padding.top;
+    late final OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => Positioned(
+        top: topInset + 72,
+        left: 16,
+        right: 16,
+        child: _ToastCard(
+          message: message,
+          onDismissed: () {
+            if (_entry == entry) _entry = null;
+            entry.remove();
+          },
+        ),
+      ),
+    );
+    _entry = entry;
+    overlay.insert(entry);
+  }
+}
+
+class _ToastCard extends StatefulWidget {
+  const _ToastCard({required this.message, required this.onDismissed});
+  final String message;
+  final VoidCallback onDismissed;
+
+  @override
+  State<_ToastCard> createState() => _ToastCardState();
+}
+
+class _ToastCardState extends State<_ToastCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 240),
+  );
+  late final Animation<double> _fade =
+      CurvedAnimation(parent: _c, curve: Curves.easeOut);
+  late final Animation<Offset> _slide = Tween<Offset>(
+    begin: const Offset(0, -0.45),
+    end: Offset.zero,
+  ).animate(CurvedAnimation(parent: _c, curve: Curves.easeOutCubic));
+
+  bool _done = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _c.forward();
+    Future.delayed(const Duration(milliseconds: 2200), _dismiss);
+  }
+
+  Future<void> _dismiss() async {
+    if (_done || !mounted) return;
+    _done = true;
+    await _c.reverse();
+    widget.onDismissed();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.topCenter,
+      child: FadeTransition(
+        opacity: _fade,
+        child: SlideTransition(
+          position: _slide,
+          child: Material(
+            color: Colors.transparent,
+            child: GestureDetector(
+              onTap: _dismiss,
+              child: GlassContainer(
+                borderRadius: 14,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.info_outline_rounded,
+                        color: AppColors.accentB, size: 18),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(widget.message,
+                          style: const TextStyle(
+                              color: AppColors.textHi,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

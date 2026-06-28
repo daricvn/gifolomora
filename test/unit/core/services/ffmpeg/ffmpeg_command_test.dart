@@ -240,11 +240,20 @@ void main() {
       expect(content, contains('duration 0.066667'));
     });
 
-    test('each frame path appears exactly once', () {
+    test('non-last frame appears once, last frame repeated for duration fix', () {
       final content =
           FfmpegCommand.buildConcatFileContent(['/a.png', '/b.png'], 10);
       expect("file '/a.png'".allMatches(content).length, equals(1));
-      expect("file '/b.png'".allMatches(content).length, equals(1));
+      expect("file '/b.png'".allMatches(content).length, equals(2));
+    });
+
+    test('last frame sentinel has no trailing duration', () {
+      final content =
+          FfmpegCommand.buildConcatFileContent(['/a.png', '/b.png'], 10);
+      final lines = content.trimRight().split('\n');
+      // sentinel is last line; preceding line is the real frame's duration
+      expect(lines.last, equals("file '/b.png'"));
+      expect(lines[lines.length - 2], startsWith('duration'));
     });
 
     test('backslash in path converted to forward slash', () {

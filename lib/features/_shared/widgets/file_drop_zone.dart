@@ -26,19 +26,26 @@ class FileDropZone extends StatefulWidget {
 
 class _FileDropZoneState extends State<FileDropZone> {
   bool _hovering = false;
+  bool _picking = false;
 
   Future<void> _pick() async {
-    final result = await FilePicker.platform.pickFiles(
-      allowMultiple: widget.allowMultiple,
-      type: widget.allowedExtensions != null ? FileType.custom : FileType.any,
-      allowedExtensions: widget.allowedExtensions,
-    );
-    if (result == null || !mounted) return;
-    final files = result.files
-        .where((f) => f.path != null)
-        .map((f) => File(f.path!))
-        .toList();
-    if (files.isNotEmpty) widget.onFilesSelected(files);
+    if (_picking) return;
+    _picking = true;
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: widget.allowMultiple,
+        type: widget.allowedExtensions != null ? FileType.custom : FileType.any,
+        allowedExtensions: widget.allowedExtensions,
+      );
+      if (result == null || !mounted) return;
+      final files = result.files
+          .where((f) => f.path != null)
+          .map((f) => File(f.path!))
+          .toList();
+      if (files.isNotEmpty) widget.onFilesSelected(files);
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
   }
 
   @override

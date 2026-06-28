@@ -36,19 +36,27 @@ class ImagesToGifScreen extends ConsumerStatefulWidget {
 }
 
 class _ImagesToGifScreenState extends ConsumerState<ImagesToGifScreen> {
+  bool _picking = false;
+
   Future<void> _addMore() async {
-    final result = await FilePicker.platform.pickFiles(
-      allowMultiple: true,
-      type: FileType.custom,
-      allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp', 'bmp'],
-    );
-    if (result == null || !mounted) return;
-    final files = result.files
-        .where((f) => f.path != null)
-        .map((f) => File(f.path!))
-        .toList();
-    if (files.isNotEmpty) {
-      ref.read(imagesToGifControllerProvider.notifier).addFrames(files);
+    if (_picking) return;
+    _picking = true;
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.custom,
+        allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp', 'bmp'],
+      );
+      if (result == null || !mounted) return;
+      final files = result.files
+          .where((f) => f.path != null)
+          .map((f) => File(f.path!))
+          .toList();
+      if (files.isNotEmpty) {
+        ref.read(imagesToGifControllerProvider.notifier).addFrames(files);
+      }
+    } finally {
+      if (mounted) setState(() => _picking = false);
     }
   }
 
@@ -136,7 +144,7 @@ class _ImagesToGifScreenState extends ConsumerState<ImagesToGifScreen> {
                   OptionSlider(
                     label: 'Frame rate',
                     value: state.fps.toDouble(),
-                    min: 5,
+                    min: 2,
                     max: 30,
                     divisions: 25,
                     unit: ' fps',
@@ -195,7 +203,7 @@ class _ImagesToGifScreenState extends ConsumerState<ImagesToGifScreen> {
                   MediaPreview(file: state.outputGif!),
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
-                    onPressed: ctrl.generate,
+                    onPressed: state.canGenerate ? ctrl.generate : null,
                     icon: const Icon(Icons.refresh_rounded, size: 16),
                     label: const Text('Regenerate'),
                     style: OutlinedButton.styleFrom(
@@ -206,7 +214,7 @@ class _ImagesToGifScreenState extends ConsumerState<ImagesToGifScreen> {
                 ],
               )
             else
-              _GenerateButton(onTap: ctrl.generate),
+              _GenerateButton(onTap: state.canGenerate ? ctrl.generate : null),
 
             if (state.error != null) ...[
               const SizedBox(height: 12),

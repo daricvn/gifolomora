@@ -39,7 +39,9 @@ lib/
       common/       # GradientScaffold (animated blob bg), ProgressOverlay, SectionHeader,
                     # EmptyState, AppToast (snackbar helper)
     services/
-      ffmpeg/       # backend interface + 2 impls + factory + service + command/progress models
+      ffmpeg/       # backend interface + 2 impls + factory + service + command/progress/encoder models
+      gif/          # GifLzw — variable-width LZW encoder used by GifOptimizer
+      gif_optimizer.dart  # pure-Dart GIF optimizer — no gifsicle; works on all platforms
       files/        # TempFileService, ExportService, MediaProbeService
       permissions/  # PermissionService (Android scoped storage)
       settings/     # SettingsService + AppSettings (shared_preferences)
@@ -78,8 +80,8 @@ FfmpegBackend (abstract interface)
   ├── FfmpegKitBackend       → Android/iOS
   └── FfmpegProcessBackend   → Windows/Linux
 FfmpegFactory.create()  picks impl at runtime via Platform.*
-FfmpegFactory.resolveGifsicle()  → gifsicle path if present next to executable, else null
-FfmpegService           → high-level API; receives backend + temp + optional gifsicle path
+VideoEncoder            → platformCandidates() returns ordered hw+sw encoder list for editVideo fallback
+FfmpegService           → high-level API; receives backend + temp
 ```
 
 ### Backend interface
@@ -99,8 +101,17 @@ abstract interface class FfmpegBackend {
 }
 ```
 
-`FfmpegCommand` builds all arg lists / filter graphs (palettegen/paletteuse, crop, drawtext,
-reverse, setpts, gifsicle fallback). `FfmpegProgress` is the progress model.
+`FfmpegCommand` builds all arg lists / filter graphs. `FfmpegProgress` is the progress model.
+
+**GIF-source commands:** `imagesToGif`, `videoToGif`, `resize`, `cropGif`, `textOverlay`,
+`reverseGif`, `changeSpeed` — single-purpose ops retained for non-Studio tools.
+
+**Composite commands (Video Studio):**
+- `videoEdit` — crop · resize · speed · trim · text · audio in one pass; selects encoder from `VideoEncoder.platformCandidates()`.
+- `videoStreamCopy` — no-op fast path: stream-copy when no edits.
+- `videoEditToGif` — bakes video layers (crop · fps · resize · speed · text) → GIF palette in one pass.
+- `gifEdit` — applies crop · fps · resize · speed · text · loop · boomerang to an existing GIF; `boomerang` appends a reversed stream via `concat=n=2` for ping-pong.
+- `buildConcatFileContent` — generates concat demuxer file listing frames at a given fps.
 
 ### FfmpegService high-level API
 
@@ -109,21 +120,50 @@ All methods return `Result<File, FfmpegError>`; output is written to a per-job t
 invokes `cleanCurrentJob()`.
 
 ```dart
+// Single-tool ops
 imagesToGif({ frames, fps, width, onProgress })
 videoToGif({ input, start, duration, fps, width, onProgress, totalMs })
 probe(File)                       // → MediaInfo?
 resizeGif({ input, width, height, ... })
 cropGif({ input, x, y, cropWidth, cropHeight, ... })
-optimizeGif({ input, colors, lossy, ... })   // gifsicle if present, else ffmpeg palette
+optimizeGif({ input, colors, lossy, loopCount, ... })  // delegates to GifOptimizer (pure-Dart)
 textOverlay({ input, text, fontFile, fontSize, fontColor, position, ... })
 reverseGif({ input, ... })
 changeSpeed({ input, factor, ... })
+
+// Video Studio composite ops
+editVideo({ input, cropX/Y/W/H, scaleW/H, speedFactor, hasAudio, encoderCandidates,
+            startMs, durationMs, overlayText, overlayFontFile, ... })
+            // encoder fallback: tries each candidate in order until one succeeds
+bakeVideoToGif({ input, cropX/Y/W/H, scaleW, speedFactor, fps, startMs, durationMs, ... })
+editGif({ input, cropX/Y/W/H, scaleW, speedFactor, overlayText, fps,
+          loopCount, boomerang, ... })
+cleanJobAt(String jobDir)         // frees an arbitrary temp dir (e.g. baked-GIF source)
 ```
 
-Windows binaries (`ffmpeg.exe`, `ffprobe.exe`, optional `gifsicle.exe`) are resolved relative to
+Windows binaries (`ffmpeg.exe`, `ffprobe.exe`) are resolved relative to
 `Platform.resolvedExecutable` at runtime (`FfmpegProcessBackend.resolveBin`). During dev they must
 sit next to the built exe (`build\windows\x64\runner\Debug\`); `scripts/setup_windows_dev.ps1`
 copies them after clean builds. Always quote paths passed to `Process`.
+
+---
+
+## GifOptimizer
+
+Pure-Dart GIF optimizer (`lib/core/services/gif_optimizer.dart`). Replaces gifsicle — no external
+binary, works on all platforms. Entire pipeline runs in an `Isolate`.
+
+**Pipeline:**
+1. `image.decodeGif` → per-frame RGBA composited frames
+2. `OctreeQuantizer` trains one global palette across all frames (`colors` 2–256 entries, capped at 254 to reserve a transparency slot)
+3. Exhaustive nearest-color search with RGB memo cache (avoids octree tree-walk dead-ends)
+4. Inter-frame transparency diff against a running **displayed canvas** (`disposal=1 leave-in-place`):
+   - Pixel transparent if canvas already shows the correct index (lossless), or if the current true color is within `lossy²` squared-RGB distance of the displayed color
+   - Canvas updated only on redraw → displayed error bounded to `lossy` budget every frame (no ghosting drift)
+5. Per-frame bounding-box crop — only the changed pixel region written in each Image Descriptor
+6. Custom GIF writer + `GifLzw.encode` (`lib/core/services/gif/gif_lzw.dart`) — spec-correct variable-width LZW
+
+**Parameters:** `colors` 2–256, `lossy` 0–200 (0 = lossless diff; higher = more transparency, smaller file), `loopCount` (null = preserve source NETSCAPE2.0 count).
 
 ---
 
@@ -200,7 +240,11 @@ options, last generated preview/output, `FfmpegProgress?`, processing flag, and 
 | `create` | Video Studio, Images → GIF | large featured cards (`FeaturedToolCard`) |
 | `refine` | Resize, Crop, Text Overlay, Optimize, Effects | compact grid (`ToolCard`) |
 
-Video Studio subsumes Video → GIF — crop/resize/speed + GIF export all in one screen.
+Video Studio handles both video **and** GIF source files in one screen:
+- `EditStage.video` — non-destructive layers (crop/resize/speed/trim/text); `makeGif()` bakes them → GIF.
+- `EditStage.gif` — `applyEdits()` bakes GIF edits (+ fps/loopCount/boomerang/optimize) into a temp and pushes a history entry; `undo()`/`redo()` navigates the `_GifVersion` stack (each entry owns its temp dir).
+- `StudioTool` enum: `crop | resize | speed | trim | text | optimize | properties` — drives the dock panel.
+- `exportVideo()` — edits video (encoder fallback); `exportGif()` — two-step edit + optional optimize; `discardGif()` returns to video stage.
 
 Routes: `/video-studio`, `/images-to-gif`, `/resize`, `/crop`, `/text-overlay`, `/optimize`,
 `/effects`, plus `/settings` and `/about`. All non-home routes use a fade + 4%-slide transition.
@@ -251,12 +295,18 @@ platforms. After the copy, `FfmpegService.cleanCurrentJob()` removes the temp di
 | Package | Version | Role |
 |---|---|---|
 | `flutter_riverpod` | 2.6.1 | state (manual providers) |
-| `go_router` | 14.8.1 | routing |
+| `go_router` | 14.6.3 | routing |
 | `ffmpeg_kit_flutter_new` | 4.2.1 | Android FFmpeg backend |
-| `file_picker` | 8.3.7 | pick + saveFile dialog |
-| `permission_handler` | 11.4.0 | Android scoped storage |
-| `media_kit` (+ `_video`, `_libs_video`) | 1.2.6 / 1.3.1 / 1.0.7 | video preview |
+| `file_picker` | 8.1.2 | pick + saveFile dialog |
+| `permission_handler` | 11.3.1 | Android scoped storage |
+| `media_kit` (+ `_video`, `_libs_video`) | 1.1.10 / 1.2.4 / 1.0.4 | video preview |
 | `window_manager` | 0.3.9 | Windows custom title bar |
-| `shared_preferences` | 2.5.5 | settings + recents persist |
-| `path_provider` + `path` | 2.1.6 / — | temp dirs, path joins |
-| ffmpeg / ffprobe (Windows) | 8.1.1 | bundled binaries |
+| `shared_preferences` | 2.3.0 | settings + recents persist |
+| `path_provider` + `path` | 2.1.4 / — | temp dirs, path joins |
+| `image` | 4.0.0 | GifOptimizer — GIF decode + OctreeQuantizer |
+| `desktop_drop` | 0.4.4 | drag-and-drop file acceptance (Windows/macOS/Linux) |
+| `package_info_plus` | 8.0.0 | app version / build metadata |
+| ffmpeg / ffprobe (Windows) | bundled | bundled binaries (resolved at runtime) |
+
+Dev deps of note: `msix` 3.16.7 (MSIX packaging via `scripts/build_msix_release.ps1`),
+`flutter_launcher_icons` 0.14.3 (generates `.ico` / adaptive icon).

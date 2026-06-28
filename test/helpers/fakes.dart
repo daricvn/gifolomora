@@ -120,6 +120,7 @@ class FakeFfmpegService extends FfmpegService {
     required File input,
     int colors = 128,
     int lossy = 40,
+    int? loopCount,
     void Function(FfmpegProgress)? onProgress,
     int? totalMs,
   }) async {

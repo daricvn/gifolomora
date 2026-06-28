@@ -54,6 +54,7 @@ dev_dependencies:
   custom_lint: ^0.7.5
   riverpod_lint: ^2.3.13
   flutter_launcher_icons: ^0.14.3
+  msix: ^3.16.7
 
 dependency_overrides:
   # Local override: same Dart/Android/iOS code but pluginClass:none for Windows
@@ -82,3 +83,27 @@ flutter_launcher_icons:
     generate: false
   linux:
     generate: false
+
+msix_config:
+  display_name: Gifolomora
+  publisher_display_name: Takayoshi Code
+  # identity_name format: PublisherName.AppName (no spaces, alphanumeric+dots only)
+  # Must match the identity registered in Partner Center for Store submission.
+  identity_name: TakayoshiCode.Gifolomora
+  publisher: CN=Takayoshi Code
+  # msix_version must be 4-part (major.minor.patch.build)
+  msix_version: 1.0.0.0
+  logo_path: assets\app.png
+  # icons_background_color: transparent works for logos with alpha channel
+  icons_background_color: transparent
+  architecture: x64
+  languages: en-us
+  # runFullTrust: required for Desktop Bridge (Win32) apps.
+  # Allows child process spawning (ffmpeg.exe/ffprobe.exe) and broad file system access.
+  # Permitted in Microsoft Store for Desktop Bridge / packaged Win32 apps.
+  capabilities: 'runFullTrust'
+  # For local dev/testing: generate a self-signed cert (see scripts\build_msix_release.ps1).
+  # For Store submission: leave certificate_path unset — Partner Center signs the package.
+  # certificate_path: path\to\your.pfx
+  # certificate_password: yourpassword
+  store: false

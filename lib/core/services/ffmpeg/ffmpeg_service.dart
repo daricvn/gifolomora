@@ -153,6 +153,7 @@ class FfmpegService {
     required File input,
     int colors = 128,
     int lossy = 40,
+    int? loopCount,
     void Function(FfmpegProgress)? onProgress,
     int? totalMs,
   }) async {
@@ -165,6 +166,7 @@ class FfmpegService {
         File(outputPath),
         colors: colors,
         lossy: lossy,
+        loopCount: loopCount,
       );
       return Ok(File(outputPath));
     } catch (e) {
@@ -407,6 +409,9 @@ class FfmpegService {
     int overlayFontSize = 36,
     String overlayFontColor = 'white',
     String overlayPosition = 'center',
+    int? fps,
+    int loopCount = 0,
+    bool boomerang = false,
   }) async {
     final jobDir = await _temp.createJobDir();
     _currentJobDir = jobDir;
@@ -426,6 +431,9 @@ class FfmpegService {
         drawTextSize: overlayFontSize,
         drawTextColor: overlayFontColor,
         drawTextPosition: overlayPosition,
+        fps: fps,
+        loopCount: loopCount,
+        boomerang: boomerang,
       );
       final effectiveTotalMs =
           totalMs != null && (speedFactor - 1.0).abs() > 0.001

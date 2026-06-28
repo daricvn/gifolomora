@@ -29,22 +29,26 @@ import 'gif/gif_lzw.dart';
 class GifOptimizer {
   const GifOptimizer._();
 
+  /// [loopCount]  null = preserve the input GIF's loop count; otherwise
+  ///              override the NETSCAPE2.0 loop count (0 = loop forever).
   static Future<void> optimize(
     File input,
     File output, {
     int colors = 128,
     int lossy = 0,
+    int? loopCount,
   }) async {
     final bytes = await input.readAsBytes();
     final result = await Isolate.run(
-      () => _process(bytes, colors.clamp(2, 256), lossy.clamp(0, 200)),
+      () => _process(bytes, colors.clamp(2, 256), lossy.clamp(0, 200), loopCount),
     );
     await output.writeAsBytes(result);
   }
 
   // ---- pipeline ------------------------------------------------------------
 
-  static Uint8List _process(Uint8List bytes, int colors, int lossy) {
+  static Uint8List _process(
+      Uint8List bytes, int colors, int lossy, int? loopOverride) {
     final decoded = img.decodeGif(bytes);
     if (decoded == null) throw const FormatException('Invalid GIF');
 
@@ -185,7 +189,7 @@ class GifOptimizer {
 
     // 5. Assemble GIF bytes.
     final minCodeSize = _minCodeSize(totalColors);
-    final loopCount = decoded.loopCount;
+    final loopCount = loopOverride ?? decoded.loopCount;
     return _writeGif(
       width: width,
       height: height,

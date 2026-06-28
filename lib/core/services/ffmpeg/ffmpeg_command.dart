@@ -300,11 +300,15 @@ abstract final class FfmpegCommand {
     int drawTextSize = 36,
     String drawTextColor = 'white',
     String drawTextPosition = 'center',
+    int? fps,
+    int loopCount = 0,
+    bool boomerang = false,
   }) {
     final pre = <String>[];
     if (cropX != null && cropY != null && cropW != null && cropH != null) {
       pre.add('crop=$cropW:$cropH:$cropX:$cropY');
     }
+    if (fps != null) pre.add('fps=$fps');
     if (scaleW != null) pre.add('scale=$scaleW:-1:flags=lanczos');
     if ((speedFactor - 1.0).abs() > 0.001) {
       pre.add('setpts=${(1.0 / speedFactor).toStringAsFixed(6)}*PTS');
@@ -316,11 +320,16 @@ abstract final class FfmpegCommand {
       pre.add("drawtext=fontfile='$escapedFont':text='$escaped':x=$x:y=$y:fontsize=$drawTextSize:fontcolor=$drawTextColor:borderw=2:bordercolor=black@0.6");
     }
     final chain = pre.isEmpty ? 'null' : pre.join(',');
+    // Boomerang: append a reversed copy of the (edited) stream so the GIF plays
+    // forward then backward → seamless ping-pong loop.
+    final body = boomerang
+        ? '$chain,split[fwd][r0];[r0]reverse[rev];[fwd][rev]concat=n=2:v=1,split[a][b]'
+        : '$chain,split[a][b]';
     return [
       '-y', '-i', inputPath,
       '-filter_complex',
-      '$chain,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5',
-      '-loop', '0',
+      '$body;[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5',
+      '-loop', '$loopCount',
       '-progress', 'pipe:1',
       outputPath,
     ];
@@ -357,6 +366,12 @@ abstract final class FfmpegCommand {
       final escaped = p.replaceAll('\\', '/').replaceAll("'", r"\'");
       buf.writeln("file '$escaped'");
       buf.writeln('duration $duration');
+    }
+    // Repeat last frame without duration so concat demuxer honors its duration
+    if (framePaths.isNotEmpty) {
+      final lastEscaped =
+          framePaths.last.replaceAll('\\', '/').replaceAll("'", r"\'");
+      buf.writeln("file '$lastEscaped'");
     }
     return buf.toString();
   }

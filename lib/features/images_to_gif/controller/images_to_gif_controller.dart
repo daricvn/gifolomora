@@ -49,6 +49,7 @@ class ImagesToGifState {
   final String? error;
 
   bool get hasFrames => frames.isNotEmpty;
+  bool get canGenerate => frames.length >= 2;
   bool get hasText => overlayText.trim().isNotEmpty;
 
   ImagesToGifState copyWith({
