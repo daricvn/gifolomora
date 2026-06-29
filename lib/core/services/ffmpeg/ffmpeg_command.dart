@@ -1,3 +1,25 @@
+class DrawTextSpec {
+  const DrawTextSpec({
+    required this.text,
+    required this.fontFile,
+    required this.x,
+    required this.y,
+    required this.fontSize,
+    required this.fontColorHex,
+    required this.strokeColorHex,
+    required this.strokeWidth,
+  });
+
+  final String text;
+  final String fontFile;
+  final int x;
+  final int y;
+  final int fontSize;
+  final String fontColorHex; // RRGGBB
+  final String strokeColorHex; // RRGGBB
+  final int strokeWidth; // 0 = none
+}
+
 abstract final class FfmpegCommand {
   static List<String> imagesToGif({
     required String concatFilePath,
@@ -102,6 +124,30 @@ abstract final class FfmpegCommand {
       '-y', '-i', inputPath,
       '-filter_complex',
       "drawtext=fontfile='$escapedFont':text='$escapedText':x=$x:y=$y:fontsize=$fontSize:fontcolor=$fontColor:borderw=2:bordercolor=black@0.6,split[a][b];[a]palettegen[p];[b][p]paletteuse",
+      '-loop', '0',
+      '-progress', 'pipe:1',
+      outputPath,
+    ];
+  }
+
+  static List<String> textOverlayMulti({
+    required String inputPath,
+    required String outputPath,
+    required List<DrawTextSpec> specs,
+  }) {
+    assert(specs.isNotEmpty, 'textOverlayMulti requires at least one DrawTextSpec');
+    final parts = specs.map((s) {
+      final t = _escapeText(s.text);
+      final f = _escapeFontPath(s.fontFile);
+      final stroke = s.strokeWidth > 0
+          ? ':borderw=${s.strokeWidth}:bordercolor=0x${s.strokeColorHex}'
+          : ':borderw=0';
+      return "drawtext=fontfile='$f':text='$t':x=${s.x}:y=${s.y}:fontsize=${s.fontSize}:fontcolor=0x${s.fontColorHex}$stroke";
+    }).join(',');
+    return [
+      '-y', '-i', inputPath,
+      '-filter_complex',
+      '$parts,split[a][b];[a]palettegen[p];[b][p]paletteuse',
       '-loop', '0',
       '-progress', 'pipe:1',
       outputPath,

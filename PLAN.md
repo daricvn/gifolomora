@@ -1,136 +1,168 @@
-# Performance Tackle Plan
+# PLAN — Text Overlay (full rewrite)
 
-> Scope: performance scan of Gifolomora, navigated via `ARCHITECTURE.md`.
-> Status of evidence: all findings are from **reading source** (file:line cited).
-> Runtime impact is **inferred**, not yet profiled on a device. Confirm each with
-> a Flutter DevTools timeline / `--profile` run before and after the fix.
+Standalone tool at `/text-overlay`. Multi-text, list-driven, free drag positioning, per-text format panel. Model + render layer built host-agnostic so they later drop into Video Studio / Images→GIF unchanged.
 
----
+Current impl = single-text, 3 position presets, preset colors. **Replace entirely.**
 
-## Findings (ranked by impact)
-
-### P1 — Too many `BackdropFilter` blur surfaces, some inside scrolling lists ✅ DONE
-**Confirmed.** `ARCHITECTURE.md:186-189` sets the rules: cap ~3–6 blur surfaces
-per screen, and **never** put `BackdropFilter` inside a scrolling list.
-
-Both are violated:
-- `GlassContainer` is the sole `BackdropFilter` primitive
-  ([glass_container.dart:41](lib/core/widgets/glass/glass_container.dart#L41)),
-  and `GlassCard` wraps it ([glass_card.dart:25](lib/core/widgets/glass/glass_card.dart#L25)).
-- Home screen stacks well past the cap: `GlassAppBar` + up to 10 recents cards +
-  2 featured cards + 5 tool cards.
-- **Scrolling-list violation:** `RecentsStrip` builds a `GlassContainer` per card
-  inside a horizontal `ListView.builder`
-  ([recents_strip.dart:39-46](lib/features/home/widgets/recents_strip.dart#L39-L46),
-  [recents_strip.dart:75](lib/features/home/widgets/recents_strip.dart#L75)).
-  The two home `SliverGrid`s of `GlassCard`s scroll too
-  ([home_screen.dart:111-161](lib/features/home/view/home_screen.dart#L111-L161)).
-- 62 `GlassContainer`/`GlassCard`/`BackdropFilter` references across 21 files;
-  several tool screens use 5–6 each (crop / text_overlay = 6).
-- Compounder: the animated blob background (P4) keeps the backdrop layer dirty,
-  so every blur **re-runs the gaussian every frame**, not just on scroll.
-  Desktop sigma is 18 ([glass_container.dart:30](lib/core/widgets/glass/glass_container.dart#L30)).
-
-**Fix:**
-1. Add a no-blur mode to the glass primitive — a flat fill that keeps the same
-   tint + border + sheen + shadow but drops `BackdropFilter` (e.g.
-   `GlassContainer(blur: 0)` → plain `DecoratedBox`, or a `GlassCard.flat`).
-2. Use the flat variant for every surface inside a scroll view: recents cards,
-   featured grid, refine grid. Reserve true blur for the app bar + at most one
-   or two non-scrolling hero surfaces per screen.
-3. Audit each tool screen against the 3–6 cap; convert overflow to flat.
-
-**Verify:** DevTools raster-thread timeline on Home — scroll + idle. Expect the
-per-frame `BackdropFilter` raster cost to drop sharply.
+**Two tracks, decoupled:** Backend (model + ffmpeg + controller + fonts) and UI (screen + widgets). The **Contract** section below is the only thing they share — UI talks to the controller provider + state shape and never touches ffmpeg. Tracks can be implemented by different models in parallel; build Backend first only because UI needs the contract to compile.
 
 ---
 
-### P2 — `GifOptimizer` exhaustive nearest-color search dominates CPU ✅ DONE
-**Confirmed (CPU hot path).**
-[gif_optimizer.dart:114-143](lib/core/services/gif_optimizer.dart#L114-L143).
-Per pixel, on a cache miss, it linearly scans all palette colors
-(`O(pixels × realColors)`, up to ~254). The RGB memo cache
-([gif_optimizer.dart:113](lib/core/services/gif_optimizer.dart#L113)) keys on the
-**exact** 24-bit color, so it only helps flat-color GIFs. A video-sourced or
-photographic GIF has near-unique colors per pixel → cache rarely hits → cost
-approaches `pixels × 254`. For 480×270×60 frames ≈ 7.8M px × 254 ≈ 2e9 ops.
+## Decisions (locked)
 
-**Fix (pick one, lowest risk first):**
-1. **Quantize the cache key** — mask low bits per channel (e.g. `>>3`, 5-bit →
-   32768 buckets). Near-guaranteed cache hits, turns per-pixel cost ~constant.
-   Tiny quality cost (sub-perceptual at 5-bit). Smallest diff.
-2. Build a fixed 3D RGB→index LUT (e.g. 32³) once after palette training; pixel
-   lookup becomes a single array index. More memory (~32KB), zero per-pixel scan.
-3. Spatial structure (k-d tree) over the palette — more code, only worth it if
-   1/2 prove insufficient.
-
-Runs in an isolate already ([gif_optimizer.dart:42](lib/core/services/gif_optimizer.dart#L42)),
-so this is wall-clock latency of the optimize step, not UI jank — but it's the
-single biggest CPU cost in the app.
-
-**Verify:** time `optimize()` on a real photographic GIF before/after; assert
-output bytes within a small tolerance (quality regression guard).
+1. Bundle fonts in `assets/fonts/` (Roboto regular/bold/italic) for deterministic cross-platform styling.
+2. Preview is **approximate** (Flutter Text). Real output via Generate.
+3. Color = **full color-wheel picker** (HSV). Store hex `RRGGBB`.
+4. No resize handles — font-size slider covers sizing.
+5. Up to **20** text items.
 
 ---
 
-### P3 — `GifOptimizer` palette training: full stacked image + full-pixel walk ✅ DONE
-**Confirmed (memory + CPU).**
-[gif_optimizer.dart:205-226](lib/core/services/gif_optimizer.dart#L205-L226).
-`_buildGlobalPalette` allocates one `img.Image` of `W × (H×N)` then
-`toUint8List()` copies it again, and `OctreeQuantizer` walks every pixel of every
-frame. For 480×270×60 that's ~23MB stacked + a 23MB copy, on top of `framesRgb`
-(23MB), `framesIndex` (7.8MB), `framesTransparent` (7.8MB), and the decoder's
-RGBA frames (~31MB) — peak ~100MB+ in the isolate.
+## Scope
 
-**Fix:** train the quantizer on a **subsample** — every Nth pixel (stride) and/or
-every Nth frame. A global palette is statistically stable under subsampling; this
-cuts training memory and time several-fold. Avoid materializing the stacked
-image; feed strided samples directly.
-
-**Verify:** compare palette + output size on a few GIFs; expect ~equal size,
-lower peak RSS, faster training.
+- Input: GIF (same pick flow). Source GIF = preview background.
+- Add / remove / select / edit text items.
+- List panel: every item; tap → select + edit.
+- Selected item on preview: draggable, bounding box, format toolbar floats above box.
+- Per-item format: font style, font size, font color, stroke color, stroke width.
+- Output: bake all drawtext → GIF (palettegen/paletteuse) → export (existing flow).
 
 ---
 
-### P4 — `GradientScaffold` blobs repaint full-screen every frame, forever ✅ DONE
-**Confirmed.** [gradient_scaffold.dart:34-37](lib/core/widgets/common/gradient_scaffold.dart#L34-L37)
-runs an 8s `AnimationController.repeat(reverse: true)` that never stops; the
-`AnimatedBuilder` rebuilds `_Blobs` (three large `RadialGradient` circles) every
-tick ([gradient_scaffold.dart:65-74](lib/core/widgets/common/gradient_scaffold.dart#L65-L74)).
-This runs on **every screen, while idle**, and is what keeps every `BackdropFilter`
-above it dirty (see P1) — constant GPU + battery drain even when nothing moves.
+# CONTRACT (shared — both tracks depend on this)
 
-**Fix:**
-1. Biggest win is P1: once scrolling surfaces stop blurring, the blob repaint no
-   longer forces N gaussian recomputes.
-2. Wrap the blob layer in its own `RepaintBoundary` so it doesn't dirty siblings.
-3. Consider pausing/slowing the controller when the route is not visible, or
-   lowering the effective tick rate; the motion is subtle enough that ~30fps or a
-   paused-when-occluded state is unnoticeable.
+Implemented by Backend, consumed by UI. UI imports only `model/text_item.dart` + `controller/text_overlay_controller.dart`.
 
-**Verify:** GPU/raster timeline at idle on Home before/after.
+### Model — `lib/features/text_overlay/model/text_item.dart`
+
+```dart
+enum TextStyleKind { regular, bold, italic, boldItalic }
+
+class TextItem {            // immutable + copyWith
+  final String id;         // unique
+  final String text;
+  final double nx, ny;     // normalized TOP-LEFT of box, 0..1 of media W/H
+  final int    fontSize;   // media px
+  final String fontColor;  // hex 'RRGGBB'
+  final String strokeColor;// hex 'RRGGBB'
+  final int    strokeWidth;// 0..12 px (0 = none)
+  final TextStyleKind style;
+}
+```
+
+Coord helpers (pure, static — single source of truth, used by UI for drag + by Backend for ffmpeg):
+- `nxFromLocal(localX, scale, mw) => (localX/scale)/mw`  (same for y)
+- `leftFromNx(nx, mw, scale) => nx*mw*scale`             (same for top)
+- `previewFontSize(fontSize, scale) => fontSize*scale`
+- `pxX(nx, mw) => (nx*mw).round()`                       (same for y)
+- clamp nx,ny to [0,1) on write.
+
+`scale = displayW / mediaW` (uniform letterbox fit).
+
+### State — `TextOverlayState`
+
+```
+File? inputFile; MediaInfo? mediaInfo; bool isProbing;
+List<TextItem> items; String? selectedId;
+File? outputGif; FfmpegProgress? progress;
+bool isProcessing; String? error;
+```
+Getters: `hasInput`, `selected` (TextItem?), `canAdd` (items.length<20), `fontReady` (bool), `canGenerate` (hasInput && items.isNotEmpty && every item.text.trim non-empty && fontReady).
+
+### Controller API — `textOverlayControllerProvider` (`AsyncNotifierProvider<TextOverlayController, TextOverlayState>`)
+
+```
+Future<void> setInput(File)
+void addText()                 // guard canAdd; default item centered (nx,ny=.4), text 'Text', selects it; invalidate outputGif
+void removeText(String id)     // clears selection if removed
+void select(String? id)
+void updateSelected({ String? text, TextStyleKind? style, int? fontSize,
+                      String? fontColor, String? strokeColor, int? strokeWidth })
+void moveSelected(double nx, double ny)   // clamps
+Future<void> generate()        // builds output gif
+Future<bool> exportGif()
+Future<void> cancel()
+void clear()
+```
+Any item mutation invalidates `outputGif` + clears `error`.
+
+UI needs **nothing else** from backend. Everything below CONTRACT is Backend-internal.
 
 ---
 
-## Non-issues checked (ruled out)
-- Tool controllers (`images_to_gif`, etc.) keep heavy work off the main thread —
-  all encode/optimize goes through `FfmpegService` / the optimizer isolate
-  ([images_to_gif_controller.dart:202-260](lib/features/images_to_gif/controller/images_to_gif_controller.dart#L202-L260)). OK.
-- `GifLzw.encode` is a single linear pass with a dict map — fine
-  ([gif_lzw.dart](lib/core/services/gif/gif_lzw.dart)).
-- `VideoPreview` crop painter repaints only on crop/size change
-  ([video_preview.dart:380-381](lib/features/_shared/widgets/video_preview.dart#L380-L381)). OK.
-- `MediaPreview` uses `Image.file` with `gaplessPlayback` — fine.
+# BACKEND TRACK
+
+### B1 — Model
+`text_item.dart`: TextItem, TextStyleKind, copyWith, coord helpers (above). **Unit test**: mapping round-trip (local→nx→px), clamp bounds.
+
+### B2 — Fonts
+- Add `assets/fonts/Roboto-Regular.ttf`, `-Bold.ttf`, `-Italic.ttf`, `-BoldItalic.ttf`; register in `pubspec.yaml` assets.
+- `FontResolver`: add `fileForStyle(TextStyleKind) -> String` resolving bundled asset path on disk. Bundled assets need a real filesystem path for ffmpeg `fontfile` — copy from rootBundle to a temp/app-support dir once, cache path (assets aren't direct FS paths on Android). Fallback to existing system-font `resolve()` if copy fails.
+- `fontReady` in state = at least regular resolvable.
+
+### B3 — FFmpeg
+`FfmpegCommand` — replace `textOverlay`/`_textPosition` with:
+```
+textOverlayMulti({ inputPath, outputPath, List<DrawTextSpec> specs })
+DrawTextSpec { text, fontFile, x, y, fontSize, fontColorHex, strokeColorHex, strokeWidth }  // x,y abs px
+```
+Filter graph: one `drawtext` per spec, chained, then split→palettegen→paletteuse:
+```
+drawtext=fontfile='F':text='T':x=X:y=Y:fontsize=S:fontcolor=0xRRGGBB:borderw=W:bordercolor=0xRRGGBB, ... ,
+split[a][b];[a]palettegen[p];[b][p]paletteuse
+```
+- strokeWidth 0 → emit `borderw=0` (omit bordercolor).
+- Reuse `_escapeText`, `_escapeFontPath`. Hex → `0x` prefix.
+- Empty specs → guard.
+
+`FfmpegService`: rewrite `textOverlay` → `textOverlayMulti({ input, List<TextItem> items, MediaInfo mediaInfo, onProgress, totalMs })`; maps items→specs (`pxX/pxY` + `fileForStyle`). Keep job-dir / Result / progress pattern.
+
+### B4 — Controller
+Rewrite `TextOverlayController` + `TextOverlayState` per CONTRACT. **Unit test**: add caps at 20, removeText clears selection, updateSelected patches correct item + invalidates outputGif, canGenerate logic.
+
+### B5 — verify
+`flutter analyze` 0, `flutter test`. Update `ARCHITECTURE.md` GIF-source command list (`textOverlay`→`textOverlayMulti`).
 
 ---
 
-## Suggested order
-1. **P1** — highest runtime win, contained change (one primitive + swap call sites).
-2. **P4** — small, compounds with P1.
-3. **P2** — biggest CPU win for the optimize feature, isolated to one function.
-4. **P3** — memory + latency polish on the same file.
+# UI TRACK
 
-## Caveat (most-likely-wrong claim)
-Runtime magnitudes are **inferred from code shape, not profiled.** The P1 ordering
-assumes blur-over-animated-backdrop is the dominant cost; confirm with a DevTools
-raster timeline before committing to the refactor scope.
+Depends only on CONTRACT. Rewrite `text_overlay_screen.dart`. Keep step skeleton; Preview becomes interactive editor. Reuse glass widgets, `GradientScaffold`, `GlassAppBar`, `ExportBottomSheet`, `FileDropZone`, `MediaPreview`, and existing sub-widgets (`_SectionHeader`, `_FileInfoCard`, `_ProgressCard`, `_GenerateButton`, `_ErrorCard`, `_ExportBar`).
+
+### U1 — Step 1 Pick
+Unchanged: `FileDropZone` / `_FileInfoCard`; if `!state.fontReady` show font warning card.
+
+### U2 — Editor (after input)
+- `_PreviewEditor`: `LayoutBuilder` → displayW; derive displayH + `scale` from `mediaInfo` aspect (letterbox). `Stack`:
+  - bg `Image.file(inputFile)` sized display W×H (Flutter renders animated GIF).
+  - per item `Positioned(left/top from leftFromNx/topFromNy)` → `GestureDetector(onTap: select, onPanUpdate → moveSelected(nxFromLocal,...))` rendering Flutter `Text`:
+    - fontSize = `previewFontSize`, fontWeight/fontStyle from `style`, color = fontColor.
+    - stroke: layered `Text` w/ `foreground = Paint()..style=stroke..strokeWidth..color=strokeColor` under fill Text.
+  - selected item: bounding box `Border` + `_FormatToolbar` positioned above box (flip below if near top edge).
+  - hit-test: last item in list = topmost wins; list panel = reliable select.
+- `_FormatToolbar` (glass, compact, floats above selected box):
+  - text field bound to `selected.text` → `updateSelected(text:)`.
+  - style toggle Aa / **B** / *I* → `updateSelected(style:)`.
+  - font-size mini-slider/stepper (12–96) → `updateSelected(fontSize:)`.
+  - font color button → opens color-wheel sheet → `updateSelected(fontColor:)`.
+  - stroke color button → wheel sheet → `updateSelected(strokeColor:)`.
+  - stroke width slider 0–12 → `updateSelected(strokeWidth:)`.
+- `_TextListPanel` (glass): header "+ Add" (disabled when !canAdd) + `n/20`; `ListView` rows = text preview + selected highlight + delete icon. Tap row → `select(id)`.
+
+### U3 — Color-wheel picker
+Add dep `flutter_colorpicker` (HSV/wheel). Wrap in a glass bottom sheet; return hex `RRGGBB`. (ponytail: building an HSV wheel by hand is non-trivial; use the package. If dep undesired, swap to a swatch grid — but decision #3 = wheel.)
+
+### U4 — Step 3 Generate/Preview
+`_GenerateButton` (enabled = `canGenerate`) → `generate()`. On `outputGif` show `MediaPreview(outputGif)` + Regenerate. `_ProgressCard` while processing, `_ErrorCard` on error. Export bar unchanged.
+
+### U5 — verify
+`flutter analyze` 0; manual: add/select/drag/style/color/stroke/delete, generate, export.
+
+---
+
+## Build order
+Backend B1→B5 first (unblocks compile + contract), then UI U1→U5. Can hand UI to a separate model once CONTRACT types/provider exist (stub controller methods compile-ready early if parallelizing).
+
+## Notes
+- Reusability: model + coord helpers + `textOverlayMulti` are screen-independent. Video Studio embed later = feed its `mediaInfo` + reuse `_PreviewEditor` over its preview; no backend change.
+- WYSIWYG drift accepted (decision #2): Flutter Text ≠ exact drawtext metrics; Generate shows truth.

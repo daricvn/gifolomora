@@ -183,7 +183,7 @@ class ImagesToGifController extends AsyncNotifier<ImagesToGifState> {
 
   Future<void> generate() async {
     final current = state.valueOrNull;
-    if (current == null || current.frames.isEmpty) return;
+    if (current == null || current.frames.length < 2) return;
     if (current.isProcessing) return;
 
     state = AsyncData(current.copyWith(

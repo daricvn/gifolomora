@@ -2,8 +2,10 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import '../files/temp_file_service.dart';
 import '../gif_optimizer.dart';
+import '../../utils/font_resolver.dart';
 import '../../utils/logger.dart';
 import '../../utils/result.dart';
+import '../../../features/text_overlay/model/text_item.dart';
 import 'ffmpeg_backend.dart';
 import 'ffmpeg_command.dart';
 import 'ffmpeg_progress.dart';
@@ -201,6 +203,45 @@ class FfmpegService {
         position: position,
       );
       return await _backend.run(args, outputPath, onProgress: onProgress, totalMs: totalMs);
+    } catch (e) {
+      await _temp.cleanJob(jobDir);
+      _currentJobDir = null;
+      return Err(FfmpegError(message: e.toString()));
+    }
+  }
+
+  Future<Result<File, FfmpegError>> textOverlayMulti({
+    required File input,
+    required List<TextItem> items,
+    required MediaInfo mediaInfo,
+    void Function(FfmpegProgress)? onProgress,
+    int? totalMs,
+  }) async {
+    final jobDir = await _temp.createJobDir();
+    _currentJobDir = jobDir;
+    try {
+      final outputPath = await _temp.tempOutputPath(jobDir, 'gif');
+      final mw = mediaInfo.width.toDouble();
+      final mh = mediaInfo.height.toDouble();
+      final specs = items
+          .map((item) => DrawTextSpec(
+                text: item.text.trim(),
+                fontFile: FontResolver.fileForStyle(item.style) ?? '',
+                x: TextItem.pxX(item.nx, mw),
+                y: TextItem.pxY(item.ny, mh),
+                fontSize: item.fontSize,
+                fontColorHex: item.fontColor,
+                strokeColorHex: item.strokeColor,
+                strokeWidth: item.strokeWidth,
+              ))
+          .toList();
+      final args = FfmpegCommand.textOverlayMulti(
+        inputPath: input.path,
+        outputPath: outputPath,
+        specs: specs,
+      );
+      return await _backend.run(args, outputPath,
+          onProgress: onProgress, totalMs: totalMs);
     } catch (e) {
       await _temp.cleanJob(jobDir);
       _currentJobDir = null;

@@ -142,7 +142,7 @@ void main() {
       expect(c.read(imagesToGifControllerProvider).value!.isProcessing, isFalse);
     });
 
-    test('generate success → outputGif set, isProcessing=false, error=null', () async {
+    test('generate skips when only 1 frame (requires at least 2)', () async {
       final backend = FakeFfmpegBackend();
       backend.nextResult = Ok(File('/fake/output.gif'));
       final c = _makeContainer(ffmpeg: FakeFfmpegService(backend));
@@ -151,6 +151,22 @@ void main() {
 
       final ctrl = c.read(imagesToGifControllerProvider.notifier);
       ctrl.addFrames([File('/a.png')]);
+      await ctrl.generate();
+
+      final state = c.read(imagesToGifControllerProvider).value!;
+      expect(state.outputGif, isNull);
+      expect(state.isProcessing, isFalse);
+    });
+
+    test('generate success → outputGif set, isProcessing=false, error=null', () async {
+      final backend = FakeFfmpegBackend();
+      backend.nextResult = Ok(File('/fake/output.gif'));
+      final c = _makeContainer(ffmpeg: FakeFfmpegService(backend));
+      addTearDown(c.dispose);
+      await c.read(imagesToGifControllerProvider.future);
+
+      final ctrl = c.read(imagesToGifControllerProvider.notifier);
+      ctrl.addFrames([File('/a.png'), File('/b.png')]);
       await ctrl.generate();
 
       final state = c.read(imagesToGifControllerProvider).value!;
@@ -167,7 +183,7 @@ void main() {
       await c.read(imagesToGifControllerProvider.future);
 
       final ctrl = c.read(imagesToGifControllerProvider.notifier);
-      ctrl.addFrames([File('/a.png')]);
+      ctrl.addFrames([File('/a.png'), File('/b.png')]);
       await ctrl.generate();
 
       final state = c.read(imagesToGifControllerProvider).value!;
@@ -199,7 +215,7 @@ void main() {
       await c.read(imagesToGifControllerProvider.future);
 
       final ctrl = c.read(imagesToGifControllerProvider.notifier);
-      ctrl.addFrames([File('/a.png')]);
+      ctrl.addFrames([File('/a.png'), File('/b.png')]);
       await ctrl.generate();
       final exported = await ctrl.exportGif();
 
@@ -222,7 +238,7 @@ void main() {
       await c.read(imagesToGifControllerProvider.future);
 
       final ctrl = c.read(imagesToGifControllerProvider.notifier);
-      ctrl.addFrames([File('/a.png')]);
+      ctrl.addFrames([File('/a.png'), File('/b.png')]);
       await ctrl.generate();
       final exported = await ctrl.exportGif();
 

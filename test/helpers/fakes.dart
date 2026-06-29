@@ -7,6 +7,7 @@ import 'package:gifolomora/core/services/files/export_service.dart';
 import 'package:gifolomora/core/services/files/temp_file_service.dart';
 import 'package:gifolomora/core/services/recents/recents_service.dart';
 import 'package:gifolomora/core/utils/result.dart';
+import 'package:gifolomora/features/text_overlay/model/text_item.dart';
 
 class FakeFfmpegBackend implements FfmpegBackend {
   Result<File, FfmpegError> nextResult = Ok(File('/fake/output.gif'));
@@ -136,6 +137,18 @@ class FakeFfmpegService extends FfmpegService {
     int fontSize = 36,
     String fontColor = 'white',
     String position = 'center',
+    void Function(FfmpegProgress)? onProgress,
+    int? totalMs,
+  }) async {
+    onProgress?.call(const FfmpegProgress(fraction: 1.0));
+    return fakeBackend.nextResult;
+  }
+
+  @override
+  Future<Result<File, FfmpegError>> textOverlayMulti({
+    required File input,
+    required List<TextItem> items,
+    required MediaInfo mediaInfo,
     void Function(FfmpegProgress)? onProgress,
     int? totalMs,
   }) async {
