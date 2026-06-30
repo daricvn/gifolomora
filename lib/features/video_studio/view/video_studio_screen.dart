@@ -821,7 +821,7 @@ class _ToolSelector extends StatelessWidget {
       (StudioTool.crop, Icons.crop_rounded, 'Crop', false, null),
       (StudioTool.resize, Icons.photo_size_select_large_rounded, 'Resize', false, null),
       (StudioTool.speed, Icons.speed_rounded, 'Speed', false, null),
-      if (!isGif) (StudioTool.trim, Icons.content_cut_rounded, 'Trim', false, null),
+      if (!isGif) (StudioTool.trim, Icons.straighten_rounded, 'Trim', false, null),
       if (!isGif) (StudioTool.cut, Icons.cut_rounded, 'Cut', false, null),
       (StudioTool.text, Icons.title_rounded, 'Text', false, null),
       if (isGif) (StudioTool.optimize, Icons.tune_rounded, 'Optimise', false, null),
