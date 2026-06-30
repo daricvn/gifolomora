@@ -98,6 +98,45 @@ flutter build apk --release
 
 Creates a signed MSIX package for Windows App Installer or Microsoft Store submission. See the script for certificate configuration details.
 
+### Code Signing (Windows)
+
+Sign any `.exe`, `.msix`, or `.dll` with `signtool` (bundled in Windows SDK).
+
+**Generate a self-signed code signing certificate:**
+
+```powershell
+$cert = New-SelfSignedCertificate -Type CodeSigning -Subject "CN=Gifolomora" `
+  -KeyUsage DigitalSignature -FriendlyName "Gifolomora Code Signing" `
+  -CertStoreLocation "Cert:\CurrentUser\My" -NotAfter (Get-Date).AddYears(10)
+$pwd = ConvertTo-SecureString -String "<your-password>" -Force -AsPlainText
+Export-PfxCertificate -Cert $cert -FilePath ".\certificate.pfx" -Password $pwd
+```
+
+> **Important:** `-Type CodeSigning` is required. Without it the cert lacks the Code Signing EKU (`1.3.6.1.5.5.7.3.3`) and signtool will fail with "No certificates were found that met all the given criteria."
+
+**Sign a binary:**
+
+```powershell
+signtool sign `
+  /f certificate.pfx `
+  /p "<pfx-password>" `
+  /fd sha256 `
+  /tr http://timestamp.digicert.com `
+  /td sha256 `
+  YourApp.exe
+```
+
+**Verify:**
+
+```powershell
+signtool verify /pa YourApp.exe
+```
+
+**signtool location** (if not on PATH):
+```
+C:\Program Files (x86)\Windows Kits\10\bin\<SDK-version>\x64\signtool.exe
+```
+
 ## Project Structure
 
 ```
