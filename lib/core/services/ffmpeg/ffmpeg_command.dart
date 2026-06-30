@@ -1,3 +1,6 @@
+/// A span (absolute source ms) marked for removal from the output. start < end.
+typedef CutSegment = ({int startMs, int endMs});
+
 class DrawTextSpec {
   const DrawTextSpec({
     required this.text,
@@ -103,10 +106,17 @@ abstract final class FfmpegCommand {
     ];
   }
 
+  // drawtext text is wrapped in filtergraph single quotes by every caller.
+  // Inside '...', ffmpeg treats backslash as literal, so a `'` cannot be
+  // backslash-escaped — it must close the quote, emit an escaped quote, and
+  // reopen: ' -> '\''. (`\'` instead leaves the quote open and the rest of the
+  // filtergraph, including the trailing ,split, gets swallowed → EINVAL.)
+  // `%` is escaped so drawtext does not treat it as a `%{...}` expansion.
   static String _escapeText(String text) => text
       .replaceAll(r'\', r'\\')
-      .replaceAll("'", r"\'")
-      .replaceAll(':', r'\:');
+      .replaceAll('%', r'\%')
+      .replaceAll(':', r'\:')
+      .replaceAll("'", "'\\''");
 
   static List<String> textOverlay({
     required String inputPath,
@@ -130,20 +140,30 @@ abstract final class FfmpegCommand {
     ];
   }
 
+  /// Builds one drawtext filter segment for [s] (absolute px position, per-item
+  /// color + stroke). Shared by the GIF [textOverlayMulti] bake and the video
+  /// [videoEdit] bake so escaping/quoting lives in one place.
+  static String _sanitizeHex(String hex) =>
+      RegExp(r'^[0-9A-Fa-f]{6}$').hasMatch(hex) ? hex : 'FFFFFF';
+
+  static String _drawTextPart(DrawTextSpec s) {
+    final t = _escapeText(s.text);
+    final f = _escapeFontPath(s.fontFile);
+    final fc = _sanitizeHex(s.fontColorHex);
+    final sc = _sanitizeHex(s.strokeColorHex);
+    final stroke = s.strokeWidth > 0
+        ? ':borderw=${s.strokeWidth}:bordercolor=0x$sc'
+        : ':borderw=0';
+    return "drawtext=fontfile='$f':text='$t':x=${s.x}:y=${s.y}:fontsize=${s.fontSize}:fontcolor=0x$fc$stroke";
+  }
+
   static List<String> textOverlayMulti({
     required String inputPath,
     required String outputPath,
     required List<DrawTextSpec> specs,
   }) {
     assert(specs.isNotEmpty, 'textOverlayMulti requires at least one DrawTextSpec');
-    final parts = specs.map((s) {
-      final t = _escapeText(s.text);
-      final f = _escapeFontPath(s.fontFile);
-      final stroke = s.strokeWidth > 0
-          ? ':borderw=${s.strokeWidth}:bordercolor=0x${s.strokeColorHex}'
-          : ':borderw=0';
-      return "drawtext=fontfile='$f':text='$t':x=${s.x}:y=${s.y}:fontsize=${s.fontSize}:fontcolor=0x${s.fontColorHex}$stroke";
-    }).join(',');
+    final parts = specs.map(_drawTextPart).join(',');
     return [
       '-y', '-i', inputPath,
       '-filter_complex',
@@ -198,6 +218,15 @@ abstract final class FfmpegCommand {
     ];
   }
 
+  /// Builds the `between(t,s,e)+...` expression used by select/aselect filters.
+  static String _selectKeepExpr(List<CutSegment> ranges) {
+    return ranges.map((r) {
+      final s = (r.startMs / 1000).toStringAsFixed(3);
+      final e = (r.endMs / 1000).toStringAsFixed(3);
+      return 'between(t,$s,$e)';
+    }).join('+');
+  }
+
   static List<String> videoEdit({
     required String inputPath,
     required String outputPath,
@@ -210,15 +239,33 @@ abstract final class FfmpegCommand {
     double speedFactor = 1.0,
     required String encoder,
     bool hasAudio = false,
+    double volume = 1.0,
     int? startMs,
     int? durationMs,
+    List<DrawTextSpec>? textSpecs,
     String? drawText,
     String? drawTextFont,
     int drawTextSize = 36,
     String drawTextColor = 'white',
     String drawTextPosition = 'center',
+    List<CutSegment>? keepRanges,
   }) {
+    final hasCut = keepRanges != null && keepRanges.isNotEmpty;
     final vf = <String>[];
+
+    // When cuts present: select/setpts owns the window (no -ss/-t).
+    if (hasCut) {
+      final expr = _selectKeepExpr(keepRanges);
+      vf.add("select='$expr',setpts=N/FRAME_RATE/TB");
+    }
+
+    // Multi-item text (specs carry source-px positions) bakes first, before
+    // crop/scale, so the texted frames transform with the content — matching
+    // the GIF text pipeline and the live preview (text positioned over the
+    // full source frame).
+    if (textSpecs != null && textSpecs.isNotEmpty) {
+      vf.addAll(textSpecs.map(_drawTextPart));
+    }
 
     if (cropX != null && cropY != null && cropW != null && cropH != null) {
       vf.add('crop=$cropW:$cropH:$cropX:$cropY');
@@ -250,17 +297,27 @@ abstract final class FfmpegCommand {
     }
 
     final args = ['-y'];
-    if (startMs != null && startMs > 0) {
+    if (!hasCut && startMs != null && startMs > 0) {
       args.addAll(['-ss', (startMs / 1000).toStringAsFixed(3)]);
     }
     args.addAll(['-i', inputPath]);
-    if (durationMs != null && durationMs > 0) {
+    if (!hasCut && durationMs != null && durationMs > 0) {
       args.addAll(['-t', (durationMs / 1000).toStringAsFixed(3)]);
     }
     args.addAll(['-vf', vf.join(',')]);
 
     if (hasAudio) {
-      if (speedChanged) args.addAll(['-af', _atempoChain(speedFactor)]);
+      final af = <String>[];
+      // When cuts present: aselect/asetpts must come first in the audio chain.
+      if (hasCut) {
+        final expr = _selectKeepExpr(keepRanges);
+        af.add("aselect='$expr',asetpts=N/SR/TB");
+      }
+      if (speedChanged) af.add(_atempoChain(speedFactor));
+      if ((volume - 1.0).abs() > 0.001) {
+        af.add('volume=${volume.toStringAsFixed(3)}');
+      }
+      if (af.isNotEmpty) args.addAll(['-af', af.join(',')]);
       args.addAll(['-c:a', 'aac', '-b:a', '160k']);
     } else {
       args.add('-an');
@@ -278,7 +335,8 @@ abstract final class FfmpegCommand {
       ['-y', '-i', inputPath, '-c', 'copy', outputPath];
 
   /// Bakes the video layers (crop · resize · speed · trim · text) into a GIF in one pass.
-  /// crop → fps → scale → setpts → drawtext → palettegen/paletteuse.
+  /// When keepRanges present: select/setpts first (cuts own window, no -ss/-t).
+  /// Otherwise: crop → fps → scale → setpts → drawtext → palettegen/paletteuse.
   static List<String> videoEditToGif({
     required String inputPath,
     required String outputPath,
@@ -296,8 +354,15 @@ abstract final class FfmpegCommand {
     int drawTextSize = 36,
     String drawTextColor = 'white',
     String drawTextPosition = 'center',
+    List<CutSegment>? keepRanges,
   }) {
+    final hasCut = keepRanges != null && keepRanges.isNotEmpty;
     final pre = <String>[];
+    // When cuts present: select/setpts must come first (before crop/fps).
+    if (hasCut) {
+      final expr = _selectKeepExpr(keepRanges);
+      pre.add("select='$expr',setpts=N/FRAME_RATE/TB");
+    }
     if (cropX != null && cropY != null && cropW != null && cropH != null) {
       pre.add('crop=$cropW:$cropH:$cropX:$cropY');
     }
@@ -313,11 +378,11 @@ abstract final class FfmpegCommand {
       pre.add("drawtext=fontfile='$escapedFont':text='$escaped':x=$x:y=$y:fontsize=$drawTextSize:fontcolor=$drawTextColor:borderw=2:bordercolor=black@0.6");
     }
     final args = ['-y'];
-    if (startMs != null && startMs > 0) {
+    if (!hasCut && startMs != null && startMs > 0) {
       args.addAll(['-ss', (startMs / 1000).toStringAsFixed(3)]);
     }
     args.addAll(['-i', inputPath]);
-    if (durationMs != null && durationMs > 0) {
+    if (!hasCut && durationMs != null && durationMs > 0) {
       args.addAll(['-t', (durationMs / 1000).toStringAsFixed(3)]);
     }
     args.addAll([

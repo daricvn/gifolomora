@@ -31,32 +31,56 @@ class GifOptimizer {
 
   /// [loopCount]  null = preserve the input GIF's loop count; otherwise
   ///              override the NETSCAPE2.0 loop count (0 = loop forever).
+  /// [frameDrop]  0 = keep all frames; 2/3/4 = remove 1 of every N frames
+  ///              (2 → halve, 3 → drop a third, 4 → drop a quarter). The dropped
+  ///              frame's duration is folded into the previous kept frame so
+  ///              total playback time is unchanged. Frame 0 is always kept.
   static Future<void> optimize(
     File input,
     File output, {
     int colors = 128,
     int lossy = 0,
     int? loopCount,
+    int frameDrop = 0,
   }) async {
     final bytes = await input.readAsBytes();
     final result = await Isolate.run(
-      () => _process(bytes, colors.clamp(2, 256), lossy.clamp(0, 200), loopCount),
+      () => _process(
+          bytes, colors.clamp(2, 256), lossy.clamp(0, 200), loopCount, frameDrop),
     );
     await output.writeAsBytes(result);
   }
 
   // ---- pipeline ------------------------------------------------------------
 
-  static Uint8List _process(
-      Uint8List bytes, int colors, int lossy, int? loopOverride) {
+  static Uint8List _process(Uint8List bytes, int colors, int lossy,
+      int? loopOverride, int frameDrop) {
     final decoded = img.decodeGif(bytes);
     if (decoded == null) throw const FormatException('Invalid GIF');
 
     final width = decoded.width;
     final height = decoded.height;
     final pixels = width * height;
-    final srcFrames =
+    final allFrames =
         decoded.frames.isEmpty ? <img.Image>[decoded] : decoded.frames.toList();
+
+    // Optional frame dropping: remove 1 of every [frameDrop] frames. Dropped
+    // duration folds into the previous kept frame so total playback time is
+    // unchanged. Frame 0 is always kept (drop test requires a prior kept frame).
+    final srcFrames = <img.Image>[];
+    final srcDurMs = <int>[]; // per kept frame, in ms (incl. folded drops)
+    for (var f = 0; f < allFrames.length; f++) {
+      final fr = allFrames[f];
+      final drop = frameDrop >= 2 &&
+          srcFrames.isNotEmpty &&
+          (f % frameDrop) == frameDrop - 1;
+      if (drop) {
+        srcDurMs[srcDurMs.length - 1] += fr.frameDuration;
+      } else {
+        srcFrames.add(fr);
+        srcDurMs.add(fr.frameDuration);
+      }
+    }
     final frameCount = srcFrames.length;
 
     // Reserve one palette slot for transparency used by inter-frame diffing.
@@ -85,8 +109,8 @@ class GifOptimizer {
       }
       framesRgb[f] = rgb;
       framesTransparent[f] = trans;
-      final d = frame.frameDuration; // ms
-      durations[f] = d > 0 ? (d ~/ 10) : 10; // → centiseconds, min 1cs default
+      final d = srcDurMs[f]; // ms (incl. folded-in dropped frames)
+      durations[f] = d > 0 ? (d ~/ 10).clamp(1, 6000) : 10; // → centiseconds; floor 1cs, default 10cs for 0ms
     }
 
     // 2. Train one global palette across all frames.
@@ -143,6 +167,30 @@ class GifOptimizer {
       framesIndex[f] = idx;
     }
 
+    // 3b. Intra-frame lossy: horizontal run-extension.
+    //     Snap each pixel to its left neighbor's palette index when the true
+    //     color is within lossy budget → extends LZW runs → smaller stream.
+    //     Applies unconditionally per-frame (including frame 0 and static GIFs)
+    //     so `lossy` is not a dead knob on first/only frames.
+    final lossyBudget = lossy * lossy;
+    if (lossy > 0) {
+      for (var f = 0; f < frameCount; f++) {
+        final idx = framesIndex[f];
+        final rgb = framesRgb[f];
+        for (var p = 0, j = 0; p < pixels; p++, j += 3) {
+          if (p % width == 0) continue; // first pixel of row — no left neighbor
+          final prev = idx[p - 1];
+          if (prev == idx[p]) continue; // already same index
+          final dr = rgb[j] - pr[prev];
+          final dg = rgb[j + 1] - pg[prev];
+          final db = rgb[j + 2] - pb[prev];
+          if (dr * dr + dg * dg + db * db <= lossyBudget) {
+            idx[p] = prev;
+          }
+        }
+      }
+    }
+
     // 4. Inter-frame transparency diff against the running DISPLAYED canvas.
     //    With disposal=1 a transparent pixel shows whatever was last *drawn* at
     //    that location — the composite of all prior frames, not the full
@@ -154,7 +202,6 @@ class GifOptimizer {
     //    when the canvas already shows the right color (lossless) or a color
     //    within the lossy budget of the true color; otherwise redraw and update
     //    the canvas. This bounds the displayed error to the budget every frame.
-    final lossyBudget = lossy * lossy;
     final canvas = Uint8List(pixels)..fillRange(0, pixels, transparentIndex);
     for (var f = 0; f < frameCount; f++) {
       final cur = framesIndex[f];
@@ -213,7 +260,7 @@ class GifOptimizer {
     // Subsample: every 4th frame, every 2nd pixel in both dimensions.
     // Global palettes are statistically stable under subsampling; this cuts
     // training memory/time ~8× with no perceptible quality loss.
-    const frameStride = 4;
+    final frameStride = n > 4 ? 4 : 1;
     const pixelStride = 2;
     final sampledW = (width + pixelStride - 1) ~/ pixelStride;
     final sampledH = (height + pixelStride - 1) ~/ pixelStride;

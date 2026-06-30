@@ -8,6 +8,7 @@ import '../../../core/services/ffmpeg/ffmpeg_progress.dart';
 import '../../../core/services/ffmpeg/ffmpeg_service.dart';
 import '../../../core/services/providers.dart';
 import '../../../core/services/recents/recents_service.dart';
+import '../../../core/utils/font_registry.dart';
 import '../../../core/utils/font_resolver.dart';
 import '../model/text_item.dart';
 
@@ -91,6 +92,7 @@ class TextOverlayController extends AsyncNotifier<TextOverlayState> {
 
   @override
   Future<TextOverlayState> build() async {
+    await FontRegistry.ensureLoaded();
     final fonts = <TextStyleKind, String>{};
     for (final style in TextStyleKind.values) {
       final path = FontResolver.fileForStyle(style);
@@ -175,6 +177,7 @@ class TextOverlayController extends AsyncNotifier<TextOverlayState> {
     String? fontColor,
     String? strokeColor,
     int? strokeWidth,
+    TextFont? font,
   }) {
     final s = state.requireValue;
     final sel = s.selected;
@@ -186,6 +189,7 @@ class TextOverlayController extends AsyncNotifier<TextOverlayState> {
       fontColor: fontColor,
       strokeColor: strokeColor,
       strokeWidth: strokeWidth,
+      font: font,
     );
     state = AsyncData(s.copyWith(
       items: s.items.map((i) => i.id == sel.id ? updated : i).toList(),

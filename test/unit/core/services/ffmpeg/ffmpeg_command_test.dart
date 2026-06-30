@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gifolomora/core/services/ffmpeg/ffmpeg_command.dart';
 
+
 void main() {
   group('FfmpegCommand.imagesToGif', () {
     test('includes concat demuxer flags and paths', () {
@@ -183,6 +184,21 @@ void main() {
       expect(filter, contains(r'A\:B'));
     });
 
+    test('apostrophe in text is single-quote-escaped (not bare backslash)', () {
+      // Regression: ffmpeg treats `\` as literal inside '...', so `\'` leaves
+      // the quote open and the trailing ,split gets swallowed → EINVAL (-22).
+      // The literal apostrophe must be emitted as '\'' (close/escape/reopen).
+      final args = FfmpegCommand.textOverlay(
+        inputPath: '/in.gif',
+        outputPath: '/out.gif',
+        text: "it's",
+        fontFile: '/f.ttf',
+      );
+      final filter = args.firstWhere((a) => a.contains('drawtext='));
+      expect(filter, contains("text='it'\\''s'"));
+      expect(filter, isNot(contains("\\'s'")));
+    });
+
     test('top position: y=fontSize', () {
       final args = FfmpegCommand.textOverlay(
         inputPath: '/in.gif',
@@ -230,6 +246,163 @@ void main() {
       );
       final filter = args.firstWhere((a) => a.contains('drawtext='));
       expect(filter, contains(r'C\:/Windows/Fonts/arial.ttf'));
+    });
+  });
+
+  group('FfmpegCommand.videoEdit textSpecs', () {
+    test('drawtext bakes before crop/scale so text scales with content', () {
+      final args = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+        cropX: 10,
+        cropY: 20,
+        cropW: 100,
+        cropH: 80,
+        textSpecs: const [
+          DrawTextSpec(
+            text: 'Hi',
+            fontFile: '/f.ttf',
+            x: 5,
+            y: 6,
+            fontSize: 30,
+            fontColorHex: 'FFFFFF',
+            strokeColorHex: '000000',
+            strokeWidth: 0,
+          ),
+        ],
+      );
+      final vf = args[args.indexOf('-vf') + 1];
+      expect(vf, contains('drawtext='));
+      expect(vf.indexOf('drawtext='), lessThan(vf.indexOf('crop=')));
+    });
+
+    test('no drawtext when textSpecs null', () {
+      final args = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+      );
+      final vf = args[args.indexOf('-vf') + 1];
+      expect(vf, isNot(contains('drawtext=')));
+    });
+  });
+
+  group('FfmpegCommand.videoEdit volume', () {
+    test('volume filter added to -af when changed and audio present', () {
+      final args = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+        hasAudio: true,
+        volume: 1.5,
+      );
+      final af = args[args.indexOf('-af') + 1];
+      expect(af, contains('volume=1.500'));
+    });
+
+    test('volume chains after atempo when speed also changed', () {
+      final args = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+        hasAudio: true,
+        speedFactor: 2.0,
+        volume: 0.5,
+      );
+      final af = args[args.indexOf('-af') + 1];
+      expect(af.indexOf('atempo'), lessThan(af.indexOf('volume=')));
+    });
+
+    test('no -af when volume unchanged and no speed change', () {
+      final args = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+        hasAudio: true,
+      );
+      expect(args.contains('-af'), isFalse);
+    });
+
+    test('volume ignored when no audio (-an)', () {
+      final args = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+        volume: 2.0,
+      );
+      expect(args.contains('-an'), isTrue);
+      expect(args.contains('-af'), isFalse);
+    });
+  });
+
+  group('FfmpegCommand.videoEdit with keepRanges (cuts)', () {
+    const twoRanges = <CutSegment>[
+      (startMs: 0, endMs: 3000),
+      (startMs: 5000, endMs: 10000),
+    ];
+
+    test('select+setpts prepended to -vf, no -ss/-t', () {
+      final args = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+        keepRanges: twoRanges,
+        startMs: 0,
+        durationMs: 10000,
+      );
+      final vf = args[args.indexOf('-vf') + 1];
+      expect(vf, contains("select='between(t,0.000,3.000)+between(t,5.000,10.000)',setpts=N/FRAME_RATE/TB"));
+      expect(args, isNot(contains('-ss')));
+      expect(args, isNot(contains('-t')));
+    });
+
+    test('hasAudio → aselect+asetpts first in -af', () {
+      final args = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+        hasAudio: true,
+        keepRanges: twoRanges,
+      );
+      final af = args[args.indexOf('-af') + 1];
+      expect(
+        af,
+        contains("aselect='between(t,0.000,3.000)+between(t,5.000,10.000)',asetpts=N/SR/TB"),
+      );
+    });
+
+    test('videoEditToGif: select first in filtergraph, before fps', () {
+      final args = FfmpegCommand.videoEditToGif(
+        inputPath: '/in.mp4',
+        outputPath: '/out.gif',
+        keepRanges: twoRanges,
+      );
+      final fc = args[args.indexOf('-filter_complex') + 1];
+      expect(fc.indexOf('select='), lessThan(fc.indexOf('fps=')));
+      expect(args, isNot(contains('-ss')));
+      expect(args, isNot(contains('-t')));
+    });
+
+    test('null keepRanges → -ss/-t path unchanged (regression guard)', () {
+      final without = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+        startMs: 1000,
+        durationMs: 5000,
+      );
+      final withNull = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+        startMs: 1000,
+        durationMs: 5000,
+        keepRanges: null,
+      );
+      expect(without, equals(withNull));
+      expect(withNull, contains('-ss'));
+      expect(withNull, contains('-t'));
     });
   });
 

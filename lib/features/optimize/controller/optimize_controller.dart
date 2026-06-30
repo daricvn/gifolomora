@@ -13,6 +13,7 @@ class OptimizeState {
     this.mediaInfo,
     this.colors = 128,
     this.lossy = 40,
+    this.frameDrop = 0,
     this.outputGif,
     this.progress,
     this.isProcessing = false,
@@ -24,6 +25,7 @@ class OptimizeState {
   final MediaInfo? mediaInfo;
   final int colors;
   final int lossy;
+  final int frameDrop; // 0 = keep all; 2/3/4 = remove 1 of every N frames
   final File? outputGif;
   final FfmpegProgress? progress;
   final bool isProcessing;
@@ -39,6 +41,7 @@ class OptimizeState {
     Object? mediaInfo = _s,
     int? colors,
     int? lossy,
+    int? frameDrop,
     Object? outputGif = _s,
     Object? progress = _s,
     bool? isProcessing,
@@ -50,6 +53,7 @@ class OptimizeState {
       mediaInfo: identical(mediaInfo, _s) ? this.mediaInfo : mediaInfo as MediaInfo?,
       colors: colors ?? this.colors,
       lossy: lossy ?? this.lossy,
+      frameDrop: frameDrop ?? this.frameDrop,
       outputGif: identical(outputGif, _s) ? this.outputGif : outputGif as File?,
       progress: identical(progress, _s) ? this.progress : progress as FfmpegProgress?,
       isProcessing: isProcessing ?? this.isProcessing,
@@ -84,6 +88,12 @@ class OptimizeController extends AsyncNotifier<OptimizeState> {
     state = AsyncData(s.copyWith(lossy: lossy, outputGif: null, error: null));
   }
 
+  void setFrameDrop(int frameDrop) {
+    final s = state.valueOrNull ?? const OptimizeState();
+    state =
+        AsyncData(s.copyWith(frameDrop: frameDrop, outputGif: null, error: null));
+  }
+
   Future<void> generate() async {
     final s = state.valueOrNull;
     if (s == null || s.inputFile == null || s.isProcessing) return;
@@ -95,11 +105,7 @@ class OptimizeController extends AsyncNotifier<OptimizeState> {
       input: s.inputFile!,
       colors: s.colors,
       lossy: s.lossy,
-      totalMs: s.mediaInfo?.durationMs,
-      onProgress: (p) {
-        final cur = state.valueOrNull;
-        if (cur != null) state = AsyncData(cur.copyWith(progress: p));
-      },
+      frameDrop: s.frameDrop,
     );
 
     final cur = state.valueOrNull ?? const OptimizeState();

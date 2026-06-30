@@ -40,6 +40,7 @@ lib/
                     # EmptyState, AppToast (snackbar helper)
     services/
       ffmpeg/       # backend interface + 2 impls + factory + service + command/progress/encoder models
+                    # + DrawTextSpec model (absolute-px text layer for multi-item overlay)
       gif/          # GifLzw — variable-width LZW encoder used by GifOptimizer
       gif_optimizer.dart  # pure-Dart GIF optimizer — no gifsicle; works on all platforms
       files/        # TempFileService, ExportService, MediaProbeService
@@ -47,12 +48,14 @@ lib/
       settings/     # SettingsService + AppSettings (shared_preferences)
       recents/      # RecentsService + RecentExport (last 10 exports, shared_preferences)
       providers.dart# all Riverpod providers (manual) + SettingsNotifier + RecentsNotifier
-    utils/          # Result<T,E>, logger, FontResolver (system font paths for drawtext)
+    utils/          # Result<T,E>, logger, FontResolver (system font paths for drawtext), FontRegistry (bundled custom fonts)
   features/
     home/           # view/ + widgets/ (HomeHero, FeaturedToolCard, ToolCard, RecentsStrip)
                     # + data/tool_catalog.dart (drives the grid)
     _shared/
-      widgets/      # FileDropZone, MediaPreview, OptionSlider, ExportBottomSheet
+      widgets/      # FileDropZone, MediaPreview, OptionSlider, ExportBottomSheet,
+                    # TextOverlayControls (TextFormatCard, TextLayersPanel, showTextColorWheel —
+                    #   shared between Text Overlay screen and Video Studio)
     <tool>/         # view/ + controller/ (+ widgets/) per tool — 7 tools (Video Studio owns widgets/video_trim_slider.dart)
     about/          # static about screen
     settings/       # default-quality sliders + clear-history
@@ -104,14 +107,38 @@ abstract interface class FfmpegBackend {
 `FfmpegCommand` builds all arg lists / filter graphs. `FfmpegProgress` is the progress model.
 
 **GIF-source commands:** `imagesToGif`, `videoToGif`, `resize`, `cropGif`, `textOverlay`,
-`reverseGif`, `changeSpeed` — single-purpose ops retained for non-Studio tools.
+`textOverlayMulti`, `reverseGif`, `changeSpeed` — single-purpose ops retained for non-Studio tools.
+`textOverlayMulti` accepts `List<DrawTextSpec>` (absolute px coords, per-item color/stroke) and
+chains multiple `drawtext` segments; used by the Text Overlay tool's multi-layer export and by
+Video Studio's GIF pipeline.
 
 **Composite commands (Video Studio):**
-- `videoEdit` — crop · resize · speed · trim · text · audio in one pass; selects encoder from `VideoEncoder.platformCandidates()`.
+- `videoEdit` — crop · resize · speed · trim · text · audio in one pass; selects encoder from `VideoEncoder.platformCandidates()`. Accepts `List<DrawTextSpec>? textSpecs` (multi-layer, positioned before crop/scale so text transforms with content).
 - `videoStreamCopy` — no-op fast path: stream-copy when no edits.
 - `videoEditToGif` — bakes video layers (crop · fps · resize · speed · text) → GIF palette in one pass.
 - `gifEdit` — applies crop · fps · resize · speed · text · loop · boomerang to an existing GIF; `boomerang` appends a reversed stream via `concat=n=2` for ping-pong.
 - `buildConcatFileContent` — generates concat demuxer file listing frames at a given fps.
+
+### Text overlay models
+
+`DrawTextSpec` (in `ffmpeg_command.dart`) — absolute-pixel text layer passed to `textOverlayMulti`
+and `videoEdit`. Fields: `text`, `fontFile`, `x`, `y`, `fontSize`, `fontColorHex` (RRGGBB),
+`strokeColorHex` (RRGGBB), `strokeWidth` (0 = none). Built from `TextItem` via
+`FfmpegService._specsFromItems(items, mediaInfo)`.
+
+`TextItem` (in `features/text_overlay/model/text_item.dart`) — UI layer model. Stores normalized
+position (`nx`/`ny` in [0,1)), `fontSize` (media px), hex colors, `strokeWidth`, `TextStyleKind`.
+Shared by the Text Overlay tool and Video Studio. Static helpers convert between normalized/pixel/
+display-scale spaces.
+
+`TextStyleKind` enum: `regular | bold | italic | boldItalic` — drives `FontResolver.fileForStyle()`
+and the Flutter `FontLoader` preview registration.
+
+`TextFont` enum: `system | dancingScript | sourceCodePro | lobsterTwo | caveat` — per-layer typeface.
+`system` uses `FontResolver` (platform fonts); the rest are bundled `assets/fonts/` (Regular+Bold)
+managed by `FontRegistry.ensureLoaded()`, which materializes each to the app-support dir (ffmpeg
+`fontfile=`) and registers a `FontLoader` family (preview). `FontRegistry.pathFor/familyFor(font,
+style)` resolve both; italic styles fall back to upright (no italic faces bundled).
 
 ### FfmpegService high-level API
 
@@ -126,15 +153,18 @@ videoToGif({ input, start, duration, fps, width, onProgress, totalMs })
 probe(File)                       // → MediaInfo?
 resizeGif({ input, width, height, ... })
 cropGif({ input, x, y, cropWidth, cropHeight, ... })
-optimizeGif({ input, colors, lossy, loopCount, ... })  // delegates to GifOptimizer (pure-Dart)
+optimizeGif({ input, colors, lossy, loopCount, frameDrop })
+            // delegates to GifOptimizer (pure-Dart); frameDrop 0/2/3/4
 textOverlay({ input, text, fontFile, fontSize, fontColor, position, ... })
+textOverlayMulti({ input, items, mediaInfo, ... })
+            // items: List<TextItem> → resolved to DrawTextSpec[] via _specsFromItems()
 reverseGif({ input, ... })
 changeSpeed({ input, factor, ... })
 
 // Video Studio composite ops
-editVideo({ input, cropX/Y/W/H, scaleW/H, speedFactor, hasAudio, encoderCandidates,
-            startMs, durationMs, overlayText, overlayFontFile, ... })
-            // encoder fallback: tries each candidate in order until one succeeds
+editVideo({ input, cropX/Y/W/H, scaleW/H, speedFactor, hasAudio, volume,
+            encoderCandidates, startMs, durationMs, overlayItems, mediaInfo, ... })
+            // overlayItems: List<TextItem>? — baked before crop/scale; encoder fallback loop
 bakeVideoToGif({ input, cropX/Y/W/H, scaleW, speedFactor, fps, startMs, durationMs, ... })
 editGif({ input, cropX/Y/W/H, scaleW, speedFactor, overlayText, fps,
           loopCount, boomerang, ... })
@@ -163,7 +193,7 @@ binary, works on all platforms. Entire pipeline runs in an `Isolate`.
 5. Per-frame bounding-box crop — only the changed pixel region written in each Image Descriptor
 6. Custom GIF writer + `GifLzw.encode` (`lib/core/services/gif/gif_lzw.dart`) — spec-correct variable-width LZW
 
-**Parameters:** `colors` 2–256, `lossy` 0–200 (0 = lossless diff; higher = more transparency, smaller file), `loopCount` (null = preserve source NETSCAPE2.0 count).
+**Parameters:** `colors` 2–256, `lossy` 0–200 (0 = lossless diff; higher = more transparency, smaller file), `loopCount` (null = preserve source NETSCAPE2.0 count), `frameDrop` 0/2/3/4 (0 = keep all; N = drop 1 of every N frames, folding its duration into the previous kept frame so total playback time is unchanged; frame 0 always kept).
 
 ---
 
@@ -241,10 +271,14 @@ options, last generated preview/output, `FfmpegProgress?`, processing flag, and 
 | `refine` | Resize, Crop, Text Overlay, Optimize, Effects | compact grid (`ToolCard`) |
 
 Video Studio handles both video **and** GIF source files in one screen:
-- `EditStage.video` — non-destructive layers (crop/resize/speed/trim/text); `makeGif()` bakes them → GIF.
+- `EditStage.video` — non-destructive layers (crop/resize/speed/trim/text/volume); `makeGif()` bakes them → GIF.
 - `EditStage.gif` — `applyEdits()` bakes GIF edits (+ fps/loopCount/boomerang/optimize) into a temp and pushes a history entry; `undo()`/`redo()` navigates the `_GifVersion` stack (each entry owns its temp dir).
 - `StudioTool` enum: `crop | resize | speed | trim | text | optimize | properties` — drives the dock panel.
-- `exportVideo()` — edits video (encoder fallback); `exportGif()` — two-step edit + optional optimize; `discardGif()` returns to video stage.
+- Multi-item text overlay (`textItems: List<TextItem>`, up to 20) is shared with the Text Overlay tool. Draggable in the preview canvas; `TextFormatCard`/`TextLayersPanel` from `text_overlay_controls.dart`. Font files resolved per `TextStyleKind` (regular/bold/italic/boldItalic), registered with Flutter `FontLoader` for preview fidelity.
+- GIF pipeline order: `textOverlayMulti` → `editGif` → `optimizeGif` (text bakes first against source dimensions so later crop/scale transforms the texted frames).
+- `applyVideoEdits()` — bakes current video edits into a temp and swaps in as live preview; sets `editsApplied` so export skips re-encoding. Frees the prior baked temp on supersede.
+- `exportVideo()` — edits video (encoder fallback); `exportGif()` — runs GIF pipeline + save; `discardGif()` returns to video stage.
+- `VideoStudioState.volume` — audio gain 0–2.0; baked into encode's audio filter; ignored for GIF.
 
 Routes: `/video-studio`, `/images-to-gif`, `/resize`, `/crop`, `/text-overlay`, `/optimize`,
 `/effects`, plus `/settings` and `/about`. All non-home routes use a fade + 4%-slide transition.
@@ -269,6 +303,13 @@ Every tool screen shares the 4-step skeleton:
 Export is always **user-driven**: the full job writes to a temp job dir via `TempFileService`,
 then `ExportService` calls `file_picker.saveFile()`. No silent gallery writes. Applies to both
 platforms. After the copy, `FfmpegService.cleanCurrentJob()` removes the temp dir.
+
+---
+
+## Web marketing site
+
+`web/gifolomora-intro-web/` — standalone Vite/React marketing page. **Not part of the Flutter build.**
+Separate `package.json`; the `web/` directory is untracked (`??` in git status).
 
 ---
 
@@ -305,6 +346,7 @@ platforms. After the copy, `FfmpegService.cleanCurrentJob()` removes the temp di
 | `path_provider` + `path` | 2.1.4 / — | temp dirs, path joins |
 | `image` | 4.0.0 | GifOptimizer — GIF decode + OctreeQuantizer |
 | `desktop_drop` | 0.4.4 | drag-and-drop file acceptance (Windows/macOS/Linux) |
+| `flutter_colorpicker` | — | HSV/hue-wheel color picker used in `text_overlay_controls.dart` |
 | `package_info_plus` | 8.0.0 | app version / build metadata |
 | ffmpeg / ffprobe (Windows) | bundled | bundled binaries (resolved at runtime) |
 

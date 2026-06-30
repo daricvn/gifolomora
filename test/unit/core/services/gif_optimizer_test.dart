@@ -83,6 +83,27 @@ void main() {
       expect(lossy.lengthSync(), lessThanOrEqualTo(lossless.lengthSync()));
     });
 
+    test('frameDrop removes 1 of every N frames and preserves total time',
+        () async {
+      // 4 frames @ 10cs each = 40cs total. Drop 1 of every 2 → 2 kept frames,
+      // each absorbing a dropped frame's duration → still 40cs total.
+      final encoder = img.GifEncoder(repeat: 0);
+      for (var f = 0; f < 4; f++) {
+        final frame = img.Image(width: 32, height: 32, numChannels: 3);
+        img.fill(frame, color: img.ColorRgb8(10 + f * 40, 30, 30));
+        encoder.addFrame(frame, duration: 10); // centiseconds
+      }
+      final src = encoder.finish()!;
+      final input = File('${tmp.path}/drop_in.gif')..writeAsBytesSync(src);
+      final output = File('${tmp.path}/drop_out.gif');
+      await GifOptimizer.optimize(input, output, colors: 64, frameDrop: 2);
+      final decoded = img.decodeGif(output.readAsBytesSync());
+      expect(decoded!.numFrames, 2, reason: 'should drop frames 1 and 3');
+      final totalMs = decoded.frames
+          .fold<int>(0, (sum, fr) => sum + fr.frameDuration);
+      expect(totalMs, 400, reason: 'total playback time must be preserved (ms)');
+    });
+
     test('rejects invalid GIF data', () async {
       final input = File('${tmp.path}/bad.gif')
         ..writeAsBytesSync(Uint8List.fromList([1, 2, 3, 4]));

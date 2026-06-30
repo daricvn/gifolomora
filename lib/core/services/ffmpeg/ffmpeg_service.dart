@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import '../files/temp_file_service.dart';
 import '../gif_optimizer.dart';
+import '../../utils/font_registry.dart';
 import '../../utils/font_resolver.dart';
 import '../../utils/logger.dart';
 import '../../utils/result.dart';
@@ -156,8 +157,7 @@ class FfmpegService {
     int colors = 128,
     int lossy = 40,
     int? loopCount,
-    void Function(FfmpegProgress)? onProgress,
-    int? totalMs,
+    int frameDrop = 0,
   }) async {
     final jobDir = await _temp.createJobDir();
     _currentJobDir = jobDir;
@@ -169,6 +169,7 @@ class FfmpegService {
         colors: colors,
         lossy: lossy,
         loopCount: loopCount,
+        frameDrop: frameDrop,
       );
       return Ok(File(outputPath));
     } catch (e) {
@@ -210,6 +211,29 @@ class FfmpegService {
     }
   }
 
+  /// Maps text layers to ffmpeg draw specs: normalized positions → source px
+  /// (against [mediaInfo] dims), font resolved per style. Shared by the GIF
+  /// [textOverlayMulti] bake and the video [editVideo] bake.
+  static List<DrawTextSpec> _specsFromItems(
+      List<TextItem> items, MediaInfo mediaInfo) {
+    final mw = mediaInfo.width.toDouble();
+    final mh = mediaInfo.height.toDouble();
+    return items
+        .map((item) => DrawTextSpec(
+              text: item.text.trim(),
+              fontFile: FontRegistry.pathFor(item.font, item.style) ??
+                  FontResolver.fileForStyle(item.style) ??
+                  '',
+              x: TextItem.pxX(item.nx, mw),
+              y: TextItem.pxY(item.ny, mh),
+              fontSize: item.fontSize,
+              fontColorHex: item.fontColor,
+              strokeColorHex: item.strokeColor,
+              strokeWidth: item.strokeWidth,
+            ))
+        .toList();
+  }
+
   Future<Result<File, FfmpegError>> textOverlayMulti({
     required File input,
     required List<TextItem> items,
@@ -221,20 +245,7 @@ class FfmpegService {
     _currentJobDir = jobDir;
     try {
       final outputPath = await _temp.tempOutputPath(jobDir, 'gif');
-      final mw = mediaInfo.width.toDouble();
-      final mh = mediaInfo.height.toDouble();
-      final specs = items
-          .map((item) => DrawTextSpec(
-                text: item.text.trim(),
-                fontFile: FontResolver.fileForStyle(item.style) ?? '',
-                x: TextItem.pxX(item.nx, mw),
-                y: TextItem.pxY(item.ny, mh),
-                fontSize: item.fontSize,
-                fontColorHex: item.fontColor,
-                strokeColorHex: item.strokeColor,
-                strokeWidth: item.strokeWidth,
-              ))
-          .toList();
+      final specs = _specsFromItems(items, mediaInfo);
       final args = FfmpegCommand.textOverlayMulti(
         inputPath: input.path,
         outputPath: outputPath,
@@ -303,27 +314,35 @@ class FfmpegService {
     int? scaleH,
     double speedFactor = 1.0,
     bool hasAudio = false,
+    double volume = 1.0,
     List<String>? encoderCandidates,
     void Function(FfmpegProgress)? onProgress,
     int? totalMs,
     int? startMs,
     int? durationMs,
-    String? overlayText,
-    String? overlayFontFile,
-    int overlayFontSize = 36,
-    String overlayFontColor = 'white',
-    String overlayPosition = 'center',
+    List<TextItem>? overlayItems,
+    MediaInfo? mediaInfo,
+    List<CutSegment>? keepRanges,
+    int? keepRangesOutputMs,
   }) async {
     final jobDir = await _temp.createJobDir();
     _currentJobDir = jobDir;
 
-    final hasText = overlayText != null && overlayText.isNotEmpty && overlayFontFile != null;
+    final items =
+        overlayItems?.where((i) => i.text.trim().isNotEmpty).toList() ??
+            const <TextItem>[];
+    final hasText = items.isNotEmpty && mediaInfo != null;
+    final textSpecs = hasText ? _specsFromItems(items, mediaInfo) : null;
     final hasTrim = (startMs != null && startMs > 0) || (durationMs != null && durationMs > 0);
+    final volumeChanged = hasAudio && (volume - 1.0).abs() >= 0.01;
+    final hasCutRanges = keepRanges != null && keepRanges.length >= 2;
     final isNoOp = cropX == null &&
         scaleW == null &&
         (speedFactor - 1.0).abs() < 0.001 &&
         !hasText &&
-        !hasTrim;
+        !hasTrim &&
+        !volumeChanged &&
+        !hasCutRanges;
 
     try {
       final outputPath = await _temp.tempOutputPath(jobDir, 'mp4');
@@ -340,11 +359,12 @@ class FfmpegService {
       final candidates =
           encoderCandidates ?? VideoEncoder.platformCandidates();
 
-      final effectiveTotalMs = durationMs != null && durationMs > 0
-          ? durationMs
-          : (totalMs != null && (speedFactor - 1.0).abs() > 0.001
-              ? (totalMs / speedFactor).round()
-              : totalMs);
+      final effectiveTotalMs = keepRangesOutputMs ??
+          (durationMs != null && durationMs > 0
+              ? durationMs
+              : (totalMs != null && (speedFactor - 1.0).abs() > 0.001
+                  ? (totalMs / speedFactor).round()
+                  : totalMs));
 
       for (int i = 0; i < candidates.length; i++) {
         final encoder = candidates[i];
@@ -360,13 +380,11 @@ class FfmpegService {
           speedFactor: speedFactor,
           encoder: encoder,
           hasAudio: hasAudio,
+          volume: volume,
           startMs: startMs,
           durationMs: durationMs,
-          drawText: overlayText,
-          drawTextFont: overlayFontFile,
-          drawTextSize: overlayFontSize,
-          drawTextColor: overlayFontColor,
-          drawTextPosition: overlayPosition,
+          textSpecs: textSpecs,
+          keepRanges: keepRanges,
         );
         final result = await _backend.run(
           args,
@@ -386,7 +404,7 @@ class FfmpegService {
     }
   }
 
-  /// Bakes the current video edits (crop · resize · speed · trim) into a GIF.
+  /// Bakes the current video edits (crop · resize · speed · trim · cut) into a GIF.
   /// The job dir is kept (output gif is the new editing source); the caller
   /// owns its cleanup via [cleanJobAt].
   Future<Result<File, FfmpegError>> bakeVideoToGif({
@@ -402,6 +420,8 @@ class FfmpegService {
     int? totalMs,
     int? startMs,
     int? durationMs,
+    List<CutSegment>? keepRanges,
+    int? keepRangesOutputMs,
   }) async {
     final jobDir = await _temp.createJobDir();
     _currentJobDir = jobDir;
@@ -419,12 +439,14 @@ class FfmpegService {
         fps: fps,
         startMs: startMs,
         durationMs: durationMs,
+        keepRanges: keepRanges,
       );
-      final effectiveTotalMs = durationMs != null && durationMs > 0
-          ? durationMs
-          : (totalMs != null && (speedFactor - 1.0).abs() > 0.001
-              ? (totalMs / speedFactor).round()
-              : totalMs);
+      final effectiveTotalMs = keepRangesOutputMs ??
+          (durationMs != null && durationMs > 0
+              ? durationMs
+              : (totalMs != null && (speedFactor - 1.0).abs() > 0.001
+                  ? (totalMs / speedFactor).round()
+                  : totalMs));
       return await _backend.run(args, outputPath,
           onProgress: onProgress, totalMs: effectiveTotalMs);
     } catch (e) {

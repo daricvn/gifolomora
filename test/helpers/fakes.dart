@@ -13,6 +13,7 @@ class FakeFfmpegBackend implements FfmpegBackend {
   Result<File, FfmpegError> nextResult = Ok(File('/fake/output.gif'));
   MediaInfo? nextProbeResult;
   bool cancelCalled = false;
+  int runCount = 0;
 
   @override
   Future<Result<File, FfmpegError>> run(
@@ -22,6 +23,7 @@ class FakeFfmpegBackend implements FfmpegBackend {
     int? totalFrames,
     int? totalMs,
   }) async {
+    runCount++;
     onProgress?.call(const FfmpegProgress(fraction: 1.0));
     return nextResult;
   }
@@ -122,6 +124,7 @@ class FakeFfmpegService extends FfmpegService {
     int colors = 128,
     int lossy = 40,
     int? loopCount,
+    int frameDrop = 0,
     void Function(FfmpegProgress)? onProgress,
     int? totalMs,
   }) async {
@@ -194,6 +197,16 @@ class FakeExportService extends ExportService {
   @override
   Future<File?> saveGif(File tempFile,
       {String defaultName = 'animated.gif'}) async {
+    return returnFile;
+  }
+
+  /// Records the temp file handed to the last saveVideo call.
+  File? savedVideoSource;
+
+  @override
+  Future<File?> saveVideo(File tempFile,
+      {String defaultName = 'edited.mp4'}) async {
+    savedVideoSource = tempFile;
     return returnFile;
   }
 }

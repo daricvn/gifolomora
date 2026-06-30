@@ -1,18 +1,18 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
+import '../../../core/utils/font_registry.dart';
 import '../../../core/widgets/common/gradient_scaffold.dart';
 import '../../../core/widgets/glass/glass_app_bar.dart';
 import '../../../core/widgets/glass/glass_container.dart';
 import '../../_shared/widgets/export_bottom_sheet.dart';
 import '../../_shared/widgets/file_drop_zone.dart';
 import '../../_shared/widgets/media_preview.dart';
-import '../../_shared/widgets/option_slider.dart';
+import '../../_shared/widgets/text_overlay_controls.dart';
 import '../controller/text_overlay_controller.dart';
 import '../model/text_item.dart';
 
@@ -20,12 +20,6 @@ import '../model/text_item.dart';
 // ascent space above caps. Lift the preview text by this fraction of fontSize so
 // the on-screen top matches the rendered output. (calibration knob)
 const double _kTextTopBias = 0.10;
-
-// ── Hex helpers ────────────────────────────────────────────────────────────────
-Color _colorFromHex(String hex) =>
-    Color(int.parse('FF${hex.padLeft(6, '0')}', radix: 16));
-String _hexFromColor(Color c) =>
-    (c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase();
 
 class TextOverlayScreen extends ConsumerWidget {
   const TextOverlayScreen({super.key});
@@ -121,13 +115,26 @@ class TextOverlayScreen extends ConsumerWidget {
             _PreviewEditor(state: state, ctrl: ctrl),
             const SizedBox(height: 12),
             if (state.selected != null)
-              _FormatCard(
+              TextFormatCard(
                 key: ValueKey(state.selectedId),
                 item: state.selected!,
-                ctrl: ctrl,
+                onText: (v) => ctrl.updateSelected(text: v),
+                onStyle: (v) => ctrl.updateSelected(style: v),
+                onFont: (v) => ctrl.updateSelected(font: v),
+                onFontSize: (v) => ctrl.updateSelected(fontSize: v),
+                onFontColor: (v) => ctrl.updateSelected(fontColor: v),
+                onStrokeColor: (v) => ctrl.updateSelected(strokeColor: v),
+                onStrokeWidth: (v) => ctrl.updateSelected(strokeWidth: v),
               ),
             const SizedBox(height: 12),
-            _TextListPanel(state: state, ctrl: ctrl),
+            TextLayersPanel(
+              items: state.items,
+              selectedId: state.selectedId,
+              canAdd: state.canAdd,
+              onAdd: ctrl.addText,
+              onSelect: ctrl.select,
+              onDelete: ctrl.removeText,
+            ),
 
             // ── Step 3: Generate / Preview ───────────────────────────────
             const SizedBox(height: 24),
@@ -231,7 +238,8 @@ class _PreviewEditor extends ConsumerWidget {
                         mh: mh,
                         ctrl: ctrl,
                         ref: ref,
-                        fontFamily: state.fontFamilies[item.style],
+                        fontFamily: FontRegistry.familyFor(item.font, item.style) ??
+                            state.fontFamilies[item.style],
                       ),
                   ],
                 ),
@@ -287,8 +295,8 @@ class _DraggableText extends StatelessWidget {
                 item.style == TextStyleKind.boldItalic)
         ? FontStyle.italic
         : FontStyle.normal;
-    final fill = _colorFromHex(item.fontColor);
-    final strokeC = _colorFromHex(item.strokeColor);
+    final fill = colorFromHex(item.fontColor);
+    final strokeC = colorFromHex(item.strokeColor);
     // ffmpeg borderw=N grows the glyph N px each side; Flutter's centered stroke
     // grows W/2 — double it so the preview footprint matches the output.
     final sw = item.strokeWidth * 2 * scale;
@@ -356,451 +364,6 @@ class _DraggableText extends StatelessWidget {
       ),
     );
   }
-}
-
-// ── Format card (selected item) ──────────────────────────────────────────────────
-
-class _FormatCard extends StatefulWidget {
-  const _FormatCard({super.key, required this.item, required this.ctrl});
-  final TextItem item;
-  final TextOverlayController ctrl;
-
-  @override
-  State<_FormatCard> createState() => _FormatCardState();
-}
-
-class _FormatCardState extends State<_FormatCard> {
-  late final TextEditingController _textCtrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _textCtrl = TextEditingController(text: widget.item.text);
-  }
-
-  @override
-  void dispose() {
-    _textCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _pickColor(bool isFill) async {
-    final initial = isFill ? widget.item.fontColor : widget.item.strokeColor;
-    final hex = await _showColorWheel(context, initial);
-    if (hex == null) return;
-    if (isFill) {
-      widget.ctrl.updateSelected(fontColor: hex);
-    } else {
-      widget.ctrl.updateSelected(strokeColor: hex);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final item = widget.item;
-    final ctrl = widget.ctrl;
-    return GlassContainer(
-      borderRadius: 20,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            controller: _textCtrl,
-            onChanged: (v) => ctrl.updateSelected(text: v),
-            style: const TextStyle(color: AppColors.textHi, fontSize: 14),
-            maxLines: 1,
-            decoration: InputDecoration(
-              hintText: 'Text…',
-              hintStyle: const TextStyle(color: AppColors.textLo, fontSize: 14),
-              filled: true,
-              fillColor: AppColors.glassTint,
-              isDense: true,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: AppColors.glassStroke),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: AppColors.glassStroke),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: AppColors.accentA),
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          const Text('Style',
-              style: TextStyle(color: AppColors.textLo, fontSize: 12)),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              for (final s in TextStyleKind.values) ...[
-                _StyleChip(
-                  kind: s,
-                  selected: item.style == s,
-                  onTap: () => ctrl.updateSelected(style: s),
-                ),
-                const SizedBox(width: 8),
-              ],
-            ],
-          ),
-          const SizedBox(height: 14),
-          OptionSlider(
-            label: 'Font Size',
-            value: item.fontSize.toDouble(),
-            min: 12,
-            max: 96,
-            divisions: 84,
-            unit: 'px',
-            onChanged: (v) => ctrl.updateSelected(fontSize: v.round()),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _ColorButton(
-                  label: 'Fill',
-                  hex: item.fontColor,
-                  onTap: () => _pickColor(true),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _ColorButton(
-                  label: 'Stroke',
-                  hex: item.strokeColor,
-                  onTap: () => _pickColor(false),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          OptionSlider(
-            label: 'Stroke Width',
-            value: item.strokeWidth.toDouble(),
-            min: 0,
-            max: 12,
-            divisions: 12,
-            displayValue:
-                item.strokeWidth == 0 ? 'Off' : '${item.strokeWidth}px',
-            onChanged: (v) => ctrl.updateSelected(strokeWidth: v.round()),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StyleChip extends StatelessWidget {
-  const _StyleChip(
-      {required this.kind, required this.selected, required this.onTap});
-  final TextStyleKind kind;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final (label, weight, style) = switch (kind) {
-      TextStyleKind.regular => ('Aa', FontWeight.w400, FontStyle.normal),
-      TextStyleKind.bold => ('Aa', FontWeight.w800, FontStyle.normal),
-      TextStyleKind.italic => ('Aa', FontWeight.w400, FontStyle.italic),
-      TextStyleKind.boldItalic => ('Aa', FontWeight.w800, FontStyle.italic),
-    };
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: 44,
-        height: 38,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.accentA.withValues(alpha: 0.25)
-              : AppColors.glassTint,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: selected ? AppColors.accentA : AppColors.glassStroke,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: selected ? AppColors.accentB : AppColors.textLo,
-            fontSize: 15,
-            fontWeight: weight,
-            fontStyle: style,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ColorButton extends StatelessWidget {
-  const _ColorButton(
-      {required this.label, required this.hex, required this.onTap});
-  final String label;
-  final String hex;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: AppColors.glassTint,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppColors.glassStroke),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 20,
-              height: 20,
-              decoration: BoxDecoration(
-                color: _colorFromHex(hex),
-                shape: BoxShape.circle,
-                border:
-                    Border.all(color: Colors.white.withValues(alpha: 0.4)),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Text(label,
-                style:
-                    const TextStyle(color: AppColors.textHi, fontSize: 13)),
-            const Spacer(),
-            Text('#$hex',
-                style:
-                    const TextStyle(color: AppColors.textLo, fontSize: 11)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── Text list panel ───────────────────────────────────────────────────────────────
-
-class _TextListPanel extends StatelessWidget {
-  const _TextListPanel({required this.state, required this.ctrl});
-  final TextOverlayState state;
-  final TextOverlayController ctrl;
-
-  @override
-  Widget build(BuildContext context) {
-    return GlassContainer(
-      borderRadius: 20,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Text('Text Layers',
-                  style: TextStyle(
-                      color: AppColors.textHi,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700)),
-              const SizedBox(width: 8),
-              Text('${state.items.length}/20',
-                  style:
-                      const TextStyle(color: AppColors.textLo, fontSize: 12)),
-              const Spacer(),
-              _AddButton(onTap: state.canAdd ? ctrl.addText : null),
-            ],
-          ),
-          if (state.items.isEmpty) ...[
-            const SizedBox(height: 12),
-            const Text('No text yet. Tap “Add” to create one.',
-                style: TextStyle(color: AppColors.textLo, fontSize: 13)),
-          ] else
-            for (final item in state.items) ...[
-              const SizedBox(height: 8),
-              _TextRow(
-                item: item,
-                selected: item.id == state.selectedId,
-                onTap: () => ctrl.select(item.id),
-                onDelete: () => ctrl.removeText(item.id),
-              ),
-            ],
-        ],
-      ),
-    );
-  }
-}
-
-class _AddButton extends StatelessWidget {
-  const _AddButton({required this.onTap});
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = onTap != null;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-        decoration: BoxDecoration(
-          gradient: enabled ? AppGradients.primaryButton : null,
-          color: enabled ? null : AppColors.glassTint,
-          borderRadius: BorderRadius.circular(20),
-          border:
-              enabled ? null : Border.all(color: AppColors.glassStroke),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.add_rounded,
-                size: 16,
-                color: enabled ? Colors.white : AppColors.textLo),
-            const SizedBox(width: 4),
-            Text('Add',
-                style: TextStyle(
-                  color: enabled ? Colors.white : AppColors.textLo,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                )),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TextRow extends StatelessWidget {
-  const _TextRow({
-    required this.item,
-    required this.selected,
-    required this.onTap,
-    required this.onDelete,
-  });
-  final TextItem item;
-  final bool selected;
-  final VoidCallback onTap;
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    final label = item.text.trim().isEmpty ? '(empty)' : item.text;
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.accentA.withValues(alpha: 0.18)
-              : AppColors.glassTint,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected ? AppColors.accentA : AppColors.glassStroke,
-          ),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.text_fields_rounded,
-                color: AppColors.textLo, size: 18),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: selected ? AppColors.textHi : AppColors.textLo,
-                  fontSize: 13,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                ),
-              ),
-            ),
-            GestureDetector(
-              onTap: onDelete,
-              behavior: HitTestBehavior.opaque,
-              child: const Padding(
-                padding: EdgeInsets.all(2),
-                child: Icon(Icons.delete_outline_rounded,
-                    color: AppColors.textLo, size: 18),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── Color wheel sheet ─────────────────────────────────────────────────────────────
-
-Future<String?> _showColorWheel(BuildContext context, String initialHex) {
-  var picked = _colorFromHex(initialHex);
-  return showModalBottomSheet<String>(
-    context: context,
-    backgroundColor: Colors.transparent,
-    isScrollControlled: true,
-    builder: (_) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: GlassContainer(
-          borderRadius: 24,
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.glassStroke,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 20),
-              ColorPicker(
-                pickerColor: picked,
-                onColorChanged: (c) => picked = c,
-                enableAlpha: false,
-                displayThumbColor: true,
-                paletteType: PaletteType.hueWheel,
-                labelTypes: const [],
-                pickerAreaBorderRadius: BorderRadius.circular(12),
-              ),
-              SizedBox(
-                width: double.infinity,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: AppGradients.primaryButton,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: ElevatedButton(
-                    onPressed: () =>
-                        Navigator.of(context).pop(_hexFromColor(picked)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.transparent,
-                      shadowColor: Colors.transparent,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    child: const Text('Done',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        )),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    ),
-  );
 }
 
 // ── Shared sub-widgets (mirrors resize/images_to_gif) ────────────────────────────

@@ -16,12 +16,19 @@ const _kCropInset = _kHandleRadius + 4;
 
 enum _Handle { topLeft, topRight, bottomLeft, bottomRight, body, none }
 
-/// Allows the parent to seek the embedded player from outside VideoPreview.
+/// Allows the parent to seek/play/pause the embedded player from outside.
 class VideoPreviewController {
   _VideoPreviewState? _state;
+
+  /// Live play/pause state of the player (true while playing). GIFs report
+  /// false since they aren't player-driven.
+  final ValueNotifier<bool> playing = ValueNotifier(false);
+
   void _attach(_VideoPreviewState s) => _state = s;
   void _detach() => _state = null;
   void seekTo(int ms) => _state?._seekTo(ms);
+  void togglePlay() => _state?._togglePlay();
+  void dispose() => playing.dispose();
 }
 
 class VideoPreview extends StatefulWidget {
@@ -31,6 +38,7 @@ class VideoPreview extends StatefulWidget {
     required this.videoWidth,
     required this.videoHeight,
     this.speedRate = 1.0,
+    this.volume = 1.0,
     this.cropRect,
     this.onCropChanged,
     this.interactive = true,
@@ -44,6 +52,9 @@ class VideoPreview extends StatefulWidget {
   final int videoWidth;
   final int videoHeight;
   final double speedRate;
+
+  /// Audio gain multiplier (1.0 = 100%). Applied live to the preview player.
+  final double volume;
   final Rect? cropRect;
   final void Function(Rect)? onCropChanged;
 
@@ -72,6 +83,7 @@ class _VideoPreviewState extends State<VideoPreview> {
   String? _activePath;
   StreamSubscription<Duration>? _positionSub;
   StreamSubscription<bool>? _completedSub;
+  StreamSubscription<bool>? _playingSub;
 
   /// Animated GIFs are decoded by Flutter (Image.file), not libmpv, which only
   /// renders the first frame of a GIF.
@@ -104,6 +116,9 @@ class _VideoPreviewState extends State<VideoPreview> {
     if (!_isAnimatedImage && old.speedRate != widget.speedRate) {
       _player.setRate(widget.speedRate);
     }
+    if (!_isAnimatedImage && old.volume != widget.volume) {
+      _player.setVolume((widget.volume * 100).clamp(0.0, 200.0));
+    }
     if (widget.cropRect != null && widget.cropRect != _crop) {
       setState(() => _crop = widget.cropRect!);
     }
@@ -124,12 +139,21 @@ class _VideoPreviewState extends State<VideoPreview> {
     _activePath = widget.file.path;
     _positionSub?.cancel();
     _completedSub?.cancel();
+    _playingSub?.cancel();
     if (mounted) setState(() => _initialized = false);
     try {
+      // Subscribe before open() — stream.playing is a plain broadcast piped
+      // through distinct() with no replay, so the play:true edge fired during
+      // open() is lost if we listen after. Missing it leaves the controller's
+      // playing flag stuck false (icon never flips, controls never auto-hide).
+      _playingSub = _player.stream.playing.listen((p) {
+        widget.controller?.playing.value = p;
+      });
       await _player.open(Media(widget.file.path), play: true);
       // Manual loop so we can enforce trim boundaries on restart.
       await _player.setPlaylistMode(PlaylistMode.none);
       await _player.setRate(widget.speedRate);
+      await _player.setVolume((widget.volume * 100).clamp(0.0, 200.0));
       if (widget.trimStartMs > 0) {
         await _player.seek(Duration(milliseconds: widget.trimStartMs));
       }
@@ -161,11 +185,17 @@ class _VideoPreviewState extends State<VideoPreview> {
     _player.seek(Duration(milliseconds: ms));
   }
 
+  void _togglePlay() {
+    if (_isAnimatedImage) return;
+    _player.playOrPause();
+  }
+
   @override
   void dispose() {
     widget.controller?._detach();
     _positionSub?.cancel();
     _completedSub?.cancel();
+    _playingSub?.cancel();
     _player.dispose();
     super.dispose();
   }

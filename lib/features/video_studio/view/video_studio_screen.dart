@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -7,14 +8,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
+import '../../../core/utils/font_registry.dart';
 import '../../../core/widgets/common/gradient_scaffold.dart';
 import '../../../core/widgets/glass/glass_app_bar.dart';
 import '../../../core/widgets/glass/glass_container.dart';
 import '../../_shared/widgets/file_drop_zone.dart';
 import '../../_shared/widgets/option_slider.dart';
+import '../../_shared/widgets/text_overlay_controls.dart';
 import '../../_shared/widgets/video_preview.dart';
+import '../../text_overlay/model/text_item.dart';
+import '../widgets/cut_segment_slider.dart';
 import '../widgets/video_trim_slider.dart';
 import '../controller/video_studio_controller.dart';
+
+// ffmpeg drawtext anchors the glyph top at y; Flutter's line box keeps ~0.1em
+// of ascent above caps. Lift the preview text so the on-screen top matches the
+// rendered output. (calibration knob — mirrors the Text Overlay screen)
+const double _kTextTopBias = 0.10;
 
 String _fmtMs(int ms) {
   if (ms <= 0) return '0:00';
@@ -78,6 +88,7 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
   @override
   void dispose() {
     _transform.dispose();
+    _previewCtrl.dispose();
     super.dispose();
   }
 
@@ -216,6 +227,8 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                   renderH = baseH * renderScale;
                 }
 
+                final textActive = state.activeTool == StudioTool.text;
+
                 final preview = SizedBox(
                   width: renderW,
                   height: renderH,
@@ -224,24 +237,66 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                     padding: EdgeInsets.zero,
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(20),
-                      child: VideoPreview(
-                        key: ValueKey(state.sourceFile!.path),
-                        file: state.sourceFile!,
-                        videoWidth: srcW,
-                        videoHeight: srcH,
-                        speedRate: state.speedFactor,
-                        cropRect: (cropActive || !state.isCropFull)
-                            ? state.cropNormalized
-                            : null,
-                        interactive: cropActive,
-                        onCropChanged: ctrl.setCrop,
-                        controller: _previewCtrl,
-                        onPositionChanged: (ms) =>
-                            setState(() => _positionMs = ms),
-                        trimStartMs: state.trimStartMs,
-                        trimEndMs: state.sourceDurationMs > 0
-                            ? state.effectiveTrimEndMs
-                            : 0,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: VideoPreview(
+                              key: ValueKey(state.sourceFile!.path),
+                              file: state.sourceFile!,
+                              videoWidth: srcW,
+                              videoHeight: srcH,
+                              speedRate: state.speedFactor,
+                              volume: state.volume,
+                              cropRect: (cropActive || !state.isCropFull)
+                                  ? state.cropNormalized
+                                  : null,
+                              interactive: cropActive,
+                              onCropChanged: ctrl.setCrop,
+                              controller: _previewCtrl,
+                              onPositionChanged: (ms) =>
+                                  setState(() => _positionMs = ms),
+                              trimStartMs: state.trimStartMs,
+                              trimEndMs: state.sourceDurationMs > 0
+                                  ? state.effectiveTrimEndMs
+                                  : 0,
+                            ),
+                          ),
+                          if (state.textItems.isNotEmpty)
+                            Positioned.fill(
+                              child: _StudioTextLayer(
+                                state: state,
+                                ctrl: ctrl,
+                                renderW: renderW,
+                                renderH: renderH,
+                                srcW: srcW,
+                                interactive: textActive,
+                              ),
+                            ),
+                          // Red tint when playhead is inside a cut segment (hint only).
+                          if (!state.isGif &&
+                              state.cutSegments.any((s) =>
+                                  _positionMs >= s.startMs &&
+                                  _positionMs < s.endMs))
+                            const Positioned.fill(
+                              child: IgnorePointer(
+                                child: ColoredBox(color: Color(0x80FF0000)),
+                              ),
+                            ),
+                          // YouTube-style controls — videos only, and only when
+                          // no canvas tool (crop/text) owns the preview gestures.
+                          if (!state.isGif && !cropActive && !textActive)
+                            Positioned.fill(
+                              child: _VideoControlsOverlay(
+                                controller: _previewCtrl,
+                                positionMs: _positionMs,
+                                durationMs: state.sourceDurationMs,
+                                onSeek: (ms) {
+                                  _previewCtrl.seekTo(ms);
+                                  setState(() => _positionMs = ms);
+                                },
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ),
@@ -251,8 +306,10 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                 final overflowY = renderH > constraints.maxHeight + 0.5;
                 // Crop's drag gesture owns the whole frame, so pan stays off
                 // during crop to avoid fighting the handles.
-                final canPan =
-                    !fitMode && !cropActive && (overflowX || overflowY);
+                final canPan = !fitMode &&
+                    !cropActive &&
+                    !textActive &&
+                    (overflowX || overflowY);
 
                 // Frame now fits the pane but a prior pan left a stale
                 // translation — recenter so it isn't truncated to one edge.
@@ -474,6 +531,220 @@ class _ZoomControl extends StatelessWidget {
   }
 }
 
+// ── Video controls overlay (YouTube-style play/pause + scrubber) ─────────────
+//
+// Shows on hover (desktop) or tap (touch); auto-hides ~3s after playback
+// resumes, stays up while paused or scrubbing. Drives the shared
+// VideoPreviewController for play/pause + seek.
+class _VideoControlsOverlay extends StatefulWidget {
+  const _VideoControlsOverlay({
+    required this.controller,
+    required this.positionMs,
+    required this.durationMs,
+    required this.onSeek,
+  });
+  final VideoPreviewController controller;
+  final int positionMs;
+  final int durationMs;
+  final void Function(int ms) onSeek;
+
+  @override
+  State<_VideoControlsOverlay> createState() => _VideoControlsOverlayState();
+}
+
+class _VideoControlsOverlayState extends State<_VideoControlsOverlay> {
+  bool _visible = false;
+  bool _dragging = false;
+  Timer? _hideTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.playing.addListener(_onPlayingChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.playing.removeListener(_onPlayingChanged);
+    _hideTimer?.cancel();
+    super.dispose();
+  }
+
+  void _onPlayingChanged() {
+    // Only manages timer — never reveals. Loop emits false→true; revealing here
+    // causes unwanted flash. Show only from user gestures (_show).
+    if (widget.controller.playing.value) {
+      if (_visible) _scheduleHide();
+    } else {
+      _hideTimer?.cancel();
+      // keep visible if already visible; don't force-show
+    }
+  }
+
+  void _show() {
+    _hideTimer?.cancel();
+    if (!_visible) setState(() => _visible = true);
+    _scheduleHide();
+  }
+
+  void _scheduleHide() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 3), () {
+      // Stay visible while paused or scrubbing.
+      if (!mounted || _dragging || !widget.controller.playing.value) return;
+      setState(() => _visible = false);
+    });
+  }
+
+  void _toggleVisible() {
+    if (_visible) {
+      _hideTimer?.cancel();
+      setState(() => _visible = false);
+    } else {
+      _show();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dur = widget.durationMs;
+    final maxMs = (dur > 0 ? dur : 1).toDouble();
+    final pos = widget.positionMs.toDouble().clamp(0.0, maxMs);
+    return MouseRegion(
+      onEnter: (_) => _show(),
+      onHover: (_) => _show(),
+      onExit: (_) {
+        if (widget.controller.playing.value && mounted) {
+          _hideTimer?.cancel();
+          setState(() => _visible = false);
+        }
+      },
+      child: Stack(
+        children: [
+          // Tap empty area to toggle the chrome (touch). Always present so a
+          // tap re-shows controls after they auto-hide.
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _toggleVisible,
+            ),
+          ),
+          Positioned.fill(
+            child: IgnorePointer(
+              ignoring: !_visible,
+              child: AnimatedOpacity(
+                opacity: _visible ? 1 : 0,
+                duration: const Duration(milliseconds: 180),
+                child: _chrome(pos, maxMs, dur),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _chrome(double pos, double maxMs, int dur) {
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.center,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.transparent,
+                  Colors.black.withValues(alpha: 0.55),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Center(
+          child: ValueListenableBuilder<bool>(
+            valueListenable: widget.controller.playing,
+            builder: (_, playing, _) => _CenterPlayButton(
+              playing: playing,
+              onTap: () {
+                widget.controller.togglePlay();
+                _show();
+              },
+            ),
+          ),
+        ),
+        Positioned(
+          left: 10,
+          right: 10,
+          bottom: 4,
+          child: Row(
+            children: [
+              Text(_fmtMs(pos.round()),
+                  style: const TextStyle(color: Colors.white, fontSize: 11)),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderThemeData(
+                    trackHeight: 3,
+                    activeTrackColor: Colors.red,
+                    inactiveTrackColor: Colors.white.withValues(alpha: 0.3),
+                    thumbColor: Colors.red,
+                    thumbShape:
+                        const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    overlayShape:
+                        const RoundSliderOverlayShape(overlayRadius: 12),
+                    overlayColor: Colors.red.withValues(alpha: 0.2),
+                  ),
+                  child: Slider(
+                    value: pos,
+                    max: maxMs,
+                    onChangeStart: (_) {
+                      _dragging = true;
+                      _hideTimer?.cancel();
+                    },
+                    onChanged: dur > 0 ? (v) => widget.onSeek(v.round()) : null,
+                    onChangeEnd: (_) {
+                      _dragging = false;
+                      _scheduleHide();
+                    },
+                  ),
+                ),
+              ),
+              Text(_fmtMs(dur),
+                  style: const TextStyle(color: Colors.white, fontSize: 11)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CenterPlayButton extends StatelessWidget {
+  const _CenterPlayButton({required this.playing, required this.onTap});
+  final bool playing;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 56,
+        height: 56,
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.45),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+          color: Colors.white,
+          size: 34,
+        ),
+      ),
+    );
+  }
+}
+
 // ── Control dock: tool selector + active panel + actions ─────────────────────
 
 class _ControlDock extends StatelessWidget {
@@ -518,6 +789,7 @@ class _ControlDock extends StatelessWidget {
               ctrl: ctrl,
               positionMs: positionMs,
               onSeekPreview: onSeekPreview,
+              toast: toast,
             ),
           ),
           if (state.error != null) ...[
@@ -544,15 +816,16 @@ class _ToolSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // (tool, icon, label, disabled, tag)
     final tools = [
-      (StudioTool.crop, Icons.crop_rounded, 'Crop', false),
-      (StudioTool.resize, Icons.photo_size_select_large_rounded, 'Resize', false),
-      (StudioTool.speed, Icons.speed_rounded, 'Speed', false),
-      if (isGif)
-        (StudioTool.optimize, Icons.tune_rounded, 'Optimise', false)
-      else
-        (StudioTool.trim, Icons.content_cut_rounded, 'Trim', false),
-      (StudioTool.properties, Icons.settings_suggest_rounded, 'Props', false),
+      (StudioTool.crop, Icons.crop_rounded, 'Crop', false, null),
+      (StudioTool.resize, Icons.photo_size_select_large_rounded, 'Resize', false, null),
+      (StudioTool.speed, Icons.speed_rounded, 'Speed', false, null),
+      if (!isGif) (StudioTool.trim, Icons.content_cut_rounded, 'Trim', false, null),
+      if (!isGif) (StudioTool.cut, Icons.cut_rounded, 'Cut', false, null),
+      (StudioTool.text, Icons.title_rounded, 'Text', false, null),
+      if (isGif) (StudioTool.optimize, Icons.tune_rounded, 'Optimise', false, null),
+      (StudioTool.properties, Icons.settings_suggest_rounded, 'Props', false, null),
     ];
     return Wrap(
       spacing: 6,
@@ -560,12 +833,13 @@ class _ToolSelector extends StatelessWidget {
       children: [
         for (final t in tools)
           SizedBox(
-            width: (MediaQuery.of(context).size.width - 44) / 6,
+            width: (MediaQuery.of(context).size.width - 44) / (tools.length + 1),
             child: _ToolButton(
               icon: t.$2,
               label: t.$3,
               selected: active == t.$1,
               disabled: t.$4,
+              tag: t.$5,
               onTap: t.$4 ? null : () => onSelect(active == t.$1 ? null : t.$1),
             ),
           ),
@@ -580,12 +854,14 @@ class _ToolButton extends StatelessWidget {
     required this.label,
     required this.selected,
     this.disabled = false,
+    this.tag,
     this.onTap,
   });
   final IconData icon;
   final String label;
   final bool selected;
   final bool disabled;
+  final String? tag;
   final VoidCallback? onTap;
 
   @override
@@ -595,33 +871,62 @@ class _ToolButton extends StatelessWidget {
         : selected
             ? Colors.white
             : AppColors.textHi;
-    return GestureDetector(
-      onTap: disabled ? null : onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          gradient: selected && !disabled ? AppGradients.primaryButton : null,
-          color: selected && !disabled ? null : AppColors.glassTint,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected && !disabled
-                ? Colors.transparent
-                : AppColors.glassStroke,
-          ),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, size: 18, color: effectiveColor),
-            const SizedBox(height: 3),
-            Text(label,
-                style: TextStyle(
-                    color: effectiveColor,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600)),
-          ],
+    final btn = AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        gradient: selected && !disabled ? AppGradients.primaryButton : null,
+        color: selected && !disabled ? null : AppColors.glassTint,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: selected && !disabled
+              ? Colors.transparent
+              : AppColors.glassStroke,
         ),
       ),
+      child: Column(
+        children: [
+          Icon(icon, size: 18, color: effectiveColor),
+          const SizedBox(height: 3),
+          Text(label,
+              style: TextStyle(
+                  color: effectiveColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+    return GestureDetector(
+      onTap: disabled ? null : onTap,
+      child: tag == null
+          ? btn
+          : Stack(
+              clipBehavior: Clip.none,
+              fit: StackFit.passthrough,
+              children: [
+                btn,
+                Positioned(
+                  top: -4,
+                  right: -4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 4, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: AppColors.accentC.withValues(alpha: 0.85),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      tag!,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 8,
+                          fontWeight: FontWeight.w700,
+                          height: 1.2),
+                    ),
+                  ),
+                ),
+              ],
+            ),
     );
   }
 }
@@ -632,11 +937,13 @@ class _ToolPanel extends StatelessWidget {
     required this.ctrl,
     required this.positionMs,
     required this.onSeekPreview,
+    required this.toast,
   });
   final VideoStudioState state;
   final VideoStudioController ctrl;
   final int positionMs;
   final void Function(int ms) onSeekPreview;
+  final void Function(String) toast;
 
   @override
   Widget build(BuildContext context) {
@@ -701,8 +1008,21 @@ class _ToolPanel extends StatelessWidget {
           positionMs: positionMs,
           onSeekPreview: onSeekPreview,
         );
+      case StudioTool.cut:
+        return _CutPanel(
+          key: const ValueKey('cut'),
+          state: state,
+          ctrl: ctrl,
+          positionMs: positionMs,
+          onSeekPreview: onSeekPreview,
+          toast: toast,
+        );
       case StudioTool.text:
-        return const SizedBox(width: double.infinity, key: ValueKey('none'));
+        return _StudioTextPanel(
+          key: const ValueKey('text'),
+          state: state,
+          ctrl: ctrl,
+        );
       case StudioTool.optimize:
         return _OptimizePanel(
           key: const ValueKey('optimize'),
@@ -805,6 +1125,406 @@ class _TrimPanel extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+// ── Cut panel ──────────────────────────────────────────────────────────────────
+
+class _CutPanel extends StatefulWidget {
+  const _CutPanel({
+    super.key,
+    required this.state,
+    required this.ctrl,
+    required this.positionMs,
+    required this.onSeekPreview,
+    required this.toast,
+  });
+  final VideoStudioState state;
+  final VideoStudioController ctrl;
+  final int positionMs;
+  final void Function(int ms) onSeekPreview;
+  final void Function(String) toast;
+
+  @override
+  State<_CutPanel> createState() => _CutPanelState();
+}
+
+class _CutPanelState extends State<_CutPanel> {
+  late int _pendingStartMs;
+  late int _pendingEndMs;
+
+  @override
+  void initState() {
+    super.initState();
+    _initPending();
+  }
+
+  void _initPending() {
+    final s = widget.state;
+    final lo = s.trimStartMs;
+    final hi = s.effectiveTrimEndMs;
+    if (hi - lo <= 1000) {
+      _pendingStartMs = lo;
+      _pendingEndMs = hi;
+      return;
+    }
+    const span = 1000;
+    final start = widget.positionMs.clamp(lo, hi - span);
+    _pendingStartMs = start;
+    _pendingEndMs = start + span;
+  }
+
+  @override
+  void didUpdateWidget(_CutPanel old) {
+    super.didUpdateWidget(old);
+    final lo = widget.state.trimStartMs;
+    final hi = widget.state.effectiveTrimEndMs;
+    if (_pendingStartMs < lo) _pendingStartMs = lo;
+    if (_pendingEndMs > hi) _pendingEndMs = hi;
+    if (_pendingEndMs - _pendingStartMs <= 0) {
+      _pendingEndMs = (_pendingStartMs + 1000).clamp(lo, hi);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.state;
+    final totalMs = s.sourceDurationMs;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (totalMs > 0) ...[
+          CutSegmentSlider(
+            totalMs: totalMs,
+            trimStartMs: s.trimStartMs,
+            trimEndMs: s.effectiveTrimEndMs,
+            cutSegments: s.cutSegments,
+            pendingStartMs: _pendingStartMs,
+            pendingEndMs: _pendingEndMs,
+            positionMs: widget.positionMs.clamp(0, totalMs),
+            onPendingChanged: (start, end) =>
+                setState(() {
+                  _pendingStartMs = start;
+                  _pendingEndMs = end;
+                }),
+            onSeek: widget.onSeekPreview,
+          ),
+          const SizedBox(height: 8),
+        ],
+        Row(
+          children: [
+            _TrimChip(
+              icon: Icons.login_rounded,
+              label: 'From',
+              ms: _pendingStartMs,
+            ),
+            const SizedBox(width: 8),
+            _TrimChip(
+              icon: Icons.logout_rounded,
+              label: 'To',
+              ms: _pendingEndMs,
+            ),
+            const Spacer(),
+            GestureDetector(
+              onTap: () {
+                final ok = widget.ctrl.addCutSegment(_pendingStartMs, _pendingEndMs);
+                if (!ok) widget.toast("Can't add that segment");
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.red.withValues(alpha: 0.35)),
+                ),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.cut_rounded, color: Colors.redAccent, size: 14),
+                  SizedBox(width: 6),
+                  Text('Mark for removal',
+                      style: TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (s.cutSegments.isEmpty)
+          const Text(
+            'Mark a span to remove it',
+            style: TextStyle(color: AppColors.textLo, fontSize: 12),
+          )
+        else ...[
+          ...s.cutSegments.map((seg) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: Colors.red.withValues(alpha: 0.30)),
+                      ),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        const Icon(Icons.cut_rounded,
+                            color: Colors.redAccent, size: 12),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${_fmtMs(seg.startMs)} – ${_fmtMs(seg.endMs)}',
+                          style: const TextStyle(
+                              color: Colors.redAccent,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ]),
+                    ),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () => widget.ctrl.removeCutSegment(seg),
+                      child: const Padding(
+                        padding: EdgeInsets.all(6),
+                        child: Icon(Icons.close_rounded,
+                            size: 16, color: AppColors.textLo),
+                      ),
+                    ),
+                  ],
+                ),
+              )),
+          const SizedBox(height: 4),
+          Text(
+            'Output ≈ ${_fmtMs(s.cutOutputMs)}',
+            style: const TextStyle(color: AppColors.textLo, fontSize: 12),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// ── Text overlay (multi-item, shared model with the Text Overlay tool) ───────
+//
+// Drag to position on the main preview canvas; edit the selected layer here.
+// GIF stage bakes layers via textOverlayMulti (Apply / Export GIF); video
+// stage bakes them into the encode via editVideo (Export Video).
+
+class _StudioTextPanel extends StatelessWidget {
+  const _StudioTextPanel({super.key, required this.state, required this.ctrl});
+  final VideoStudioState state;
+  final VideoStudioController ctrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 340),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (!state.fontReady) ...[
+              GlassContainer(
+                borderRadius: 16,
+                tint: Colors.orange,
+                opacity: 0.08,
+                child: const Row(children: [
+                  Icon(Icons.warning_amber_rounded,
+                      color: Colors.orange, size: 20),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'No system font found. Text may fail to render.',
+                      style: TextStyle(color: Colors.orange, fontSize: 13),
+                    ),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (state.selectedText != null) ...[
+              TextFormatCard(
+                key: ValueKey(state.selectedTextId),
+                item: state.selectedText!,
+                onText: (v) => ctrl.updateSelectedText(text: v),
+                onStyle: (v) => ctrl.updateSelectedText(style: v),
+                onFont: (v) => ctrl.updateSelectedText(font: v),
+                onFontSize: (v) => ctrl.updateSelectedText(fontSize: v),
+                onFontColor: (v) => ctrl.updateSelectedText(fontColor: v),
+                onStrokeColor: (v) => ctrl.updateSelectedText(strokeColor: v),
+                onStrokeWidth: (v) => ctrl.updateSelectedText(strokeWidth: v),
+              ),
+              const SizedBox(height: 12),
+            ],
+            TextLayersPanel(
+              items: state.textItems,
+              selectedId: state.selectedTextId,
+              canAdd: state.canAddText,
+              onAdd: ctrl.addText,
+              onSelect: ctrl.selectText,
+              onDelete: ctrl.removeText,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Draggable text overlay rendered on the main preview canvas. Positions are
+// normalized to the source-gif dims and laid out against the rendered frame
+// (renderW × renderH), so they line up with the textOverlayMulti bake.
+class _StudioTextLayer extends StatelessWidget {
+  const _StudioTextLayer({
+    required this.state,
+    required this.ctrl,
+    required this.renderW,
+    required this.renderH,
+    required this.srcW,
+    this.interactive = true,
+  });
+  final VideoStudioState state;
+  final VideoStudioController ctrl;
+  final double renderW;
+  final double renderH;
+  final int srcW;
+  final bool interactive;
+
+  @override
+  Widget build(BuildContext context) {
+    final scale = srcW > 0 ? renderW / srcW : 1.0;
+    final layer = Stack(
+      clipBehavior: Clip.none,
+      children: [
+        if (interactive)
+          // tap empty → deselect
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: () => ctrl.selectText(null),
+            ),
+          ),
+        for (final item in state.textItems)
+          _StudioDraggableText(
+            item: item,
+            selected: item.id == state.selectedTextId,
+            scale: scale,
+            renderW: renderW,
+            renderH: renderH,
+            fontFamily: FontRegistry.familyFor(item.font, item.style) ??
+                state.fontFamilies[item.style],
+            ctrl: ctrl,
+          ),
+      ],
+    );
+    return interactive ? layer : IgnorePointer(child: layer);
+  }
+}
+
+class _StudioDraggableText extends ConsumerWidget {
+  const _StudioDraggableText({
+    required this.item,
+    required this.selected,
+    required this.scale,
+    required this.renderW,
+    required this.renderH,
+    required this.fontFamily,
+    required this.ctrl,
+  });
+  final TextItem item;
+  final bool selected;
+  final double scale;
+  final double renderW;
+  final double renderH;
+  final String? fontFamily;
+  final VideoStudioController ctrl;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final fs = item.fontSize * scale;
+    // When the real font file is loaded its weight/style are baked in — don't
+    // also synthesize bold/italic or it doubles up.
+    final hasFam = fontFamily != null;
+    final fw = !hasFam &&
+            (item.style == TextStyleKind.bold ||
+                item.style == TextStyleKind.boldItalic)
+        ? FontWeight.w700
+        : FontWeight.w400;
+    final fst = !hasFam &&
+            (item.style == TextStyleKind.italic ||
+                item.style == TextStyleKind.boldItalic)
+        ? FontStyle.italic
+        : FontStyle.normal;
+    final fill = colorFromHex(item.fontColor);
+    final strokeC = colorFromHex(item.strokeColor);
+    // ffmpeg borderw=N grows the glyph N px each side; Flutter's centered stroke
+    // grows W/2 — double it so the preview footprint matches the output.
+    final sw = item.strokeWidth * 2 * scale;
+
+    final textStack = Stack(
+      children: [
+        if (item.strokeWidth > 0)
+          Text(
+            item.text,
+            textScaler: TextScaler.noScaling,
+            style: TextStyle(
+              fontFamily: fontFamily,
+              fontSize: fs,
+              fontWeight: fw,
+              fontStyle: fst,
+              height: 1.0,
+              foreground: Paint()
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = sw
+                ..strokeJoin = StrokeJoin.round
+                ..color = strokeC,
+            ),
+          ),
+        Text(
+          item.text,
+          textScaler: TextScaler.noScaling,
+          style: TextStyle(
+            fontFamily: fontFamily,
+            fontSize: fs,
+            fontWeight: fw,
+            fontStyle: fst,
+            height: 1.0,
+            color: fill,
+          ),
+        ),
+      ],
+    );
+
+    return Positioned(
+      left: item.nx * renderW,
+      top: item.ny * renderH - fs * _kTextTopBias,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => ctrl.selectText(item.id),
+        onPanDown: (_) => ctrl.selectText(item.id),
+        onPanUpdate: (d) {
+          final cur =
+              ref.read(videoStudioControllerProvider).valueOrNull?.selectedText;
+          if (cur == null) return;
+          ctrl.moveSelectedText(
+            cur.nx + d.delta.dx / renderW,
+            cur.ny + d.delta.dy / renderH,
+          );
+        },
+        child: Container(
+          foregroundDecoration: selected
+              ? BoxDecoration(
+                  border: Border.all(color: AppColors.accentB, width: 1.5),
+                  borderRadius: BorderRadius.circular(4),
+                )
+              : null,
+          child: textStack,
+        ),
+      ),
     );
   }
 }
@@ -1013,8 +1733,8 @@ class _OptimizePanel extends StatelessWidget {
             label: 'Colors',
             value: state.optimizeColors.toDouble(),
             min: 16,
-            max: 256,
-            divisions: 30,
+            max: 254,
+            divisions: 29,
             displayValue: '${state.optimizeColors}',
             onChanged: (v) => ctrl.setOptimizeColors(v.round()),
           ),
@@ -1029,13 +1749,48 @@ class _OptimizePanel extends StatelessWidget {
                 state.optimizeLossy == 0 ? 'Off' : '${state.optimizeLossy}',
             onChanged: (v) => ctrl.setOptimizeLossy(v.round()),
           ),
+          const SizedBox(height: 14),
+          const Text('Remove frames',
+              style: TextStyle(
+                  color: AppColors.textHi,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: const [
+              ('Keep all', 0),
+              ('1 / 4', 4),
+              ('1 / 3', 3),
+              ('1 / 2', 2),
+            ].map((p) {
+              final selected = p.$2 == state.optimizeFrameDrop;
+              return ChoiceChip(
+                label: Text(p.$1),
+                selected: selected,
+                onSelected: (_) => ctrl.setOptimizeFrameDrop(p.$2),
+                selectedColor: AppColors.accentA.withValues(alpha: 0.3),
+                backgroundColor: AppColors.glassTint,
+                labelStyle: TextStyle(
+                  color: selected ? AppColors.accentB : AppColors.textHi,
+                  fontSize: 13,
+                ),
+                side: BorderSide(
+                  color: selected ? AppColors.accentA : AppColors.glassStroke,
+                ),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              );
+            }).toList(),
+          ),
         ],
       ],
     );
   }
 }
 
-// ── Properties panel (fps · loop count · boomerang) ───────────────────────────
+// ── Properties panel (video: volume · gif: fps · loop count · boomerang) ──────
 
 class _PropertiesPanel extends StatelessWidget {
   const _PropertiesPanel({
@@ -1057,6 +1812,33 @@ class _PropertiesPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Video: audio volume only (no fps/loop/reverse — those are GIF concepts).
+    if (!state.isGif) {
+      final pct = (state.volume * 100).round();
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          OptionSlider(
+            label: 'Volume',
+            value: (state.volume * 100).clamp(0, 200),
+            min: 0,
+            max: 200,
+            divisions: 40,
+            displayValue: state.hasAudio ? '$pct%' : 'No audio',
+            onChanged: state.hasAudio
+                ? (v) => ctrl.setVolume(v / 100)
+                : (_) {},
+          ),
+          const SizedBox(height: 4),
+          Text(
+            state.hasAudio
+                ? '100% = original · 0% mutes · up to 200% louder.'
+                : 'This video has no audio track.',
+            style: const TextStyle(color: AppColors.textLo, fontSize: 11),
+          ),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1145,7 +1927,28 @@ class _ActionBar extends StatelessWidget {
             _SecondaryButton(
               icon: Icons.arrow_back_rounded,
               label: 'Back to video',
-              onTap: ctrl.discardGif,
+              onTap: () async {
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    title: const Text('Discard GIF edits?'),
+                    content: const Text(
+                        'Going back will discard all changes made to the GIF.'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('Discard',
+                            style: TextStyle(color: Colors.redAccent)),
+                      ),
+                    ],
+                  ),
+                );
+                if (ok == true) ctrl.discardGif();
+              },
             ),
             const SizedBox(width: 10),
           ],
@@ -1167,24 +1970,24 @@ class _ActionBar extends StatelessWidget {
             },
           ),
           const SizedBox(width: 10),
-          _SecondaryButton(
-            icon: Icons.auto_fix_high_rounded,
-            label: 'Apply',
-            onTap: () async {
-              final ok = await ctrl.applyEdits();
-              toast(ok ? 'Applied to preview' : 'Nothing to apply');
-            },
-          ),
-          const SizedBox(width: 10),
           Expanded(
-            child: _PrimaryButton(
-              icon: Icons.save_alt_rounded,
-              label: 'Export GIF',
+            child: _SecondaryButton(
+              icon: Icons.auto_fix_high_rounded,
+              label: 'Apply',
               onTap: () async {
-                final ok = await ctrl.exportGif();
-                toast(ok ? 'GIF saved' : 'Export cancelled');
+                final ok = await ctrl.applyEdits();
+                toast(ok ? 'Applied to preview' : 'Nothing to apply');
               },
             ),
+          ),
+          const SizedBox(width: 10),
+          _PrimaryButton(
+            icon: Icons.save_alt_rounded,
+            tooltip: 'Export GIF',
+            onTap: () async {
+              final ok = await ctrl.exportGif();
+              toast(ok ? 'GIF saved' : 'Export cancelled');
+            },
           ),
         ],
       );
@@ -1195,36 +1998,67 @@ class _ActionBar extends StatelessWidget {
           icon: Icons.gif_box_rounded,
           label: 'Make GIF',
           onTap: () async {
+            if (state.effectiveOutputMs > 60000) {
+              final proceed = await showDialog<bool>(
+                context: context,
+                builder: (_) => AlertDialog(
+                  title: const Text('Video too long'),
+                  content: const Text(
+                      'GIF is limited to 60 seconds. Trim the video first for best results, or only the first 60 seconds will be used.'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('Use first 60s'),
+                    ),
+                  ],
+                ),
+              );
+              if (proceed != true) return;
+            }
             final ok = await ctrl.makeGif();
             if (!ok) toast('Could not create GIF');
           },
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: _PrimaryButton(
-            icon: Icons.save_alt_rounded,
-            label: 'Export Video',
+          child: _SecondaryButton(
+            icon: Icons.auto_fix_high_rounded,
+            label: 'Apply',
             onTap: () async {
-              final ok = await ctrl.exportVideo();
-              toast(ok ? 'Video saved' : 'Export cancelled');
+              final ok = await ctrl.applyVideoEdits();
+              toast(ok ? 'Applied to preview' : 'Nothing to apply');
             },
           ),
+        ),
+        const SizedBox(width: 10),
+        _PrimaryButton(
+          icon: Icons.save_alt_rounded,
+          tooltip: 'Export Video',
+          onTap: () async {
+            final ok = await ctrl.exportVideo();
+            toast(ok ? 'Video saved' : 'Export cancelled');
+          },
         ),
       ],
     );
   }
 }
 
+// Icon-only primary action (gradient fill). Pass [tooltip] to name the action.
 class _PrimaryButton extends StatelessWidget {
   const _PrimaryButton(
-      {required this.icon, required this.label, required this.onTap});
+      {required this.icon, this.tooltip, required this.onTap});
   final IconData icon;
-  final String label;
+  final String? tooltip;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    Widget btn = GestureDetector(
       onTap: onTap,
       child: DecoratedBox(
         decoration: BoxDecoration(
@@ -1232,22 +2066,13 @@ class _PrimaryButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 15),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, color: Colors.white, size: 18),
-              const SizedBox(width: 8),
-              Text(label,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700)),
-            ],
-          ),
+          padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 18),
+          child: Icon(icon, color: Colors.white, size: 22),
         ),
       ),
     );
+    if (tooltip != null) btn = Tooltip(message: tooltip!, child: btn);
+    return btn;
   }
 }
 
@@ -1271,6 +2096,7 @@ class _SecondaryButton extends StatelessWidget {
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, color: AppColors.textHi, size: 18),
             const SizedBox(width: 8),

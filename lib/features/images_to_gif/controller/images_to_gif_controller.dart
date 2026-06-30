@@ -246,7 +246,6 @@ class ImagesToGifController extends AsyncNotifier<ImagesToGifState> {
         input: gif,
         colors: current.optimizeColors,
         lossy: current.optimizeLossy,
-        onProgress: onProgress,
       );
       if (optResult.isErr) {
         final s = state.valueOrNull ?? const ImagesToGifState();

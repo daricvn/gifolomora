@@ -69,6 +69,7 @@ flutter:
     - assets/banner.png
     - assets/banner.gif
     - assets/app.png
+    - assets/fonts/
 
 flutter_launcher_icons:
   android: true

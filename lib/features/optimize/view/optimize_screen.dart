@@ -123,6 +123,11 @@ class OptimizeScreen extends ConsumerWidget {
                     displayValue: state.lossy == 0 ? 'Off' : '${state.lossy}',
                     onChanged: (v) => ctrl.setLossy(v.round()),
                   ),
+                  const Divider(color: AppColors.glassStroke, height: 24),
+                  _FrameDropSelector(
+                    value: state.frameDrop,
+                    onChanged: ctrl.setFrameDrop,
+                  ),
                 ],
               ),
             ),
@@ -196,6 +201,58 @@ class _SectionHeader extends StatelessWidget {
                 color: AppColors.textHi,
                 fontSize: 16,
                 fontWeight: FontWeight.w700)),
+      ],
+    );
+  }
+}
+
+class _FrameDropSelector extends StatelessWidget {
+  const _FrameDropSelector({required this.value, required this.onChanged});
+  final int value; // 0 = keep all; 2/3/4 = remove 1 of every N
+  final void Function(int) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    const presets = <(String, int)>[
+      ('Keep all', 0),
+      ('1 / 4', 4),
+      ('1 / 3', 3),
+      ('1 / 2', 2),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(bottom: 10),
+          child: Text('Remove frames',
+              style: TextStyle(
+                  color: AppColors.textHi,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600)),
+        ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: presets.map((p) {
+            final selected = p.$2 == value;
+            return ChoiceChip(
+              label: Text(p.$1),
+              selected: selected,
+              onSelected: (_) => onChanged(p.$2),
+              selectedColor: AppColors.accentA.withValues(alpha: 0.3),
+              backgroundColor: AppColors.glassTint,
+              labelStyle: TextStyle(
+                color: selected ? AppColors.accentB : AppColors.textHi,
+                fontSize: 13,
+              ),
+              side: BorderSide(
+                color: selected ? AppColors.accentA : AppColors.glassStroke,
+              ),
+              shape:
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            );
+          }).toList(),
+        ),
       ],
     );
   }

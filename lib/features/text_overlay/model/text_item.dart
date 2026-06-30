@@ -1,5 +1,19 @@
 enum TextStyleKind { regular, bold, italic, boldItalic }
 
+// Selectable typeface. `system` = platform default (FontResolver). The rest are
+// bundled assets (assets/fonts/) materialized + registered by FontRegistry.
+enum TextFont { system, dancingScript, sourceCodePro, lobsterTwo, caveat }
+
+extension TextFontLabel on TextFont {
+  String get label => switch (this) {
+        TextFont.system => 'Default',
+        TextFont.dancingScript => 'Dancing Script',
+        TextFont.sourceCodePro => 'Source Code Pro',
+        TextFont.lobsterTwo => 'Lobster Two',
+        TextFont.caveat => 'Caveat',
+      };
+}
+
 class TextItem {
   const TextItem({
     required this.id,
@@ -11,6 +25,7 @@ class TextItem {
     this.strokeColor = '000000',
     this.strokeWidth = 0,
     this.style = TextStyleKind.regular,
+    this.font = TextFont.system,
   });
 
   final String id;
@@ -22,6 +37,7 @@ class TextItem {
   final String strokeColor; // hex RRGGBB
   final int strokeWidth; // 0..12 px
   final TextStyleKind style;
+  final TextFont font;
 
   // scale = displayW / mediaW
   static double nxFromLocal(double localX, double scale, double mw) =>
@@ -47,6 +63,7 @@ class TextItem {
     String? strokeColor,
     int? strokeWidth,
     TextStyleKind? style,
+    TextFont? font,
   }) =>
       TextItem(
         id: id,
@@ -58,5 +75,6 @@ class TextItem {
         strokeColor: strokeColor ?? this.strokeColor,
         strokeWidth: strokeWidth ?? this.strokeWidth,
         style: style ?? this.style,
+        font: font ?? this.font,
       );
 }

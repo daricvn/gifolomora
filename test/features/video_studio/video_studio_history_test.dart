@@ -38,7 +38,6 @@ ProviderContainer _makeContainer({
 Future<VideoStudioController> _loadGif(
   ProviderContainer c, {
   String path = '/input.gif',
-  MediaInfo? info,
 }) async {
   await c.read(videoStudioControllerProvider.future);
   final ctrl = c.read(videoStudioControllerProvider.notifier);
@@ -48,9 +47,8 @@ Future<VideoStudioController> _loadGif(
 
 /// Gets into GIF stage via makeGif (video → bake → gif stage).
 Future<VideoStudioController> _makeGifFromVideo(
-  ProviderContainer c, {
-  MediaInfo? info,
-}) async {
+  ProviderContainer c,
+) async {
   await c.read(videoStudioControllerProvider.future);
   final ctrl = c.read(videoStudioControllerProvider.notifier);
   await ctrl.setInput(File('/input.mp4'));
@@ -123,7 +121,8 @@ void main() {
   });
 
   group('VideoStudio GIF history — undo / redo', () {
-    test('undo() restores previous state', () async {
+    test('undo() restores the pre-apply settings, not the post-bake reset',
+        () async {
       final c = _makeContainer();
       addTearDown(c.dispose);
       final ctrl = await _loadGif(c);
@@ -133,8 +132,10 @@ void main() {
 
       ctrl.undo();
 
-      // After undo, state reverts to the base (loopCount=0 = default).
-      expect(_state(c).loopCount, equals(0));
+      // Undo reverses the Apply: it returns to the editing state right before
+      // it — the user's pending settings (loopCount=3) over the parent source —
+      // so the panels show what was applied and can be tweaked / re-applied.
+      expect(_state(c).loopCount, equals(3));
       expect(ctrl.canUndo, isFalse);
       expect(ctrl.canRedo, isTrue);
     });
@@ -195,16 +196,18 @@ void main() {
 
       expect(_state(c).loopCount, equals(3));
 
-      ctrl.undo(); // → v2
-      expect(_state(c).loopCount, equals(2));
+      // Each undo restores the pre-apply settings of the Apply it reverses, so
+      // the panel shows the value the user had set for that step.
+      ctrl.undo(); // reverses 3rd apply → loop=3 pending over v2 source
+      expect(_state(c).loopCount, equals(3));
       expect(ctrl.canUndo, isTrue);
       expect(ctrl.canRedo, isTrue);
 
-      ctrl.undo(); // → v1
-      expect(_state(c).loopCount, equals(1));
+      ctrl.undo(); // reverses 2nd apply → loop=2
+      expect(_state(c).loopCount, equals(2));
 
-      ctrl.undo(); // → v0
-      expect(_state(c).loopCount, equals(0));
+      ctrl.undo(); // reverses 1st apply → loop=1 over base source
+      expect(_state(c).loopCount, equals(1));
       expect(ctrl.canUndo, isFalse);
       expect(ctrl.canRedo, isTrue);
     });
@@ -229,40 +232,55 @@ void main() {
       expect(ctrl.canRedo, isFalse);
       expect(_state(c).loopCount, equals(9));
 
-      ctrl.undo(); // back to v1
+      ctrl.undo(); // reverses the loop=9 apply → loop=9 pending
+      expect(_state(c).loopCount, equals(9));
+      ctrl.undo(); // reverses the loop=1 apply → loop=1 over base source
       expect(_state(c).loopCount, equals(1));
-      ctrl.undo(); // back to base
-      expect(_state(c).loopCount, equals(0));
     });
 
-    test('undo/redo preserve overlayFontColor across multiple versions',
+    test('undo restores baked text layers to the panel (reported bug)',
         () async {
       final c = _makeContainer();
       addTearDown(c.dispose);
       final ctrl = await _loadGif(c);
 
-      ctrl.setLoopCount(1);
-      ctrl.setOverlayFontColor('red');
-      await ctrl.applyEdits(); // v1: fontColor=red
+      // Add text on the clean base gif, then apply (bakes text into pixels and
+      // resets the live text layer to []).
+      ctrl.addText();
+      ctrl.updateSelectedText(text: 'Hello');
+      await ctrl.applyEdits();
+      expect(_state(c).textItems, isEmpty); // baked → live layer cleared
+      expect(ctrl.canUndo, isTrue);
 
-      ctrl.setLoopCount(2);
-      ctrl.setOverlayFontColor('blue');
-      await ctrl.applyEdits(); // v2: fontColor=blue
-
-      expect(_state(c).overlayFontColor, equals('blue'));
-
+      // Undo must bring the text back into the panel over the clean base source.
       ctrl.undo();
-      expect(_state(c).overlayFontColor, equals('red'));
+      expect(_state(c).textItems, hasLength(1));
+      expect(_state(c).textItems.single.text, equals('Hello'));
+    });
 
-      ctrl.undo();
-      // Base state has default fontColor 'white'.
-      expect(_state(c).overlayFontColor, equals('white'));
+    test('text layer API: add / update / move / remove', () async {
+      final c = _makeContainer();
+      addTearDown(c.dispose);
+      final ctrl = await _loadGif(c);
 
-      ctrl.redo();
-      expect(_state(c).overlayFontColor, equals('red'));
+      ctrl.addText();
+      final id = _state(c).selectedTextId;
+      expect(id, isNotNull);
+      expect(_state(c).textItems.length, equals(1));
+      expect(_state(c).hasText, isTrue); // default text 'Text'
 
-      ctrl.redo();
-      expect(_state(c).overlayFontColor, equals('blue'));
+      ctrl.updateSelectedText(text: 'Hello', fontColor: 'FF0000');
+      expect(_state(c).selectedText!.text, equals('Hello'));
+      expect(_state(c).selectedText!.fontColor, equals('FF0000'));
+
+      ctrl.moveSelectedText(0.2, 0.3);
+      expect(_state(c).selectedText!.nx, closeTo(0.2, 1e-9));
+      expect(_state(c).selectedText!.ny, closeTo(0.3, 1e-9));
+
+      ctrl.removeText(id!);
+      expect(_state(c).textItems, isEmpty);
+      expect(_state(c).selectedTextId, isNull);
+      expect(_state(c).hasText, isFalse);
     });
   });
 
@@ -393,7 +411,8 @@ void main() {
       expect(ctrl.canUndo, isTrue);
       ctrl.undo();
       expect(ctrl.canUndo, isFalse);
-      expect(_state(c).loopCount, equals(0));
+      // Pre-apply settings restored (loop=2 pending over the baked base).
+      expect(_state(c).loopCount, equals(2));
     });
   });
 }
