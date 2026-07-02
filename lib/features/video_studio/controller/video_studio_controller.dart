@@ -38,8 +38,8 @@ class VideoStudioState {
     this.fontFiles = const {},
     this.fontFamilies = const {},
     this.doOptimize = false,
-    this.optimizeColors = 200,
-    this.optimizeLossy = 20,
+    this.optimizeColors = 246,
+    this.optimizeLossy = 15,
     this.optimizeFrameDrop = 0,
     this.fps = 16,
     this.loopCount = 0,
@@ -201,6 +201,42 @@ class VideoStudioState {
       !isCropFull ||
       targetWidth != null ||
       (speedFactor - 1.0).abs() >= 0.001;
+
+  /// GIF stage: whether a re-encode is needed on top of doOptimize/text (fps
+  /// retiming, boomerang, or a geometry/speed edit).
+  bool get needsGifEdit {
+    final srcFps = sourceInfo?.fps;
+    final fpsChanged = srcFps != null && (fps - srcFps).abs() >= 0.5;
+    return hasEdits || boomerang || fpsChanged || (loopCount != 0 && !doOptimize);
+  }
+
+  /// Whether Apply/Export would actually do anything beyond a straight save.
+  bool get hasPendingApply => isGif
+      ? (needsGifEdit || doOptimize || hasText)
+      : (hasEdits || hasTrim || hasText || hasVolumeChange || hasCut);
+
+  /// Whether [tool]'s panel currently carries a non-default edit — drives the
+  /// dot indicator on the tool selector.
+  bool isToolEdited(StudioTool tool) {
+    switch (tool) {
+      case StudioTool.crop:
+        return !isCropFull;
+      case StudioTool.resize:
+        return targetWidth != null;
+      case StudioTool.speed:
+        return (speedFactor - 1.0).abs() >= 0.001;
+      case StudioTool.trim:
+        return hasTrim;
+      case StudioTool.cut:
+        return hasCut;
+      case StudioTool.text:
+        return hasText;
+      case StudioTool.optimize:
+        return doOptimize;
+      case StudioTool.properties:
+        return isGif ? (loopCount != 0 || boomerang) : hasVolumeChange;
+    }
+  }
 
   VideoStudioState copyWith({
     Object? inputFile = _s,
@@ -798,22 +834,13 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
 
   // ── GIF render pipeline ───────────────────────────────────────────────────
 
-  bool _needsGifEdit(VideoStudioState s) {
-    final srcFps = s.sourceInfo?.fps;
-    final fpsChanged = srcFps != null && (s.fps - srcFps).abs() >= 0.5;
-    return s.hasEdits ||
-        s.boomerang ||
-        fpsChanged ||
-        (s.loopCount != 0 && !s.doOptimize);
-  }
-
   /// Runs editGif → optimizeGif for [s] starting from [workingFile].
   /// Returns `(result, editDir)`: result is null on error (state already
   /// updated); editDir is the editGif temp dir when both steps ran so the
   /// caller can free it if needed.
   Future<(File?, String?)> _runGifPipeline(
       VideoStudioState s, File workingFile) async {
-    final needsEdit = _needsGifEdit(s);
+    final needsEdit = s.needsGifEdit;
     final needsText = s.hasText && s.fontReady && s.sourceInfo != null;
     String? editDir;
     // Frees a temp produced by an earlier step once a later step supersedes it.
@@ -924,9 +951,7 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
     }
 
     // Nothing pending → don't burn an encode.
-    if (!s.hasEdits && !s.hasTrim && !s.hasText && !s.hasVolumeChange && !s.hasCut) {
-      return false;
-    }
+    if (!s.hasPendingApply) return false;
 
     state = AsyncData(s.copyWith(
         isProcessing: true, progress: null, error: null, activeTool: null));
@@ -1048,7 +1073,7 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
     }
 
     // Fast path: nothing to apply → save the baked GIF directly.
-    if (!_needsGifEdit(s) && !s.doOptimize && !s.hasText) {
+    if (!s.hasPendingApply) {
       final saved =
           await _export.saveGif(s.sourceFile!, defaultName: 'studio.gif');
       if (saved != null) await _addRecent(saved);
@@ -1084,7 +1109,7 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
     }
 
     // Nothing pending → don't burn an ffmpeg pass.
-    if (!_needsGifEdit(s) && !s.doOptimize && !s.hasText) return false;
+    if (!s.hasPendingApply) return false;
 
     state = AsyncData(s.copyWith(
         isProcessing: true, progress: null, error: null, activeTool: null));

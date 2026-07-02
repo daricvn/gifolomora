@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
+import 'package:gifolomora/core/services/gif/gif_lzw.dart';
 import 'package:gifolomora/core/services/gif_optimizer.dart';
 
 /// Builds an animated GIF: 3 frames, [size]×[size], a solid background with a
@@ -19,6 +20,130 @@ Uint8List _buildSourceGif(int size) {
     encoder.addFrame(frame, duration: 10);
   }
   return encoder.finish()!;
+}
+
+/// Hand-assembles a sticker-class GIF: transparent background, a 2×2 opaque
+/// red dot that MOVES between frames, disposal=2. package:image's GifEncoder
+/// can't write transparency, so the file is built byte-by-byte (frame data via
+/// GifLzw, which is round-trip tested separately).
+Uint8List _buildStickerGif() {
+  const size = 8;
+  const transparent = 3;
+  final out = BytesBuilder();
+  void u16(int v) => out
+    ..addByte(v & 0xff)
+    ..addByte((v >> 8) & 0xff);
+
+  out.add('GIF89a'.codeUnits);
+  u16(size);
+  u16(size);
+  out.addByte(0x80 | 0x01); // GCT present, 4 entries
+  out.addByte(0);
+  out.addByte(0);
+  // GCT: red, green, white, black (index 3 = transparent).
+  out.add(const [220, 40, 40, 40, 200, 40, 255, 255, 255, 0, 0, 0]);
+  // NETSCAPE2.0 loop forever.
+  out
+    ..addByte(0x21)
+    ..addByte(0xFF)
+    ..addByte(11)
+    ..add('NETSCAPE2.0'.codeUnits)
+    ..addByte(0x03)
+    ..addByte(0x01);
+  u16(0);
+  out.addByte(0);
+
+  for (final dotAt in [1, 5]) {
+    final indices = Uint8List(size * size)
+      ..fillRange(0, size * size, transparent);
+    for (var y = dotAt; y < dotAt + 2; y++) {
+      for (var x = dotAt; x < dotAt + 2; x++) {
+        indices[y * size + x] = 0; // red
+      }
+    }
+    out
+      ..addByte(0x21)
+      ..addByte(0xF9)
+      ..addByte(4)
+      ..addByte((2 << 2) | 0x01); // disposal=2, transparency on
+    u16(10); // 10cs
+    out
+      ..addByte(transparent)
+      ..addByte(0)
+      ..addByte(0x2C);
+    u16(0);
+    u16(0);
+    u16(size);
+    u16(size);
+    out.addByte(0); // no local color table
+    out.add(GifLzw.encode(indices, 2));
+  }
+  out.addByte(0x3B);
+  return out.toBytes();
+}
+
+/// GIF whose frame 1 is a 1×1 sub-rect duplicate-frame placeholder (disposal=1,
+/// no local color table) — the shape pre-optimized GIFs (gifsicle/ffmpeg) use
+/// for "nothing changed". package:image's decode() mis-composites this into a
+/// solid index-0 flood; the optimizer must composite raw frames itself.
+Uint8List _buildSubRectDupGif() {
+  const size = 16;
+  final out = BytesBuilder();
+  void u16(int v) => out
+    ..addByte(v & 0xff)
+    ..addByte((v >> 8) & 0xff);
+
+  out.add('GIF89a'.codeUnits);
+  u16(size);
+  u16(size);
+  out.addByte(0x80 | 0x01); // GCT present, 4 entries
+  out.addByte(0);
+  out.addByte(0);
+  // GCT: teal (index 0 — the mis-composite flood color), red, white, black.
+  out.add(const [66, 137, 160, 220, 40, 40, 255, 255, 255, 0, 0, 0]);
+
+  // Frame 0: full-canvas red/white checker.
+  final full = Uint8List(size * size);
+  for (var p = 0; p < full.length; p++) {
+    full[p] = ((p ~/ size) + p) % 2 == 0 ? 1 : 2;
+  }
+  out
+    ..addByte(0x21)
+    ..addByte(0xF9)
+    ..addByte(4)
+    ..addByte(1 << 2); // disposal=1, no transparency
+  u16(10);
+  out
+    ..addByte(0)
+    ..addByte(0)
+    ..addByte(0x2C);
+  u16(0);
+  u16(0);
+  u16(size);
+  u16(size);
+  out.addByte(0);
+  out.add(GifLzw.encode(full, 2));
+
+  // Frame 1: 1×1 rect at the bottom-right corner repeating that pixel.
+  out
+    ..addByte(0x21)
+    ..addByte(0xF9)
+    ..addByte(4)
+    ..addByte(1 << 2);
+  u16(10);
+  out
+    ..addByte(0)
+    ..addByte(0)
+    ..addByte(0x2C);
+  u16(size - 1);
+  u16(size - 1);
+  u16(1);
+  u16(1);
+  out.addByte(0);
+  out.add(GifLzw.encode(Uint8List.fromList([full[size * size - 1]]), 2));
+
+  out.addByte(0x3B);
+  return out.toBytes();
 }
 
 void main() {
@@ -102,6 +227,57 @@ void main() {
       final totalMs = decoded.frames
           .fold<int>(0, (sum, fr) => sum + fr.frameDuration);
       expect(totalMs, 400, reason: 'total playback time must be preserved (ms)');
+    });
+
+    test('transparent-background GIF with moving dot leaves no ghost trail',
+        () async {
+      // Disposal=1 can never erase a drawn pixel, so the diff pipeline would
+      // leave the dot's old position opaque forever (ghost trail, growing
+      // every frame and across loops). The optimizer must detect the erasure
+      // requirement and fall back to disposal=2 standalone frames.
+      final src = _buildStickerGif();
+      for (final lossy in [0, 40]) {
+        final decoded = await optimizeAndDecode(src, lossy: lossy);
+        expect(decoded!.numFrames, 2);
+        for (var f = 0; f < 2; f++) {
+          var opaque = 0;
+          for (final px in decoded.frames[f]) {
+            if (px.a.toInt() != 0) opaque++;
+          }
+          expect(opaque, 4,
+              reason: 'frame $f (lossy=$lossy) must show exactly the 2×2 dot — '
+                  'more means the previous dot position was never erased');
+        }
+      }
+    });
+
+    test('1×1 sub-rect duplicate frame merges instead of flashing', () async {
+      // Regression: package:image's decode() floods such frames with index 0
+      // (bright teal here), which the optimizer then faithfully encoded — a
+      // full-canvas wrong-color flash frame. With correct raw-frame
+      // compositing frame 1 displays identically to frame 0 and must merge
+      // into a single 20cs frame.
+      final src = _buildSubRectDupGif();
+      final input = File('${tmp.path}/dup_in.gif')..writeAsBytesSync(src);
+      final output = File('${tmp.path}/dup_out.gif');
+      await GifOptimizer.optimize(input, output, colors: 64, lossy: 40);
+      final outBytes = output.readAsBytesSync();
+      final decoded = img.decodeGif(outBytes);
+      expect(decoded!.numFrames, 1,
+          reason: 'duplicate placeholder frame must fold into frame 0');
+      // package:image does not set frameDuration on single-frame decodes, so
+      // read the GCE delay (byte 4/5 after the 21 F9 04 header) directly.
+      var delayCs = -1;
+      for (var i = 0; i + 5 < outBytes.length; i++) {
+        if (outBytes[i] == 0x21 && outBytes[i + 1] == 0xF9) {
+          delayCs = outBytes[i + 4] | (outBytes[i + 5] << 8);
+          break;
+        }
+      }
+      expect(delayCs, 20, reason: 'folded duration must be preserved (cs)');
+      // Content must be the checker, not a teal flood.
+      final px = decoded.frames[0].getPixel(0, 0);
+      expect(px.r, greaterThan(150), reason: 'checker red/white, not teal');
     });
 
     test('rejects invalid GIF data', () async {

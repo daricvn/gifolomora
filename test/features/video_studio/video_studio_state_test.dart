@@ -365,6 +365,69 @@ void main() {
     });
   });
 
+  // ── hasPendingApply / isToolEdited ────────────────────────────────────────
+  group('VideoStudioState — hasPendingApply', () {
+    test('video stage: false at defaults', () {
+      const s = VideoStudioState(stage: EditStage.video);
+      expect(s.hasPendingApply, isFalse);
+    });
+
+    test('video stage: true when speed changed', () {
+      const s = VideoStudioState(stage: EditStage.video, speedFactor: 2.0);
+      expect(s.hasPendingApply, isTrue);
+    });
+
+    test('gif stage: false at defaults', () {
+      const s = VideoStudioState(stage: EditStage.gif);
+      expect(s.hasPendingApply, isFalse);
+    });
+
+    test('gif stage: true when doOptimize set', () {
+      const s = VideoStudioState(stage: EditStage.gif, doOptimize: true);
+      expect(s.hasPendingApply, isTrue);
+    });
+
+    test('gif stage: true when boomerang set (needsGifEdit)', () {
+      const s = VideoStudioState(stage: EditStage.gif, boomerang: true);
+      expect(s.hasPendingApply, isTrue);
+    });
+  });
+
+  group('VideoStudioState — isToolEdited', () {
+    test('crop: true when not full', () {
+      final s = VideoStudioState(
+        cropNormalized: const Rect.fromLTWH(0.1, 0, 0.9, 1),
+      );
+      expect(s.isToolEdited(StudioTool.crop), isTrue);
+    });
+
+    test('resize: true when targetWidth set', () {
+      const s = VideoStudioState(targetWidth: 480);
+      expect(s.isToolEdited(StudioTool.resize), isTrue);
+    });
+
+    test('properties: video uses hasVolumeChange', () {
+      const s = VideoStudioState(
+        stage: EditStage.video,
+        volume: 1.5,
+        sourceInfo: MediaInfo(durationMs: 1000, width: 320, height: 240, hasAudio: true),
+      );
+      expect(s.isToolEdited(StudioTool.properties), isTrue);
+    });
+
+    test('properties: gif uses loopCount/boomerang', () {
+      const s = VideoStudioState(stage: EditStage.gif, boomerang: true);
+      expect(s.isToolEdited(StudioTool.properties), isTrue);
+    });
+
+    test('false at all defaults for every tool', () {
+      const s = VideoStudioState();
+      for (final t in StudioTool.values) {
+        expect(s.isToolEdited(t), isFalse, reason: '$t should be unedited at defaults');
+      }
+    });
+  });
+
   // ── copyWith ──────────────────────────────────────────────────────────────
   group('VideoStudioState — copyWith', () {
     test('preserves unset fields', () {

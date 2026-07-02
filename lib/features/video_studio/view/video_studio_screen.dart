@@ -125,7 +125,28 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
               tooltip: 'Start over',
               icon: const Icon(Icons.restart_alt_rounded,
                   color: AppColors.textLo, size: 22),
-              onPressed: ctrl.clear,
+              onPressed: () async {
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    title: const Text('Start over?'),
+                    content: const Text(
+                        'This discards the loaded file and all edits.'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('Start over',
+                            style: TextStyle(color: Colors.redAccent)),
+                      ),
+                    ],
+                  ),
+                );
+                if (ok == true) ctrl.clear();
+              },
             ),
         ],
       ),
@@ -272,14 +293,52 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                                 interactive: textActive,
                               ),
                             ),
-                          // Red tint when playhead is inside a cut segment (hint only).
+                          // Red tint + corner chip when playhead is inside a
+                          // cut segment (hint only — marked for removal, not
+                          // an error state).
                           if (!state.isGif &&
                               state.cutSegments.any((s) =>
                                   _positionMs >= s.startMs &&
                                   _positionMs < s.endMs))
-                            const Positioned.fill(
+                            Positioned.fill(
                               child: IgnorePointer(
-                                child: ColoredBox(color: Color(0x80FF0000)),
+                                child: Stack(
+                                  children: [
+                                    const Positioned.fill(
+                                      child: ColoredBox(
+                                          color: Color(0x40FF0000)),
+                                    ),
+                                    Positioned(
+                                      top: 10,
+                                      left: 10,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.red
+                                              .withValues(alpha: 0.85),
+                                          borderRadius:
+                                              BorderRadius.circular(6),
+                                        ),
+                                        child: const Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.cut_rounded,
+                                                color: Colors.white,
+                                                size: 11),
+                                            SizedBox(width: 4),
+                                            Text('CUT',
+                                                style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 10,
+                                                    fontWeight:
+                                                        FontWeight.w700)),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           // YouTube-style controls — videos only, and only when
@@ -763,42 +822,61 @@ class _ControlDock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.bg1,
-        border:
-            Border(top: BorderSide(color: AppColors.glassStroke, width: 0.5)),
-      ),
-      padding: EdgeInsets.fromLTRB(
-          16, 12, 16, 12 + MediaQuery.of(context).padding.bottom),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _ToolSelector(
-            active: state.activeTool,
-            onSelect: ctrl.setActiveTool,
-            isGif: state.isGif,
-          ),
-          const SizedBox(height: 12),
-          AnimatedSize(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOut,
-            alignment: Alignment.topCenter,
-            child: _ToolPanel(
-              state: state,
-              ctrl: ctrl,
-              positionMs: positionMs,
-              onSeekPreview: onSeekPreview,
-              toast: toast,
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: AppColors.bg1,
+          border: Border(
+              top: BorderSide(color: AppColors.glassStroke, width: 0.5)),
+        ),
+        child: Stack(
+          children: [
+            const Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 48,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(gradient: AppGradients.cardSheen),
+                ),
+              ),
             ),
-          ),
-          if (state.error != null) ...[
-            const SizedBox(height: 10),
-            _ErrorCard(message: state.error!),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  16, 12, 16, 12 + MediaQuery.of(context).padding.bottom),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _ToolSelector(
+                    state: state,
+                    onSelect: ctrl.setActiveTool,
+                  ),
+                  const SizedBox(height: 12),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
+                    alignment: Alignment.topCenter,
+                    child: _ToolPanel(
+                      state: state,
+                      ctrl: ctrl,
+                      positionMs: positionMs,
+                      onSeekPreview: onSeekPreview,
+                      toast: toast,
+                    ),
+                  ),
+                  if (state.error != null) ...[
+                    const SizedBox(height: 10),
+                    _ErrorCard(message: state.error!),
+                  ],
+                  const SizedBox(height: 12),
+                  _ActionBar(state: state, ctrl: ctrl, toast: toast),
+                ],
+              ),
+            ),
           ],
-          const SizedBox(height: 12),
-          _ActionBar(state: state, ctrl: ctrl, toast: toast),
-        ],
+        ),
       ),
     );
   }
@@ -806,26 +884,26 @@ class _ControlDock extends StatelessWidget {
 
 class _ToolSelector extends StatelessWidget {
   const _ToolSelector({
-    required this.active,
+    required this.state,
     required this.onSelect,
-    required this.isGif,
   });
-  final StudioTool? active;
+  final VideoStudioState state;
   final void Function(StudioTool?) onSelect;
-  final bool isGif;
 
   @override
   Widget build(BuildContext context) {
-    // (tool, icon, label, disabled, tag)
+    final active = state.activeTool;
+    final isGif = state.isGif;
+    // (tool, icon, label)
     final tools = [
-      (StudioTool.crop, Icons.crop_rounded, 'Crop', false, null),
-      (StudioTool.resize, Icons.photo_size_select_large_rounded, 'Resize', false, null),
-      (StudioTool.speed, Icons.speed_rounded, 'Speed', false, null),
-      if (!isGif) (StudioTool.trim, Icons.straighten_rounded, 'Trim', false, null),
-      if (!isGif) (StudioTool.cut, Icons.cut_rounded, 'Cut', false, null),
-      (StudioTool.text, Icons.title_rounded, 'Text', false, null),
-      if (isGif) (StudioTool.optimize, Icons.tune_rounded, 'Optimise', false, null),
-      (StudioTool.properties, Icons.settings_suggest_rounded, 'Props', false, null),
+      (StudioTool.crop, Icons.crop_rounded, 'Crop'),
+      (StudioTool.resize, Icons.photo_size_select_large_rounded, 'Resize'),
+      (StudioTool.speed, Icons.speed_rounded, 'Speed'),
+      if (!isGif) (StudioTool.trim, Icons.straighten_rounded, 'Trim'),
+      if (!isGif) (StudioTool.cut, Icons.cut_rounded, 'Cut'),
+      (StudioTool.text, Icons.title_rounded, 'Text'),
+      if (isGif) (StudioTool.optimize, Icons.tune_rounded, 'Optimise'),
+      (StudioTool.properties, Icons.settings_suggest_rounded, 'Props'),
     ];
     return Wrap(
       spacing: 6,
@@ -838,9 +916,8 @@ class _ToolSelector extends StatelessWidget {
               icon: t.$2,
               label: t.$3,
               selected: active == t.$1,
-              disabled: t.$4,
-              tag: t.$5,
-              onTap: t.$4 ? null : () => onSelect(active == t.$1 ? null : t.$1),
+              edited: state.isToolEdited(t.$1),
+              onTap: () => onSelect(active == t.$1 ? null : t.$1),
             ),
           ),
       ],
@@ -853,35 +930,27 @@ class _ToolButton extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.selected,
-    this.disabled = false,
-    this.tag,
-    this.onTap,
+    this.edited = false,
+    required this.onTap,
   });
   final IconData icon;
   final String label;
   final bool selected;
-  final bool disabled;
-  final String? tag;
-  final VoidCallback? onTap;
+  final bool edited;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final effectiveColor = disabled
-        ? AppColors.textLo.withValues(alpha: 0.35)
-        : selected
-            ? Colors.white
-            : AppColors.textHi;
+    final effectiveColor = selected ? Colors.white : AppColors.textHi;
     final btn = AnimatedContainer(
       duration: const Duration(milliseconds: 150),
       padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(
-        gradient: selected && !disabled ? AppGradients.primaryButton : null,
-        color: selected && !disabled ? null : AppColors.glassTint,
+        gradient: selected ? AppGradients.primaryButton : null,
+        color: selected ? null : AppColors.glassTint,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: selected && !disabled
-              ? Colors.transparent
-              : AppColors.glassStroke,
+          color: selected ? Colors.transparent : AppColors.glassStroke,
         ),
       ),
       child: Column(
@@ -897,8 +966,8 @@ class _ToolButton extends StatelessWidget {
       ),
     );
     return GestureDetector(
-      onTap: disabled ? null : onTap,
-      child: tag == null
+      onTap: onTap,
+      child: !edited
           ? btn
           : Stack(
               clipBehavior: Clip.none,
@@ -906,22 +975,15 @@ class _ToolButton extends StatelessWidget {
               children: [
                 btn,
                 Positioned(
-                  top: -4,
-                  right: -4,
+                  top: -2,
+                  right: -2,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 4, vertical: 1),
+                    width: 8,
+                    height: 8,
                     decoration: BoxDecoration(
-                      color: AppColors.accentC.withValues(alpha: 0.85),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      tag!,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 8,
-                          fontWeight: FontWeight.w700,
-                          height: 1.2),
+                      color: selected ? Colors.white : AppColors.accentC,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.bg1, width: 1.5),
                     ),
                   ),
                 ),
@@ -947,6 +1009,21 @@ class _ToolPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 160),
+      transitionBuilder: (child, anim) => FadeTransition(
+        opacity: anim,
+        child: SlideTransition(
+          position: Tween<Offset>(begin: const Offset(0, 0.04), end: Offset.zero)
+              .animate(anim),
+          child: child,
+        ),
+      ),
+      child: _panel(),
+    );
+  }
+
+  Widget _panel() {
     switch (state.activeTool) {
       case StudioTool.crop:
         return Row(
@@ -1298,9 +1375,26 @@ class _CutPanelState extends State<_CutPanel> {
                 ),
               )),
           const SizedBox(height: 4),
-          Text(
-            'Output ≈ ${_fmtMs(s.cutOutputMs)}',
-            style: const TextStyle(color: AppColors.textLo, fontSize: 12),
+          Row(
+            children: [
+              Text(
+                'Output ≈ ${_fmtMs(s.cutOutputMs)}',
+                style: const TextStyle(color: AppColors.textLo, fontSize: 12),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: widget.ctrl.resetCut,
+                icon: const Icon(Icons.restore_rounded,
+                    size: 13, color: AppColors.accentB),
+                label: const Text('Clear all',
+                    style: TextStyle(color: AppColors.accentB, fontSize: 12)),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ],
           ),
         ],
       ],
@@ -1974,15 +2068,17 @@ class _ActionBar extends StatelessWidget {
             child: _SecondaryButton(
               icon: Icons.auto_fix_high_rounded,
               label: 'Apply',
+              enabled: state.hasPendingApply,
               onTap: () async {
                 final ok = await ctrl.applyEdits();
-                toast(ok ? 'Applied to preview' : 'Nothing to apply');
+                if (ok) toast('Applied to preview');
               },
             ),
           ),
           const SizedBox(width: 10),
           _PrimaryButton(
             icon: Icons.save_alt_rounded,
+            label: 'Export',
             tooltip: 'Export GIF',
             onTap: () async {
               final ok = await ctrl.exportGif();
@@ -2028,15 +2124,17 @@ class _ActionBar extends StatelessWidget {
           child: _SecondaryButton(
             icon: Icons.auto_fix_high_rounded,
             label: 'Apply',
+            enabled: state.hasPendingApply,
             onTap: () async {
               final ok = await ctrl.applyVideoEdits();
-              toast(ok ? 'Applied to preview' : 'Nothing to apply');
+              if (ok) toast('Applied to preview');
             },
           ),
         ),
         const SizedBox(width: 10),
         _PrimaryButton(
           icon: Icons.save_alt_rounded,
+          label: 'Export',
           tooltip: 'Export Video',
           onTap: () async {
             final ok = await ctrl.exportVideo();
@@ -2048,11 +2146,13 @@ class _ActionBar extends StatelessWidget {
   }
 }
 
-// Icon-only primary action (gradient fill). Pass [tooltip] to name the action.
+// Primary action (gradient fill). Pass [label] to show text next to the
+// icon; omit for an icon-only button. [tooltip] names the action either way.
 class _PrimaryButton extends StatelessWidget {
   const _PrimaryButton(
-      {required this.icon, this.tooltip, required this.onTap});
+      {required this.icon, this.label, this.tooltip, required this.onTap});
   final IconData icon;
+  final String? label;
   final String? tooltip;
   final VoidCallback onTap;
 
@@ -2066,8 +2166,22 @@ class _PrimaryButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 18),
-          child: Icon(icon, color: Colors.white, size: 22),
+          padding: EdgeInsets.symmetric(
+              vertical: 15, horizontal: label == null ? 18 : 16),
+          child: label == null
+              ? Icon(icon, color: Colors.white, size: 22)
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, color: Colors.white, size: 18),
+                    const SizedBox(width: 8),
+                    Text(label!,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600)),
+                  ],
+                ),
         ),
       ),
     );
@@ -2077,35 +2191,43 @@ class _PrimaryButton extends StatelessWidget {
 }
 
 class _SecondaryButton extends StatelessWidget {
-  const _SecondaryButton(
-      {required this.icon, required this.label, required this.onTap});
+  const _SecondaryButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.enabled = true,
+  });
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
-        decoration: BoxDecoration(
-          color: AppColors.glassTint,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.glassStroke),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: AppColors.textHi, size: 18),
-            const SizedBox(width: 8),
-            Text(label,
-                style: const TextStyle(
-                    color: AppColors.textHi,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600)),
-          ],
+    return Opacity(
+      opacity: enabled ? 1 : 0.5,
+      child: GestureDetector(
+        onTap: enabled ? onTap : null,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+          decoration: BoxDecoration(
+            color: AppColors.glassTint,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.glassStroke),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: AppColors.textHi, size: 18),
+              const SizedBox(width: 8),
+              Text(label,
+                  style: const TextStyle(
+                      color: AppColors.textHi,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600)),
+            ],
+          ),
         ),
       ),
     );

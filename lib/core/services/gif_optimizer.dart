@@ -55,63 +55,97 @@ class GifOptimizer {
 
   static Uint8List _process(Uint8List bytes, int colors, int lossy,
       int? loopOverride, int frameDrop) {
-    final decoded = img.decodeGif(bytes);
-    if (decoded == null) throw const FormatException('Invalid GIF');
-
-    final width = decoded.width;
-    final height = decoded.height;
+    // 1. Decode raw frames and composite them ourselves. package:image's
+    //    decode() mis-composites sub-rect disposal=1 frames that lack a local
+    //    color table — it skips the previous-canvas copy, flooding the frame
+    //    with index 0 and drawing only the sub-rect. Pre-optimized GIFs carry
+    //    1×1 duplicate-frame placeholders and cropped diff frames, which came
+    //    out as a solid wrong-color "flash" frame. decodeFrame() returns raw
+    //    rect frames (palette alpha 0 = transparent); spec compositing is done
+    //    here: draw opaque pixels at the frame offset, snapshot, then apply
+    //    disposal (1 keep, 2 clear rect, 3 restore previous).
+    //    ponytail: interlaced sub-rect frames still broken upstream
+    //    (decodeFrame writes interlaced rows at absolute y into a rect-sized
+    //    image) — write our own LZW/block reader if that class ever shows up.
+    final decoder = img.GifDecoder();
+    final gifInfo = decoder.startDecode(bytes);
+    if (gifInfo == null || gifInfo.frames.isEmpty) {
+      throw const FormatException('Invalid GIF');
+    }
+    final width = gifInfo.width;
+    final height = gifInfo.height;
     final pixels = width * height;
-    final allFrames =
-        decoded.frames.isEmpty ? <img.Image>[decoded] : decoded.frames.toList();
+    final totalFrames = gifInfo.frames.length;
 
-    // Optional frame dropping: remove 1 of every [frameDrop] frames. Dropped
-    // duration folds into the previous kept frame so total playback time is
-    // unchanged. Frame 0 is always kept (drop test requires a prior kept frame).
-    final srcFrames = <img.Image>[];
-    final srcDurMs = <int>[]; // per kept frame, in ms (incl. folded drops)
-    for (var f = 0; f < allFrames.length; f++) {
-      final fr = allFrames[f];
+    // Composite every source frame in order (the disposal chain needs all of
+    // them), snapshotting the ones that survive [frameDrop] (1 of every N
+    // dropped; a dropped frame's duration folds into the previous kept frame
+    // so playback time is unchanged; frame 0 is always kept).
+    final framesRgb = <Uint8List>[];
+    final framesTransparent = <Uint8List>[];
+    final durations = <int>[]; // centiseconds
+    final canvasRgb = Uint8List(pixels * 3);
+    final canvasCovered = Uint8List(pixels); // 0 = never drawn → transparent
+    for (var f = 0; f < totalFrames; f++) {
+      final desc = gifInfo.frames[f];
+      final raw = decoder.decodeFrame(f);
+      if (raw == null) throw const FormatException('Invalid GIF');
+      Uint8List? savedRgb;
+      Uint8List? savedCovered;
+      if (desc.disposal == 3) {
+        savedRgb = Uint8List.fromList(canvasRgb);
+        savedCovered = Uint8List.fromList(canvasCovered);
+      }
+      for (final px in raw) {
+        if (px.a.toInt() == 0) continue; // transparent → keep canvas
+        final p = (desc.y + px.y) * width + (desc.x + px.x);
+        final o = p * 3;
+        canvasRgb[o] = px.r.toInt();
+        canvasRgb[o + 1] = px.g.toInt();
+        canvasRgb[o + 2] = px.b.toInt();
+        canvasCovered[p] = 1;
+      }
+
       final drop = frameDrop >= 2 &&
-          srcFrames.isNotEmpty &&
+          durations.isNotEmpty &&
           (f % frameDrop) == frameDrop - 1;
+      final durCs = desc.duration > 0 ? desc.duration.clamp(1, 6000) : 10;
       if (drop) {
-        srcDurMs[srcDurMs.length - 1] += fr.frameDuration;
+        durations[durations.length - 1] =
+            (durations.last + durCs).clamp(1, 6000);
       } else {
-        srcFrames.add(fr);
-        srcDurMs.add(fr.frameDuration);
+        framesRgb.add(Uint8List.fromList(canvasRgb));
+        final trans = Uint8List(pixels);
+        for (var p = 0; p < pixels; p++) {
+          trans[p] = canvasCovered[p] == 0 ? 1 : 0;
+        }
+        framesTransparent.add(trans);
+        durations.add(durCs);
+      }
+
+      // Disposal applies after the frame is displayed.
+      if (desc.disposal == 2) {
+        final bottom = desc.y + raw.height;
+        final right = desc.x + raw.width;
+        for (var y = desc.y; y < bottom; y++) {
+          final row = y * width;
+          for (var x = desc.x; x < right; x++) {
+            canvasCovered[row + x] = 0;
+          }
+        }
+      } else if (desc.disposal == 3 && savedRgb != null) {
+        canvasRgb.setAll(0, savedRgb);
+        canvasCovered.setAll(0, savedCovered!);
       }
     }
-    final frameCount = srcFrames.length;
+    final frameCount = framesRgb.length;
 
-    // Reserve one palette slot for transparency used by inter-frame diffing.
-    // The octree quantizer can return up to numberOfColors+1 entries, so cap
-    // the request at 254 → at most 255 real colors + 1 transparent ≤ 256.
-    final paletteColors = colors > 254 ? 254 : colors;
-
-    // 1. Resolve every frame to full-canvas RGBA + remember which pixels were
-    //    originally transparent. Frames from decodeGif are already composited.
-    final framesRgb = List<Uint8List>.filled(frameCount, Uint8List(0));
-    final framesTransparent = List<Uint8List>.filled(frameCount, Uint8List(0));
-    final durations = List<int>.filled(frameCount, 10);
-    for (var f = 0; f < frameCount; f++) {
-      final frame = srcFrames[f];
-      final rgb = Uint8List(pixels * 3);
-      final trans = Uint8List(pixels);
-      var i = 0;
-      var p = 0;
-      for (final px in frame) {
-        rgb[i] = px.r.toInt();
-        rgb[i + 1] = px.g.toInt();
-        rgb[i + 2] = px.b.toInt();
-        if (px.a.toInt() == 0) trans[p] = 1;
-        i += 3;
-        p++;
-      }
-      framesRgb[f] = rgb;
-      framesTransparent[f] = trans;
-      final d = srcDurMs[f]; // ms (incl. folded-in dropped frames)
-      durations[f] = d > 0 ? (d ~/ 10).clamp(1, 6000) : 10; // → centiseconds; floor 1cs, default 10cs for 0ms
-    }
+    // Reserve one palette slot for transparency used by inter-frame diffing,
+    // and keep real+transparent within the caller's color budget: crossing a
+    // power-of-two boundary (e.g. 130 entries for colors=128) doubles the GCT
+    // and widens every LZW code by a bit. The octree quantizer can return up
+    // to numberOfColors+1 entries, so request two below the budget.
+    final paletteColors = (colors - 2).clamp(2, 254);
 
     // 2. Train one global palette across all frames.
     final quantizer = _buildGlobalPalette(framesRgb, width, height, paletteColors);
@@ -167,11 +201,9 @@ class GifOptimizer {
       framesIndex[f] = idx;
     }
 
-    // 3b. Intra-frame lossy: horizontal run-extension.
-    //     Snap each pixel to its left neighbor's palette index when the true
-    //     color is within lossy budget → extends LZW runs → smaller stream.
-    //     Applies unconditionally per-frame (including frame 0 and static GIFs)
-    //     so `lossy` is not a dead knob on first/only frames.
+    // 3a. Intra-frame lossy: horizontal run-extension. Snap each pixel to its
+    //     left neighbor's palette index when the true color is within budget →
+    //     long flat runs before encoding.
     final lossyBudget = lossy * lossy;
     if (lossy > 0) {
       for (var f = 0; f < frameCount; f++) {
@@ -180,7 +212,7 @@ class GifOptimizer {
         for (var p = 0, j = 0; p < pixels; p++, j += 3) {
           if (p % width == 0) continue; // first pixel of row — no left neighbor
           final prev = idx[p - 1];
-          if (prev == idx[p]) continue; // already same index
+          if (prev == idx[p]) continue;
           final dr = rgb[j] - pr[prev];
           final dg = rgb[j + 1] - pg[prev];
           final db = rgb[j + 2] - pb[prev];
@@ -191,61 +223,205 @@ class GifOptimizer {
       }
     }
 
-    // 4. Inter-frame transparency diff against the running DISPLAYED canvas.
-    //    With disposal=1 a transparent pixel shows whatever was last *drawn* at
-    //    that location — the composite of all prior frames, not the full
+    // 3b. Lossy candidate lists: for a given true color, every palette index
+    //     within the budget, sorted by ascending error. The lossy LZW encoder
+    //     picks the first candidate that extends its current dictionary match,
+    //     so the error budget is spent only where it lengthens phrases
+    //     (gifsicle `--lossy` style). Cached on the same 5-bit-quantized key
+    //     as [nearest]; the encoder re-verifies each candidate against the
+    //     exact pixel color, so the cache is only a pre-filter.
+    final candCache = <int, Uint8List>{};
+    Uint8List candidatesFor(int r, int g, int b) {
+      final key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+      final cached = candCache[key];
+      if (cached != null) return cached;
+      final ids = <int>[];
+      final errs = <int>[];
+      for (var i = 0; i < realColors; i++) {
+        final dr = r - pr[i];
+        final dg = g - pg[i];
+        final db = b - pb[i];
+        final d = dr * dr + dg * dg + db * db;
+        if (d <= lossyBudget) {
+          // Insertion sort by error — candidate lists are tiny.
+          var at = ids.length;
+          while (at > 0 && errs[at - 1] > d) {
+            at--;
+          }
+          ids.insert(at, i);
+          errs.insert(at, d);
+        }
+      }
+      final result = ids.isEmpty
+          ? Uint8List.fromList([nearest(r, g, b)])
+          : Uint8List.fromList(ids);
+      candCache[key] = result;
+      return result;
+    }
+
+    // 3c. Sticker-class detection. The diff pipeline writes disposal=1, and
+    //     with disposal=1 a transparent pixel can only ever REVEAL what was
+    //     drawn before — it can never erase it. A GIF with a genuinely
+    //     transparent background whose opaque region moves or shrinks needs
+    //     erasure, so disposal=1 would leave permanent ghost trails (and they
+    //     accumulate across loop iterations). Detect that case up front and
+    //     fall back to standalone disposal=2 frames, which restore the frame
+    //     rect to background after display — spec-correct erase.
+    var needsErase = false;
+    final everDrawn = Uint8List(pixels);
+    for (var f = 0; f < frameCount && !needsErase; f++) {
+      final trans = framesTransparent[f];
+      for (var p = 0; p < pixels; p++) {
+        if (trans[p] == 1) {
+          if (everDrawn[p] == 1) {
+            needsErase = true;
+            break;
+          }
+        } else {
+          everDrawn[p] = 1;
+        }
+      }
+    }
+
+    // 4. Per-frame transparency + encode.
+    //
+    //    Normal mode (disposal=1): inter-frame diff against the running
+    //    DISPLAYED canvas. A transparent pixel shows whatever was last *drawn*
+    //    at that location — the composite of all prior frames, not the full
     //    previous frame. Diffing against the full previous frame lets lossy
-    //    error accumulate: each per-frame change can stay under budget while the
-    //    displayed pixel, frozen at an early frame, drifts arbitrarily far from
-    //    the true color → heavy ghosting / stale traces. Instead track the
-    //    actual displayed index per pixel and only leave a pixel transparent
-    //    when the canvas already shows the right color (lossless) or a color
-    //    within the lossy budget of the true color; otherwise redraw and update
-    //    the canvas. This bounds the displayed error to the budget every frame.
+    //    error accumulate: each per-frame change can stay under budget while
+    //    the displayed pixel, frozen at an early frame, drifts arbitrarily far
+    //    from the true color → heavy ghosting. Instead track the actual
+    //    displayed index per pixel and only leave a pixel transparent when the
+    //    canvas already shows the right color (lossless) or a color within the
+    //    lossy budget of the true color. Encoding happens inside this loop
+    //    because the lossy LZW path may substitute a different in-budget index
+    //    per pixel, and the canvas must track what is actually displayed — not
+    //    what we asked for. Frames that draw nothing merge into the previous
+    //    frame's duration (same as gifsicle); frame 0 is always kept.
+    //
+    //    Erase mode (disposal=2): every frame stands alone on a cleared
+    //    canvas, transparency is the source's own; only exact-duplicate
+    //    consecutive frames merge. No inter-frame diff savings, but correct.
+    //    ponytail: whole-GIF fallback; per-frame disposal mixing (gifsicle
+    //    optimize level 3) if sticker GIFs ever need diff savings too.
+    final minCodeSize = _minCodeSize(totalColors);
     final canvas = Uint8List(pixels)..fillRange(0, pixels, transparentIndex);
+    final boxes = <_Box>[];
+    final imageData = <Uint8List>[];
+    final outDurations = <int>[];
+    Uint8List? prevOut; // erase mode: last kept frame, for duplicate folding
     for (var f = 0; f < frameCount; f++) {
       final cur = framesIndex[f];
       final curRgb = framesRgb[f];
       final curTrans = framesTransparent[f];
       final out = Uint8List(pixels);
-      for (var p = 0, j = 0; p < pixels; p++, j += 3) {
-        if (curTrans[p] == 1) {
-          out[p] = transparentIndex; // originally transparent → reveal previous
-          continue;
+      var keep = true;
+      if (needsErase) {
+        for (var p = 0; p < pixels; p++) {
+          out[p] = curTrans[p] == 1 ? transparentIndex : cur[p];
         }
-        final desired = cur[p];
-        final shown = canvas[p];
-        var transparent = false;
-        if (shown == desired) {
-          transparent = true; // canvas already correct
-        } else if (lossyBudget > 0 && shown != transparentIndex) {
-          // Distance of the true current color to what the canvas displays now.
-          final dr = curRgb[j] - pr[shown];
-          final dg = curRgb[j + 1] - pg[shown];
-          final db = curRgb[j + 2] - pb[shown];
-          if (dr * dr + dg * dg + db * db <= lossyBudget) transparent = true;
+        keep = prevOut == null || !_listEquals(out, prevOut);
+      } else {
+        var drewAny = false;
+        for (var p = 0, j = 0; p < pixels; p++, j += 3) {
+          if (curTrans[p] == 1) {
+            out[p] = transparentIndex; // originally transparent → reveal previous
+            continue;
+          }
+          final desired = cur[p];
+          final shown = canvas[p];
+          var transparent = false;
+          if (shown == desired) {
+            transparent = true; // canvas already correct
+          } else if (lossyBudget > 0 && shown != transparentIndex) {
+            // Distance of the true current color to what the canvas shows now.
+            final dr = curRgb[j] - pr[shown];
+            final dg = curRgb[j + 1] - pg[shown];
+            final db = curRgb[j + 2] - pb[shown];
+            if (dr * dr + dg * dg + db * db <= lossyBudget) transparent = true;
+          }
+          if (transparent) {
+            out[p] = transparentIndex;
+          } else {
+            out[p] = desired; // redraw — canvas was wrong / too far
+            drewAny = true;
+          }
         }
-        if (transparent) {
-          out[p] = transparentIndex;
-        } else {
-          out[p] = desired; // redraw — canvas was wrong / too far
-          canvas[p] = desired;
+        keep = drewAny || outDurations.isEmpty;
+      }
+
+      if (!keep) {
+        // No-change frame: fold its duration into the previous frame.
+        outDurations[outDurations.length - 1] =
+            (outDurations.last + durations[f]).clamp(1, 6000);
+        continue;
+      }
+
+      // Erase mode writes full-canvas frames: disposal=2 only clears the
+      // frame's own rect, and package:image's decoder (used when an optimized
+      // GIF is fed back in) crashes on disposal=2 sub-rect frames. Transparent
+      // runs are nearly free in LZW, so the crop buys little there anyway.
+      final box = needsErase
+          ? _Box(0, 0, width, height)
+          : _boundingBox(out, width, height, transparentIndex);
+      final regionIdx = needsErase ? out : _crop(out, width, box);
+      var encoded = GifLzw.encode(regionIdx, minCodeSize);
+      var finalIdx = regionIdx;
+      if (lossyBudget > 0) {
+        // Two-way pick: also encode with in-budget index substitution that
+        // extends LZW matches, and keep whichever frame is smaller. Which one
+        // wins depends on content (substitution shrinks noisy regions but can
+        // disrupt phrase build-up on smooth gradients), so measure, don't
+        // guess. Both stay within the lossy budget of the true colors.
+        final regionRgb = _cropRgb(curRgb, width, box);
+        final chosen = Uint8List(regionIdx.length);
+        final lossyEncoded = GifLzw.encodeLossy(
+          regionIdx,
+          regionRgb,
+          minCodeSize,
+          transparentIndex: transparentIndex,
+          candidatesFor: candidatesFor,
+          paletteR: pr,
+          paletteG: pg,
+          paletteB: pb,
+          budget: lossyBudget,
+          chosen: chosen,
+        );
+        if (lossyEncoded.length < encoded.length) {
+          encoded = lossyEncoded;
+          finalIdx = chosen;
         }
       }
-      framesIndex[f] = out;
+      if (needsErase) {
+        prevOut = out;
+      } else {
+        // The canvas must reflect what the encoder actually wrote.
+        var o = 0;
+        for (var y = 0; y < box.height; y++) {
+          var p = (box.top + y) * width + box.left;
+          for (var x = 0; x < box.width; x++, p++, o++) {
+            final v = finalIdx[o];
+            if (v != transparentIndex) canvas[p] = v;
+          }
+        }
+      }
+      boxes.add(box);
+      imageData.add(encoded);
+      outDurations.add(durations[f]);
     }
 
     // 5. Assemble GIF bytes.
-    final minCodeSize = _minCodeSize(totalColors);
-    final loopCount = loopOverride ?? decoded.loopCount;
+    final loopCount = loopOverride ?? _parseLoopCount(bytes);
     return _writeGif(
       width: width,
       height: height,
       palette: palette,
       transparentIndex: transparentIndex,
-      minCodeSize: minCodeSize,
-      framesIndex: framesIndex,
-      durations: durations,
+      disposal: needsErase ? 2 : 1,
+      boxes: boxes,
+      imageData: imageData,
+      durations: outDurations,
       loopCount: loopCount,
     );
   }
@@ -297,8 +473,9 @@ class GifOptimizer {
     required int height,
     required img.Palette palette,
     required int transparentIndex,
-    required int minCodeSize,
-    required List<Uint8List> framesIndex,
+    required int disposal, // 1 = leave in place (diffed), 2 = restore to bg
+    required List<_Box> boxes,
+    required List<Uint8List> imageData,
     required List<int> durations,
     required int loopCount,
   }) {
@@ -338,7 +515,7 @@ class GifOptimizer {
       }
     }
 
-    final animated = framesIndex.length > 1;
+    final animated = imageData.length > 1;
     if (animated) {
       // NETSCAPE2.0 looping extension.
       out
@@ -352,19 +529,17 @@ class GifOptimizer {
       out.addByte(0);
     }
 
-    for (var f = 0; f < framesIndex.length; f++) {
-      final idx = framesIndex[f];
+    for (var f = 0; f < imageData.length; f++) {
+      final box = boxes[f];
 
-      // Crop to bounding box of non-transparent pixels.
-      final box = _boundingBox(idx, width, height, transparentIndex);
-
-      // Graphic Control Extension. Disposal = 1 (leave in place) so transparent
-      // pixels reveal the previous frame.
+      // Graphic Control Extension. Disposal 1 (leave in place: transparent
+      // pixels reveal the previous frame) or 2 (restore to background:
+      // standalone frames that can erase).
       out
         ..addByte(0x21)
         ..addByte(0xF9)
         ..addByte(4)
-        ..addByte((1 << 2) | 0x01); // disposal=1, transparency flag on
+        ..addByte((disposal << 2) | 0x01); // disposal, transparency flag on
       u16(durations[f]);
       out
         ..addByte(transparentIndex & 0xff)
@@ -378,9 +553,8 @@ class GifOptimizer {
       u16(box.height);
       out.addByte(0); // no local color table, no interlace
 
-      // Cropped index data.
-      final region = _crop(idx, width, box);
-      out.add(GifLzw.encode(region, minCodeSize));
+      // Pre-encoded LZW image data (cropped to the bounding box).
+      out.add(imageData[f]);
     }
 
     out.addByte(0x3B); // trailer
@@ -419,7 +593,48 @@ class GifOptimizer {
     return region;
   }
 
+  /// [_crop] for the 3-bytes-per-pixel RGB plane.
+  static Uint8List _cropRgb(Uint8List rgb, int srcWidth, _Box box) {
+    final rowBytes = box.width * 3;
+    final region = Uint8List(rowBytes * box.height);
+    var o = 0;
+    for (var y = 0; y < box.height; y++) {
+      final rowStart = ((box.top + y) * srcWidth + box.left) * 3;
+      region.setRange(o, o + rowBytes,
+          Uint8List.sublistView(rgb, rowStart, rowStart + rowBytes));
+      o += rowBytes;
+    }
+    return region;
+  }
+
   // ---- helpers -------------------------------------------------------------
+
+  /// Reads the NETSCAPE2.0 loop count (0 = forever). GifInfo does not expose
+  /// it, so scan for the extension: 21 FF 0B "NETSCAPE2.0" 03 01 lo hi.
+  static int _parseLoopCount(Uint8List bytes) {
+    const tag = 'NETSCAPE2.0';
+    outer:
+    for (var i = 0; i + 17 < bytes.length; i++) {
+      if (bytes[i] != 0x21 || bytes[i + 1] != 0xFF || bytes[i + 2] != 0x0B) {
+        continue;
+      }
+      for (var j = 0; j < tag.length; j++) {
+        if (bytes[i + 3 + j] != tag.codeUnitAt(j)) continue outer;
+      }
+      if (bytes[i + 14] == 0x03 && bytes[i + 15] == 0x01) {
+        return bytes[i + 16] | (bytes[i + 17] << 8);
+      }
+    }
+    return 0;
+  }
+
+  static bool _listEquals(Uint8List a, Uint8List b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
 
   static int _minCodeSize(int totalColors) {
     var bits = 1;
