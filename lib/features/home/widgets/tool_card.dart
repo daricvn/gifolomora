@@ -15,9 +15,9 @@ class ToolCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return GlassCard(
       onTap: onTap,
-      borderRadius: 8,
       padding: const EdgeInsets.all(16),
       flat: true,
+      hoverAccent: entry.accentColor,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -61,7 +61,7 @@ class _IconChip extends StatelessWidget {
       width: 42,
       height: 42,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(8),
         color: color.withValues(alpha: 0.16),
         border: Border.all(color: color.withValues(alpha: 0.35), width: 1),
       ),

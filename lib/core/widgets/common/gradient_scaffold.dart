@@ -83,6 +83,16 @@ class _GradientScaffoldState extends State<GradientScaffold>
               builder: (context, _) => _Blobs(t: _anim.value),
             ),
           ),
+          // Fine grain above gradient + blobs to hide banding on cheap
+          // panels. Alpha is baked into the asset (~3%), no Opacity needed.
+          const RepaintBoundary(
+            child: Image(
+              image: AssetImage('assets/noise.png'),
+              repeat: ImageRepeat.repeat,
+              filterQuality: FilterQuality.none,
+              fit: BoxFit.none,
+            ),
+          ),
           widget.body,
         ],
       ),

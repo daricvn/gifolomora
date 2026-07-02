@@ -7,6 +7,7 @@ class AppTheme {
   static ThemeData get dark => ThemeData(
     useMaterial3: true,
     brightness: Brightness.dark,
+    fontFamily: 'Inter',
     scaffoldBackgroundColor: AppColors.bg0,
     colorScheme: const ColorScheme.dark(
       primary: AppColors.accentA,
@@ -31,7 +32,23 @@ class AppTheme {
         color: AppColors.textHi,
         fontSize: 20,
         fontWeight: FontWeight.w700,
+        fontFamily: 'Inter',
       ),
+    ),
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: const Color(0xF0141B2E),
+      contentTextStyle: const TextStyle(
+        color: AppColors.textHi,
+        fontSize: 13.5,
+        fontFamily: 'Inter',
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: AppColors.glassStroke, width: 1),
+      ),
+      elevation: 8,
+      width: 420,
     ),
   );
 }

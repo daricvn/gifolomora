@@ -13,6 +13,7 @@ class GlassContainer extends StatelessWidget {
     this.padding = const EdgeInsets.all(16),
     this.gradient,
     this.tint = Colors.white,
+    this.borderColor,
   });
 
   final Widget child;
@@ -23,6 +24,9 @@ class GlassContainer extends StatelessWidget {
   final EdgeInsets padding;
   final Gradient? gradient;
   final Color tint;
+
+  /// Overrides the default white border. Used for hover accents.
+  final Color? borderColor;
 
   double get _effectiveBlur {
     if (blur != null) return blur!;
@@ -41,7 +45,7 @@ class GlassContainer extends StatelessWidget {
       gradient: gradient,
       border: border
           ? Border.all(
-              color: Colors.white.withValues(alpha: 0.18),
+              color: borderColor ?? Colors.white.withValues(alpha: 0.18),
               width: 1,
             )
           : null,

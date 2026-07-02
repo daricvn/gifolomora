@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -51,12 +52,18 @@ class RecentsStrip extends ConsumerWidget {
   }
 }
 
-class _RecentCard extends StatelessWidget {
+class _RecentCard extends StatefulWidget {
   const _RecentCard({required this.item});
   final RecentExport item;
 
-  String get _fileName =>
-      item.path.split(Platform.pathSeparator).last;
+  @override
+  State<_RecentCard> createState() => _RecentCardState();
+}
+
+class _RecentCardState extends State<_RecentCard> {
+  bool _hovered = false;
+
+  String get _fileName => widget.item.path.split(Platform.pathSeparator).last;
 
   String _timeAgo(DateTime ts) {
     final diff = DateTime.now().difference(ts);
@@ -69,54 +76,146 @@ class _RecentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 162,
-      child: GestureDetector(
-        onTap: () => context.push(item.toolRoute),
-        child: GlassContainer(
-          blur: 0.0,
-          borderRadius: 16,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(Icons.gif_box_rounded,
-                      color: AppColors.accentB, size: 16),
-                  const SizedBox(width: 5),
-                  Expanded(
-                    child: Text(
-                      item.toolName,
-                      style: const TextStyle(
-                        color: AppColors.accentB,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
+      width: 210,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: () => context.push(widget.item.toolRoute),
+          child: GlassContainer(
+            blur: 0.0,
+            borderRadius: 12,
+            borderColor: _hovered
+                ? AppColors.accentB.withValues(alpha: 0.5)
+                : null,
+            padding: const EdgeInsets.all(10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _Thumb(path: widget.item.path, animate: _hovered),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.item.toolName,
+                        style: const TextStyle(
+                          color: AppColors.accentB,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _fileName,
+                        style: const TextStyle(
+                          color: AppColors.textHi,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const Spacer(),
+                      Text(
+                        _timeAgo(widget.item.timestamp),
+                        style: const TextStyle(
+                          color: AppColors.textLo,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                _fileName,
-                style: const TextStyle(
-                  color: AppColors.textHi,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const Spacer(),
-              Text(
-                _timeAgo(item.timestamp),
-                style: const TextStyle(color: AppColors.textLo, fontSize: 11),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// GIF thumbnail: static first frame normally, live animation on hover.
+/// Non-GIF or unreadable files fall back to an icon tile.
+class _Thumb extends StatefulWidget {
+  const _Thumb({required this.path, required this.animate});
+  final String path;
+  final bool animate;
+
+  @override
+  State<_Thumb> createState() => _ThumbState();
+}
+
+class _ThumbState extends State<_Thumb> {
+  ui.Image? _firstFrame;
+  bool _failed = false;
+
+  bool get _isGif => widget.path.toLowerCase().endsWith('.gif');
+
+  @override
+  void initState() {
+    super.initState();
+    _decodeFirstFrame();
+  }
+
+  Future<void> _decodeFirstFrame() async {
+    if (!_isGif) return;
+    try {
+      final bytes = await File(widget.path).readAsBytes();
+      final codec = await ui.instantiateImageCodec(bytes, targetWidth: 140);
+      final frame = await codec.getNextFrame();
+      codec.dispose();
+      if (mounted) {
+        setState(() => _firstFrame = frame.image);
+      } else {
+        frame.image.dispose();
+      }
+    } catch (_) {
+      if (mounted) setState(() => _failed = true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _firstFrame?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget child;
+    if (!_isGif || _failed || _firstFrame == null) {
+      child = const Icon(
+        Icons.gif_box_rounded,
+        color: AppColors.accentB,
+        size: 26,
+      );
+    } else if (widget.animate) {
+      child = Image.file(
+        File(widget.path),
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => const Icon(
+          Icons.gif_box_rounded,
+          color: AppColors.accentB,
+          size: 26,
+        ),
+      );
+    } else {
+      child = RawImage(image: _firstFrame, fit: BoxFit.cover);
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: 66,
+        height: 66,
+        color: Colors.white.withValues(alpha: 0.05),
+        child: child,
       ),
     );
   }

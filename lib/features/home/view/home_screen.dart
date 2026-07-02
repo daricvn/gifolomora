@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/glass/glass_app_bar.dart';
+import '../../../core/widgets/common/entrance.dart';
 import '../../../core/widgets/common/gradient_scaffold.dart';
 import '../../../core/widgets/common/section_header.dart';
 import '../data/tool_catalog.dart';
@@ -89,20 +90,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   slivers: [
                     SliverPadding(
                       padding: EdgeInsets.fromLTRB(16, topPad, 16, 0),
-                      sliver:
-                          SliverToBoxAdapter(child: HomeHero(isWide: isWide)),
+                      sliver: SliverToBoxAdapter(
+                        child: Entrance(child: HomeHero(isWide: isWide)),
+                      ),
                     ),
 
                     // ── Recents ────────────────────────────────────────────
-                    const SliverToBoxAdapter(child: RecentsStrip()),
+                    const SliverToBoxAdapter(
+                      child: Entrance(
+                        delay: Duration(milliseconds: 60),
+                        child: RecentsStrip(),
+                      ),
+                    ),
 
                     // ── Create ─────────────────────────────────────────────
                     SliverPadding(
                       padding: const EdgeInsets.fromLTRB(16, 28, 16, 14),
                       sliver: const SliverToBoxAdapter(
-                        child: SectionHeader(
-                          overline: 'Start here',
-                          title: 'Create a GIF',
+                        child: Entrance(
+                          delay: Duration(milliseconds: 100),
+                          child: SectionHeader(
+                            overline: 'Start here',
+                            title: 'Create a GIF',
+                          ),
                         ),
                       ),
                     ),
@@ -119,9 +129,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         delegate: SliverChildBuilderDelegate(
                           (context, i) {
                             final entry = createTools[i];
-                            return FeaturedToolCard(
-                              entry: entry,
-                              onTap: () => context.push(entry.route),
+                            return Entrance(
+                              delay: Duration(milliseconds: 140 + 50 * i),
+                              child: FeaturedToolCard(
+                                entry: entry,
+                                onTap: () => context.push(entry.route),
+                              ),
                             );
                           },
                           childCount: createTools.length,
@@ -133,9 +146,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     SliverPadding(
                       padding: const EdgeInsets.fromLTRB(16, 28, 16, 14),
                       sliver: const SliverToBoxAdapter(
-                        child: SectionHeader(
-                          overline: 'Toolkit',
-                          title: 'Edit & optimize',
+                        child: Entrance(
+                          delay: Duration(milliseconds: 200),
+                          child: SectionHeader(
+                            overline: 'Toolkit',
+                            title: 'Edit & optimize',
+                          ),
                         ),
                       ),
                     ),
@@ -152,9 +168,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         delegate: SliverChildBuilderDelegate(
                           (context, i) {
                             final entry = refineTools[i];
-                            return ToolCard(
-                              entry: entry,
-                              onTap: () => context.push(entry.route),
+                            return Entrance(
+                              delay: Duration(milliseconds: 240 + 40 * i),
+                              child: ToolCard(
+                                entry: entry,
+                                onTap: () => context.push(entry.route),
+                              ),
                             );
                           },
                           childCount: refineTools.length,
@@ -191,30 +210,48 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             if (_isDragHovering)
               Positioned.fill(
                 child: IgnorePointer(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.accentB.withValues(alpha: 0.08),
-                      border: Border.all(
-                        color: AppColors.accentB.withValues(alpha: 0.6),
-                        width: 2,
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0, end: 1),
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, t, child) => Opacity(
+                      opacity: t,
+                      child: Container(
+                        // Dim the page behind the drop panel.
+                        color: AppColors.bg0.withValues(alpha: 0.6 * t),
+                        padding: const EdgeInsets.all(16),
+                        child: Transform.scale(
+                          scale: 0.98 + 0.02 * t,
+                          child: child,
+                        ),
                       ),
                     ),
-                    child: const Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.file_download_rounded,
-                              color: AppColors.accentB, size: 64),
-                          SizedBox(height: 12),
-                          Text(
-                            'Drop video or GIF',
-                            style: TextStyle(
-                              color: AppColors.textHi,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w700,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        color: AppColors.accentB.withValues(alpha: 0.08),
+                        border: Border.all(
+                          color: AppColors.accentB.withValues(alpha: 0.6),
+                          width: 2,
+                        ),
+                      ),
+                      child: const Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.file_download_rounded,
+                                color: AppColors.accentB, size: 64),
+                            SizedBox(height: 12),
+                            Text(
+                              'Drop video or GIF',
+                              style: TextStyle(
+                                color: AppColors.textHi,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
