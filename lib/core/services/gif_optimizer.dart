@@ -168,6 +168,20 @@ class GifOptimizer {
       pg[i] = palette.getGreen(i).toInt();
       pb[i] = palette.getBlue(i).toInt();
     }
+    // Redmean: cheap luma-weighted RGB distance (compuphase.com/cmetric.htm).
+    // Plain squared-RGB treats all channels equally, but the eye is far more
+    // sensitive to green — weighting by red level approximates perceptual
+    // distance without a colorspace conversion.
+    int weightedDist(int r1, int g1, int b1, int r2, int g2, int b2) {
+      final rmean = (r1 + r2) >> 1;
+      final dr = r1 - r2;
+      final dg = g1 - g2;
+      final db = b1 - b2;
+      return (((512 + rmean) * dr * dr) >> 8) +
+          4 * dg * dg +
+          (((767 - rmean) * db * db) >> 8);
+    }
+
     final cache = <int, int>{};
     int nearest(int r, int g, int b) {
       // 5-bit quantized key → 32768 buckets; near-photographic cache hit rate.
@@ -177,10 +191,7 @@ class GifOptimizer {
       var best = 0;
       var bestD = 1 << 30;
       for (var i = 0; i < realColors; i++) {
-        final dr = r - pr[i];
-        final dg = g - pg[i];
-        final db = b - pb[i];
-        final d = dr * dr + dg * dg + db * db;
+        final d = weightedDist(r, g, b, pr[i], pg[i], pb[i]);
         if (d < bestD) {
           bestD = d;
           best = i;
@@ -242,14 +253,20 @@ class GifOptimizer {
         final dg = g - pg[i];
         final db = b - pb[i];
         final d = dr * dr + dg * dg + db * db;
+        // Gate stays raw squared-RGB — lossyBudget's scale (lossy*lossy) and
+        // the exact re-verification in encodeLossy both assume it. Only the
+        // ranking of in-budget candidates uses the perceptual metric, so the
+        // LZW encoder's first-fit pick is the best-looking one, not just the
+        // numerically closest.
         if (d <= lossyBudget) {
-          // Insertion sort by error — candidate lists are tiny.
+          final wd = weightedDist(r, g, b, pr[i], pg[i], pb[i]);
+          // Insertion sort by perceptual error — candidate lists are tiny.
           var at = ids.length;
-          while (at > 0 && errs[at - 1] > d) {
+          while (at > 0 && errs[at - 1] > wd) {
             at--;
           }
           ids.insert(at, i);
-          errs.insert(at, d);
+          errs.insert(at, wd);
         }
       }
       final result = ids.isEmpty
