@@ -32,6 +32,22 @@ String _fmtMs(int ms) {
   return '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
 }
 
+// Small black rounded label used for preview overlay chips (ORIGINAL badge,
+// position readout).
+Widget _chip(String text, {double alpha = 0.7, FontWeight weight = FontWeight.w700}) {
+  return IgnorePointer(
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: alpha),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(text,
+          style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: weight)),
+    ),
+  );
+}
+
 const _kVideoExtensions = ['mp4', 'mov', 'mkv', 'avi', 'webm'];
 const _kAllExtensions = [..._kVideoExtensions, 'gif'];
 
@@ -49,6 +65,8 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
   bool _picking = false;
   // Preview zoom: null = Fit to window; otherwise a video-px scale.
   double? _zoom = 1.0;
+  // Hold-to-peek: true while the compare button is pressed.
+  bool _comparing = false;
   late final VideoPreviewController _previewCtrl;
   // Pan offset for the preview when zoomed past the pane. Owned so it can be
   // reset to identity when the frame shrinks back to fit (else stale pan keeps
@@ -262,27 +280,41 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                         children: [
                           Positioned.fill(
                             child: VideoPreview(
-                              key: ValueKey(state.sourceFile!.path),
-                              file: state.sourceFile!,
+                              key: ValueKey(_comparing
+                                  ? 'orig-${state.inputFile?.path}'
+                                  : state.sourceFile!.path),
+                              file: _comparing
+                                  ? (state.inputFile ?? state.sourceFile!)
+                                  : state.sourceFile!,
                               videoWidth: srcW,
                               videoHeight: srcH,
-                              speedRate: state.speedFactor,
-                              volume: state.volume,
-                              cropRect: (cropActive || !state.isCropFull)
-                                  ? state.cropNormalized
-                                  : null,
-                              interactive: cropActive,
+                              speedRate: _comparing ? 1.0 : state.speedFactor,
+                              volume: _comparing ? 1.0 : state.volume,
+                              cropRect: _comparing
+                                  ? null
+                                  : (cropActive || !state.isCropFull)
+                                      ? state.cropNormalized
+                                      : null,
+                              interactive: !_comparing && cropActive,
                               onCropChanged: ctrl.setCrop,
                               controller: _previewCtrl,
                               onPositionChanged: (ms) =>
                                   setState(() => _positionMs = ms),
-                              trimStartMs: state.trimStartMs,
-                              trimEndMs: state.sourceDurationMs > 0
-                                  ? state.effectiveTrimEndMs
-                                  : 0,
+                              trimStartMs: _comparing ? 0 : state.trimStartMs,
+                              trimEndMs: _comparing
+                                  ? 0
+                                  : state.sourceDurationMs > 0
+                                      ? state.effectiveTrimEndMs
+                                      : 0,
                             ),
                           ),
-                          if (state.textItems.isNotEmpty)
+                          if (_comparing)
+                            Positioned(
+                              top: 10,
+                              left: 10,
+                              child: _chip('ORIGINAL'),
+                            ),
+                          if (state.textItems.isNotEmpty && !_comparing)
                             Positioned.fill(
                               child: _StudioTextLayer(
                                 state: state,
@@ -296,7 +328,8 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                           // Red tint + corner chip when playhead is inside a
                           // cut segment (hint only — marked for removal, not
                           // an error state).
-                          if (!state.isGif &&
+                          if (!_comparing &&
+                              !state.isGif &&
                               state.cutSegments.any((s) =>
                                   _positionMs >= s.startMs &&
                                   _positionMs < s.endMs))
@@ -341,6 +374,18 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                                 ),
                               ),
                             ),
+                          // Persistent position chip — drawn under the
+                          // hover-chrome's own time row so it's occluded (not
+                          // duplicated) while that chrome is visible; on GIF
+                          // stage (no hover chrome) it's the only indicator.
+                          Positioned(
+                            left: 10,
+                            bottom: 8,
+                            child: _chip(
+                                '${_fmtMs(_positionMs)} / ${_fmtMs(state.sourceDurationMs)}',
+                                alpha: 0.55,
+                                weight: FontWeight.w600),
+                          ),
                           // YouTube-style controls — videos only, and only when
                           // no canvas tool (crop/text) owns the preview gestures.
                           if (!state.isGif && !cropActive && !textActive)
@@ -395,6 +440,15 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                 return Stack(
                   children: [
                     Positioned.fill(child: pane),
+                    if (state.inputFile != null)
+                      Positioned(
+                        top: 8,
+                        left: 8,
+                        child: _CompareButton(
+                          active: _comparing,
+                          onHoldChanged: (v) => setState(() => _comparing = v),
+                        ),
+                      ),
                     Positioned(
                       top: 8,
                       right: 8,
@@ -583,6 +637,44 @@ class _ZoomControl extends StatelessWidget {
             const SizedBox(width: 2),
             const Icon(Icons.arrow_drop_down_rounded,
                 size: 18, color: AppColors.textLo),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Compare (before/after) button ────────────────────────────────────────────
+// Hold to peek the original input file; release to return to the live edit.
+
+class _CompareButton extends StatelessWidget {
+  const _CompareButton({required this.active, required this.onHoldChanged});
+  final bool active;
+  final ValueChanged<bool> onHoldChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => onHoldChanged(true),
+      onTapUp: (_) => onHoldChanged(false),
+      onTapCancel: () => onHoldChanged(false),
+      child: GlassContainer(
+        borderRadius: 10,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.visibility_rounded,
+                size: 15,
+                color: active ? AppColors.accentB : AppColors.textHi),
+            const SizedBox(width: 5),
+            Text(
+              active ? 'Original' : 'Compare',
+              style: TextStyle(
+                  color: active ? AppColors.accentB : AppColors.textHi,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700),
+            ),
           ],
         ),
       ),
@@ -899,7 +991,7 @@ class _ToolSelector extends StatelessWidget {
       (StudioTool.crop, Icons.crop_rounded, 'Crop'),
       (StudioTool.resize, Icons.photo_size_select_large_rounded, 'Resize'),
       (StudioTool.speed, Icons.speed_rounded, 'Speed'),
-      if (!isGif) (StudioTool.trim, Icons.straighten_rounded, 'Trim'),
+      (StudioTool.trim, Icons.straighten_rounded, 'Trim'),
       if (!isGif) (StudioTool.cut, Icons.cut_rounded, 'Cut'),
       (StudioTool.text, Icons.title_rounded, 'Text'),
       if (isGif) (StudioTool.optimize, Icons.tune_rounded, 'Optimise'),

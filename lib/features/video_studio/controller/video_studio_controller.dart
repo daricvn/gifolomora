@@ -207,7 +207,7 @@ class VideoStudioState {
   bool get needsGifEdit {
     final srcFps = sourceInfo?.fps;
     final fpsChanged = srcFps != null && (fps - srcFps).abs() >= 0.5;
-    return hasEdits || boomerang || fpsChanged || (loopCount != 0 && !doOptimize);
+    return hasEdits || hasTrim || boomerang || fpsChanged || (loopCount != 0 && !doOptimize);
   }
 
   /// Whether Apply/Export would actually do anything beyond a straight save.
@@ -873,6 +873,7 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
 
     if (needsEdit) {
       final c = _cropPixels(s);
+      final t = _trimParams(s);
       final srcFps = s.sourceInfo?.fps;
       final fpsChanged = srcFps != null && (s.fps - srcFps).abs() >= 0.5;
       final result = await _ffmpeg.editGif(
@@ -883,6 +884,8 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
         cropH: c.h,
         scaleW: s.targetWidth,
         speedFactor: s.speedFactor,
+        startMs: t.startMs,
+        durationMs: t.durationMs,
         totalMs: s.sourceDurationMs > 0 ? s.sourceDurationMs : null,
         fps: fpsChanged ? s.fps : null,
         loopCount: s.loopCount,

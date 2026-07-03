@@ -467,6 +467,8 @@ class FfmpegService {
     double speedFactor = 1.0,
     void Function(FfmpegProgress)? onProgress,
     int? totalMs,
+    int? startMs,
+    int? durationMs,
     String? overlayText,
     String? overlayFontFile,
     int overlayFontSize = 36,
@@ -489,6 +491,8 @@ class FfmpegService {
         cropH: cropH,
         scaleW: scaleW,
         speedFactor: speedFactor,
+        startMs: startMs,
+        durationMs: durationMs,
         drawText: overlayText,
         drawTextFont: overlayFontFile,
         drawTextSize: overlayFontSize,
@@ -498,10 +502,11 @@ class FfmpegService {
         loopCount: loopCount,
         boomerang: boomerang,
       );
+      final baseMs = durationMs != null && durationMs > 0 ? durationMs : totalMs;
       final effectiveTotalMs =
-          totalMs != null && (speedFactor - 1.0).abs() > 0.001
-              ? (totalMs / speedFactor).round()
-              : totalMs;
+          baseMs != null && (speedFactor - 1.0).abs() > 0.001
+              ? (baseMs / speedFactor).round()
+              : baseMs;
       return await _backend.run(args, outputPath,
           onProgress: onProgress, totalMs: effectiveTotalMs);
     } catch (e) {

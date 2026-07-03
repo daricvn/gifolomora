@@ -406,6 +406,8 @@ abstract final class FfmpegCommand {
     int? cropH,
     int? scaleW,
     double speedFactor = 1.0,
+    int? startMs,
+    int? durationMs,
     String? drawText,
     String? drawTextFont,
     int drawTextSize = 36,
@@ -436,14 +438,26 @@ abstract final class FfmpegCommand {
     final body = boomerang
         ? '$chain,split[fwd][r0];[r0]reverse[rev];[fwd][rev]concat=n=2:v=1,split[a][b]'
         : '$chain,split[a][b]';
-    return [
-      '-y', '-i', inputPath,
+    final args = ['-y'];
+    if (startMs != null && startMs > 0) {
+      args.addAll(['-ss', (startMs / 1000).toStringAsFixed(3)]);
+    }
+    // -t must stay an input option (before -i): placed after -i it binds to
+    // the output instead and truncates the written stream, not the source
+    // read — invisible for a plain trim but cuts boomerang's reversed half
+    // off entirely, since the write stops mid-forward-segment.
+    if (durationMs != null && durationMs > 0) {
+      args.addAll(['-t', (durationMs / 1000).toStringAsFixed(3)]);
+    }
+    args.addAll(['-i', inputPath]);
+    args.addAll([
       '-filter_complex',
       '$body;[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5',
       '-loop', '$loopCount',
       '-progress', 'pipe:1',
       outputPath,
-    ];
+    ]);
+    return args;
   }
 
   static String _atempoChain(double factor) {

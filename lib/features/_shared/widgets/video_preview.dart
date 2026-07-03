@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -9,6 +10,9 @@ import '../../../core/theme/app_colors.dart';
 
 const _kHandleRadius = 12.0;
 const _kMinFraction = 0.08;
+// Wall-clock advance per gif playback tick (ms). Not vsync-locked — this
+// drives a preview scrubber, not the exported frame timing.
+const _kGifTickMs = 33;
 
 /// Margin reserved around the video while cropping so corner handles render
 /// fully inside the (clipped) preview and stay grabbable past the video edge.
@@ -85,9 +89,21 @@ class _VideoPreviewState extends State<VideoPreview> {
   StreamSubscription<bool>? _completedSub;
   StreamSubscription<bool>? _playingSub;
 
-  /// Animated GIFs are decoded by Flutter (Image.file), not libmpv, which only
-  /// renders the first frame of a GIF.
+  /// Animated GIFs are decoded frame-by-frame below (not handed to libmpv,
+  /// which only renders the first frame of a GIF).
   bool get _isAnimatedImage => widget.file.path.toLowerCase().endsWith('.gif');
+
+  // ── Animated-gif playback (frame-array, so seek/trim are real operations
+  // instead of riding the image's own free-running loop) ────────────────────
+  // ponytail: decodes every frame eagerly — fine for social-sized gifs (the
+  // studio caps baked gifs at 60s); bound frame count or window the decode if
+  // this ever needs to handle much larger loaded files.
+  List<ui.Image> _gifFrames = const [];
+  List<int> _gifFrameEndMs = const [];
+  int _gifTotalMs = 0;
+  int _gifPosMs = 0;
+  Timer? _gifTicker;
+  int _gifLoadToken = 0;
 
   Rect _crop = const Rect.fromLTWH(0, 0, 1, 1);
   _Handle _active = _Handle.none;
@@ -131,11 +147,30 @@ class _VideoPreviewState extends State<VideoPreview> {
         _seekTo(widget.trimStartMs);
       }
     }
+    if (_isAnimatedImage &&
+        (old.trimStartMs != widget.trimStartMs ||
+            old.trimEndMs != widget.trimEndMs)) {
+      final end = widget.trimEndMs > 0 ? widget.trimEndMs : _gifTotalMs;
+      if (_gifPosMs < widget.trimStartMs || (end > 0 && _gifPosMs >= end)) {
+        // Deferred: _seekTo fires onPositionChanged synchronously, which
+        // calls setState on the ancestor (video_studio_screen) — doing that
+        // inline here would hit it mid-rebuild (this runs from that same
+        // rebuild's didUpdateWidget cascade) and throw "setState() or
+        // markNeedsBuild() called during build."
+        final target = widget.trimStartMs;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _seekTo(target);
+        });
+      }
+    }
   }
 
   Future<void> _openFile() async {
-    // GIFs are rendered via Image.file; never hand them to libmpv.
-    if (_isAnimatedImage) return;
+    // GIFs are decoded frame-by-frame below; never hand them to libmpv.
+    if (_isAnimatedImage) {
+      await _openGif();
+      return;
+    }
     _activePath = widget.file.path;
     _positionSub?.cancel();
     _completedSub?.cancel();
@@ -181,7 +216,92 @@ class _VideoPreviewState extends State<VideoPreview> {
     }
   }
 
+  Future<void> _openGif() async {
+    final token = ++_gifLoadToken;
+    _gifTicker?.cancel();
+    _disposeGifFrames();
+    if (mounted) setState(() => _initialized = false);
+    try {
+      final bytes = await widget.file.readAsBytes();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frames = <ui.Image>[];
+      final endMs = <int>[];
+      var cum = 0;
+      for (var i = 0; i < codec.frameCount; i++) {
+        final info = await codec.getNextFrame();
+        if (token != _gifLoadToken) {
+          info.image.dispose();
+          continue;
+        }
+        frames.add(info.image);
+        cum += info.duration.inMilliseconds;
+        endMs.add(cum);
+      }
+      if (token != _gifLoadToken || !mounted) {
+        for (final f in frames) {
+          f.dispose();
+        }
+        return;
+      }
+      _gifFrames = frames;
+      _gifFrameEndMs = endMs;
+      _gifTotalMs = cum;
+      _gifPosMs = widget.trimStartMs.clamp(0, cum);
+      setState(() => _initialized = true);
+      widget.onPositionChanged?.call(_gifPosMs);
+      _gifTicker = Timer.periodic(
+          const Duration(milliseconds: _kGifTickMs), (_) => _tickGif());
+    } catch (_) {
+      if (mounted) setState(() => _initialized = false);
+    }
+  }
+
+  void _tickGif() {
+    if (!mounted || _gifFrames.isEmpty) return;
+    final total = _gifTotalMs;
+    final end = widget.trimEndMs > 0 ? widget.trimEndMs.clamp(0, total) : total;
+    final start = widget.trimStartMs.clamp(0, end);
+    var pos = _gifPosMs + _kGifTickMs;
+    if (end <= start) {
+      pos = start;
+    } else if (pos >= end) {
+      pos = start + (pos - end) % (end - start);
+    }
+    setState(() => _gifPosMs = pos);
+    widget.onPositionChanged?.call(pos);
+  }
+
+  int _gifFrameIndexFor(int posMs) {
+    if (_gifFrameEndMs.isEmpty) return 0;
+    var lo = 0, hi = _gifFrameEndMs.length - 1;
+    while (lo < hi) {
+      final mid = (lo + hi) >> 1;
+      if (_gifFrameEndMs[mid] <= posMs) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
+  }
+
+  void _disposeGifFrames() {
+    for (final f in _gifFrames) {
+      f.dispose();
+    }
+    _gifFrames = const [];
+    _gifFrameEndMs = const [];
+    _gifTotalMs = 0;
+  }
+
   void _seekTo(int ms) {
+    if (_isAnimatedImage) {
+      if (_gifTotalMs <= 0) return;
+      final clamped = ms.clamp(0, _gifTotalMs);
+      setState(() => _gifPosMs = clamped);
+      widget.onPositionChanged?.call(clamped);
+      return;
+    }
     _player.seek(Duration(milliseconds: ms));
   }
 
@@ -196,6 +316,8 @@ class _VideoPreviewState extends State<VideoPreview> {
     _positionSub?.cancel();
     _completedSub?.cancel();
     _playingSub?.cancel();
+    _gifTicker?.cancel();
+    _disposeGifFrames();
     _player.dispose();
     super.dispose();
   }
@@ -311,11 +433,18 @@ class _VideoPreviewState extends State<VideoPreview> {
 
         final Widget media;
         if (_isAnimatedImage) {
-          media = Image.file(
-            widget.file,
-            fit: BoxFit.contain,
-            gaplessPlayback: true,
-          );
+          media = _gifFrames.isEmpty
+              ? const ColoredBox(
+                  color: Colors.black,
+                  child: Center(
+                    child: CircularProgressIndicator(color: AppColors.accentB),
+                  ),
+                )
+              : RawImage(
+                  image: _gifFrames[_gifFrameIndexFor(_gifPosMs)
+                      .clamp(0, _gifFrames.length - 1)],
+                  fit: BoxFit.contain,
+                );
         } else if (_initialized) {
           media = Video(controller: _videoController, controls: NoVideoControls);
         } else {
