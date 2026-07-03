@@ -37,7 +37,8 @@ lib/
     widgets/
       glass/        # GlassContainer (BackdropFilter primitive) → GlassCard/Button/AppBar
       common/       # GradientScaffold (animated blob bg), ProgressOverlay, SectionHeader,
-                    # EmptyState, AppToast (snackbar helper)
+                    # EmptyState, AppToast (snackbar helper), Entrance (one-shot fade+slide-up,
+                    # staggers home sections on first build)
     services/
       ffmpeg/       # backend interface + 2 impls + factory + service + command/progress/encoder models
                     # + DrawTextSpec model (absolute-px text layer for multi-item overlay)
@@ -116,7 +117,7 @@ Video Studio's GIF pipeline.
 - `videoEdit` — crop · resize · speed · trim · text · audio in one pass; selects encoder from `VideoEncoder.platformCandidates()`. Accepts `List<DrawTextSpec>? textSpecs` (multi-layer, positioned before crop/scale so text transforms with content).
 - `videoStreamCopy` — no-op fast path: stream-copy when no edits.
 - `videoEditToGif` — bakes video layers (crop · fps · resize · speed · text) → GIF palette in one pass.
-- `gifEdit` — applies crop · fps · resize · speed · text · loop · boomerang to an existing GIF; `boomerang` appends a reversed stream via `concat=n=2` for ping-pong.
+- `gifEdit` — applies crop · fps · resize · speed · text · trim · loop · boomerang to an existing GIF; `boomerang` appends a reversed stream via `concat=n=2` for ping-pong. `startMs`/`durationMs` emit `-ss`/`-t` as **input** options (before `-i`) — placed after `-i` they'd bind to the output and truncate the write instead of the read, silently chopping boomerang's reversed half.
 - `buildConcatFileContent` — generates concat demuxer file listing frames at a given fps.
 
 ### Text overlay models
@@ -166,8 +167,8 @@ editVideo({ input, cropX/Y/W/H, scaleW/H, speedFactor, hasAudio, volume,
             encoderCandidates, startMs, durationMs, overlayItems, mediaInfo, ... })
             // overlayItems: List<TextItem>? — baked before crop/scale; encoder fallback loop
 bakeVideoToGif({ input, cropX/Y/W/H, scaleW, speedFactor, fps, startMs, durationMs, ... })
-editGif({ input, cropX/Y/W/H, scaleW, speedFactor, overlayText, fps,
-          loopCount, boomerang, ... })
+editGif({ input, cropX/Y/W/H, scaleW, speedFactor, startMs, durationMs,
+          overlayText, fps, loopCount, boomerang, ... })
 cleanJobAt(String jobDir)         // frees an arbitrary temp dir (e.g. baked-GIF source)
 ```
 
@@ -184,14 +185,16 @@ Pure-Dart GIF optimizer (`lib/core/services/gif_optimizer.dart`). Replaces gifsi
 binary, works on all platforms. Entire pipeline runs in an `Isolate`.
 
 **Pipeline:**
-1. `image.decodeGif` → per-frame RGBA composited frames
-2. `OctreeQuantizer` trains one global palette across all frames (`colors` 2–256 entries, capped at 254 to reserve a transparency slot)
-3. Exhaustive nearest-color search with RGB memo cache (avoids octree tree-walk dead-ends)
-4. Inter-frame transparency diff against a running **displayed canvas** (`disposal=1 leave-in-place`):
+1. `img.GifDecoder().decodeFrame()` (raw per-rect frames) + manual disposal-aware compositing onto our own canvas — **not** `image`'s `decodeGif()`/`decode()`, which mis-composites sub-rect `disposal=1` frames lacking a local color table (floods the frame with index 0 instead of copying the previous canvas; pre-optimized GIFs with 1×1 duplicate-frame placeholders come out as a solid-color flash). Disposal 1 (leave)/2 (clear rect)/3 (restore previous snapshot) handled explicitly.
+2. `OctreeQuantizer` trains one global palette across all frames (`colors` 2–256 entries, reserving 2 slots below the caller's budget for transparency — staying clear of the next power-of-two avoids doubling the GCT and widening every LZW code by a bit)
+3. Nearest-color search (RGB memo cache, 5-bit quantized key) and lossy candidate ranking both use **redmean** — a luma-weighted RGB distance (compuphase.com/cmetric.htm) that approximates perceptual distance without a colorspace conversion, since the eye is far more sensitive to green than plain squared-RGB assumes. The lossy *budget gate* stays raw squared-RGB (its scale is `lossy²`); only the ranking of in-budget candidates uses redmean.
+4. Sticker-class detection: scan for any pixel that goes from drawn to transparent-and-revealing-nothing-new — a genuinely transparent background whose opaque region moves/shrinks needs erasure, which `disposal=1` can never do (only reveal, never erase) and would otherwise leave permanent ghost trails that accumulate across loop iterations. Detected GIFs fall back to standalone `disposal=2` frames (only exact-duplicate consecutive frames merge — no inter-frame diff savings, but correct).
+5. Normal mode: inter-frame transparency diff against a running **displayed canvas** (`disposal=1` leave-in-place):
    - Pixel transparent if canvas already shows the correct index (lossless), or if the current true color is within `lossy²` squared-RGB distance of the displayed color
    - Canvas updated only on redraw → displayed error bounded to `lossy` budget every frame (no ghosting drift)
-5. Per-frame bounding-box crop — only the changed pixel region written in each Image Descriptor
-6. Custom GIF writer + `GifLzw.encode` (`lib/core/services/gif/gif_lzw.dart`) — spec-correct variable-width LZW
+   - Lossy pixels pick from a sorted-by-redmean-error candidate list of in-budget palette indices (not just nearest) so the LZW encoder can snap to whichever candidate extends its current dictionary match — gifsicle `--lossy`-style run extension
+6. Per-frame bounding-box crop — only the changed pixel region written in each Image Descriptor
+7. Custom GIF writer + `GifLzw.encode` (`lib/core/services/gif/gif_lzw.dart`) — spec-correct variable-width LZW
 
 **Parameters:** `colors` 2–256, `lossy` 0–200 (0 = lossless diff; higher = more transparency, smaller file), `loopCount` (null = preserve source NETSCAPE2.0 count), `frameDrop` 0/2/3/4 (0 = keep all; N = drop 1 of every N frames, folding its duration into the previous kept frame so total playback time is unchanged; frame 0 always kept).
 
@@ -222,6 +225,7 @@ Key parameters on `GlassContainer`:
 
 | Token | Value | Use |
 |---|---|---|
+| Font | `Inter` (Regular/Medium/SemiBold/Bold) | app-wide `fontFamily`, bundled `assets/fonts/` |
 | `bg0` | `#0B0F1A` | near-black navy, scaffold base |
 | `bg1` | `#141B2E` | gradient end |
 | `accentA` | `#6D5DF6` | violet — primary/buttons |
@@ -273,7 +277,9 @@ options, last generated preview/output, `FfmpegProgress?`, processing flag, and 
 Video Studio handles both video **and** GIF source files in one screen:
 - `EditStage.video` — non-destructive layers (crop/resize/speed/trim/text/volume); `makeGif()` bakes them → GIF.
 - `EditStage.gif` — `applyEdits()` bakes GIF edits (+ fps/loopCount/boomerang/optimize) into a temp and pushes a history entry; `undo()`/`redo()` navigates the `_GifVersion` stack (each entry owns its temp dir).
-- `StudioTool` enum: `crop | resize | speed | trim | text | optimize | properties` — drives the dock panel.
+- `StudioTool` enum: `crop | resize | speed | trim | text | optimize | properties` — drives the dock panel. `trim` is available on both video and GIF stages (GIF trim maps to `gifEdit`'s `startMs`/`durationMs`).
+- **Compare button** — hold-to-peek: while held, preview swaps to `state.inputFile` (original, pre-edit) with speed/volume/crop/trim/text all neutralized and an "ORIGINAL" chip shown; releases back to the live edited preview.
+- GIF preview playback (`VideoPreview` in `_shared/widgets/video_preview.dart`) decodes the GIF itself via `ui.instantiateImageCodec` into a frame array + cumulative-duration index, driven by its own `Timer.periodic` ticker — **not** handed to `Image.file`'s free-running loop — so trim/seek are real operations (binary-search frame lookup, position clamps to `[trimStart, trimEnd)`) instead of riding the widget's own loop.
 - Multi-item text overlay (`textItems: List<TextItem>`, up to 20) is shared with the Text Overlay tool. Draggable in the preview canvas; `TextFormatCard`/`TextLayersPanel` from `text_overlay_controls.dart`. Font files resolved per `TextStyleKind` (regular/bold/italic/boldItalic), registered with Flutter `FontLoader` for preview fidelity.
 - GIF pipeline order: `textOverlayMulti` → `editGif` → `optimizeGif` (text bakes first against source dimensions so later crop/scale transforms the texted frames).
 - `applyVideoEdits()` — bakes current video edits into a temp and swaps in as live preview; sets `editsApplied` so export skips re-encoding. Frees the prior baked temp on supersede.
@@ -344,7 +350,7 @@ Separate `package.json`; the `web/` directory is untracked (`??` in git status).
 | `window_manager` | 0.3.9 | Windows custom title bar |
 | `shared_preferences` | 2.3.0 | settings + recents persist |
 | `path_provider` + `path` | 2.1.4 / — | temp dirs, path joins |
-| `image` | 4.0.0 | GifOptimizer — GIF decode + OctreeQuantizer |
+| `image` | 4.0.0 | GifOptimizer — raw-frame `GifDecoder`/`decodeFrame` (not `decodeGif`) + OctreeQuantizer |
 | `desktop_drop` | 0.4.4 | drag-and-drop file acceptance (Windows/macOS/Linux) |
 | `flutter_colorpicker` | — | HSV/hue-wheel color picker used in `text_overlay_controls.dart` |
 | `package_info_plus` | 8.0.0 | app version / build metadata |

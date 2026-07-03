@@ -1396,29 +1396,39 @@ class _CutPanelState extends State<_CutPanel> {
               ms: _pendingEndMs,
             ),
             const Spacer(),
-            GestureDetector(
-              onTap: () {
-                final ok = widget.ctrl.addCutSegment(_pendingStartMs, _pendingEndMs);
-                if (!ok) widget.toast("Can't add that segment");
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.red.withValues(alpha: 0.35)),
+            Builder(builder: (_) {
+              final zeroLen = _pendingEndMs - _pendingStartMs < 20;
+              final covered = zeroLen ||
+                  s.isFullyCovered(_pendingStartMs, _pendingEndMs);
+              final color = covered ? AppColors.textLo : Colors.redAccent;
+              return GestureDetector(
+                onTap: covered
+                    ? null
+                    : () {
+                        final ok = widget.ctrl
+                            .addCutSegment(_pendingStartMs, _pendingEndMs);
+                        if (!ok) widget.toast("Can't add that segment");
+                      },
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: color.withValues(alpha: 0.35)),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.cut_rounded, color: color, size: 14),
+                    const SizedBox(width: 6),
+                    Text('Mark for removal',
+                        style: TextStyle(
+                            color: color,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600)),
+                  ]),
                 ),
-                child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.cut_rounded, color: Colors.redAccent, size: 14),
-                  SizedBox(width: 6),
-                  Text('Mark for removal',
-                      style: TextStyle(
-                          color: Colors.redAccent,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600)),
-                ]),
-              ),
-            ),
+              );
+            }),
           ],
         ),
         const SizedBox(height: 8),
@@ -1597,7 +1607,7 @@ class _StudioTextLayer extends StatelessWidget {
         for (final item in state.textItems)
           _StudioDraggableText(
             item: item,
-            selected: item.id == state.selectedTextId,
+            selected: interactive && item.id == state.selectedTextId,
             scale: scale,
             renderW: renderW,
             renderH: renderH,

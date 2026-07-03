@@ -139,6 +139,11 @@ class VideoStudioState {
 
   bool get hasCut => cutSegments.isNotEmpty;
 
+  /// True when [startMs, endMs] lies entirely within one existing cut segment
+  /// — marking it would be a no-op, so the UI disables "Mark for removal".
+  bool isFullyCovered(int startMs, int endMs) => cutSegments
+      .any((e) => e.startMs <= startMs && e.endMs >= endMs);
+
   /// Sum of cut durations overlapping the trim window.
   int get cutDurationMs {
     final lo = trimStartMs;
@@ -543,24 +548,40 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
 
   // ── Cut segments ─────────────────────────────────────────────────────────────
 
-  /// Adds a cut segment. Clamps to trim window, rejects overlaps and segments
-  /// that would leave < 1s of output. Returns false on rejection.
+  /// Adds a cut segment. Clamps to trim window; any existing segment it
+  /// overlaps gets merged into the new one. Rejects segments that would leave
+  /// < 1s of output (also rejects a segment fully swallowed by an existing
+  /// one, per [VideoStudioState.isFullyCovered] gating the UI). Returns false
+  /// on rejection.
   bool addCutSegment(int startMs, int endMs) {
     final s = state.valueOrNull;
     if (s == null) return false;
     final lo = s.trimStartMs;
     final hi = s.effectiveTrimEndMs;
-    final cStart = startMs.clamp(lo, hi);
-    final cEnd = endMs.clamp(lo, hi);
+    var cStart = startMs.clamp(lo, hi);
+    var cEnd = endMs.clamp(lo, hi);
     if (cEnd - cStart <= 0) return false;
-    if (s.cutSegments.any((e) => cStart < e.endMs && cEnd > e.startMs)) {
-      return false;
+
+    final overlapping = <CutSegment>[];
+    final untouched = <CutSegment>[];
+    for (final e in s.cutSegments) {
+      if (cStart < e.endMs && cEnd > e.startMs) {
+        overlapping.add(e);
+      } else {
+        untouched.add(e);
+      }
     }
-    if (s.trimDurationMs - s.cutDurationMs - (cEnd - cStart) < 1000) {
-      return false;
+    for (final e in overlapping) {
+      if (e.startMs < cStart) cStart = e.startMs;
+      if (e.endMs > cEnd) cEnd = e.endMs;
     }
-    final newSegs = [...s.cutSegments, (startMs: cStart, endMs: cEnd)]
+
+    final newSegs = [...untouched, (startMs: cStart, endMs: cEnd)]
       ..sort((a, b) => a.startMs.compareTo(b.startMs));
+    final newCutDurationMs =
+        newSegs.fold(0, (sum, seg) => sum + (seg.endMs - seg.startMs));
+    if (s.trimDurationMs - newCutDurationMs < 1000) return false;
+
     state = AsyncData(s.copyWith(cutSegments: newSegs, error: null));
     return true;
   }

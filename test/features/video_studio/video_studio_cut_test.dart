@@ -43,7 +43,7 @@ void main() {
       expect(_state(c).hasCut, isTrue);
     });
 
-    test('2. add overlapping segment → false, list unchanged', () async {
+    test('2. add overlapping segment → merges, returns true', () async {
       final c = _makeContainer();
       addTearDown(c.dispose);
       final ctrl = await _loadVideo(c);
@@ -51,8 +51,9 @@ void main() {
       ctrl.addCutSegment(2000, 5000);
       final ok = ctrl.addCutSegment(3000, 6000); // overlaps [2000,5000]
 
-      expect(ok, isFalse);
+      expect(ok, isTrue);
       expect(_state(c).cutSegments.length, equals(1));
+      expect(_state(c).cutSegments.first, equals((startMs: 2000, endMs: 6000)));
     });
 
     test('3. boundary-touching segments 1000–2000 then 2000–3000 → both accepted', () async {
@@ -94,6 +95,48 @@ void main() {
       expect(segs[0].startMs, equals(1000));
       expect(segs[1].startMs, equals(3000));
       expect(segs[2].startMs, equals(6000));
+    });
+
+    test('5a. add segment leaving exactly 999ms kept → false (boundary)',
+        () async {
+      final c = _makeContainer();
+      addTearDown(c.dispose);
+      final ctrl = await _loadVideo(c);
+
+      // source is 10000 ms; cut 0–9001 leaves 999 ms → reject
+      final ok = ctrl.addCutSegment(0, 9001);
+
+      expect(ok, isFalse);
+      expect(_state(c).cutSegments, isEmpty);
+    });
+
+    test('5b. add segment leaving exactly 1000ms kept → true (boundary)',
+        () async {
+      final c = _makeContainer();
+      addTearDown(c.dispose);
+      final ctrl = await _loadVideo(c);
+
+      // source is 10000 ms; cut 0–9000 leaves exactly 1000 ms → accept
+      final ok = ctrl.addCutSegment(0, 9000);
+
+      expect(ok, isTrue);
+      expect(_state(c).cutSegments.first, equals((startMs: 0, endMs: 9000)));
+    });
+
+    test('5c. one add spanning two existing segments → merges all into one',
+        () async {
+      final c = _makeContainer();
+      addTearDown(c.dispose);
+      final ctrl = await _loadVideo(c);
+
+      ctrl.addCutSegment(1000, 2000);
+      ctrl.addCutSegment(4000, 5000);
+      final ok = ctrl.addCutSegment(1500, 4500); // overlaps both
+
+      expect(ok, isTrue);
+      final segs = _state(c).cutSegments;
+      expect(segs.length, equals(1));
+      expect(segs.first, equals((startMs: 1000, endMs: 5000)));
     });
   });
 

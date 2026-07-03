@@ -12,6 +12,16 @@ Respond like compressed caveman. Rules:
 - Technical terms exact. Code blocks unchanged. Errors quoted exact.
 - Exception: security warnings, irreversible action confirmations — write normal, then resume compressed.
 
+## Before you start
+
+For architecture/system design questions: read ARCHITECTURE.md first, then ask.
+For state management questions: check ARCHITECTURE.md state management section.
+For export flow: see ARCHITECTURE.md export flow section.
+
+## Architecture
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full architecture reference: layer structure, dual-backend FFmpeg design, glass design system, state management, tool screen skeleton, export flow, and platform specifics.
+
 ## Commands
 
 ```bash
@@ -27,7 +37,3 @@ dart run build_runner watch              # codegen watch mode during development
 
 > **Windows prerequisite:** `flutter run -d windows` requires Developer Mode enabled for symlinks.  
 > Open: `start ms-settings:developers`
-
-## Architecture
-
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full architecture reference: layer structure, dual-backend FFmpeg design, glass design system, state management, tool screen skeleton, export flow, and platform specifics.
