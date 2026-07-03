@@ -405,11 +405,16 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
   final List<_GifVersion> _history = [];
   int _cursor = -1;
 
+  // ponytail: caps disk usage from repeated Apply during one session (each
+  // version owns a full baked-GIF temp dir); raise if undo depth complaints.
+  static const _maxHistory = 20;
+
   bool get canUndo => _cursor > 0;
   bool get canRedo => _cursor >= 0 && _cursor < _history.length - 1;
 
   /// Appends [snapshot] as the new current version, branching off [_cursor].
-  /// Any redo tail is dropped and its owned temps freed.
+  /// Any redo tail is dropped and its owned temps freed. Oldest entry is
+  /// evicted once [_maxHistory] is exceeded.
   void _pushVersion(VideoStudioState snapshot, {String? ownedDir}) {
     for (var i = _history.length - 1; i > _cursor; i--) {
       final d = _history[i].ownedDir;
@@ -420,6 +425,11 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
     }
     _history.add(_GifVersion(state: snapshot, ownedDir: ownedDir));
     _cursor = _history.length - 1;
+    if (_history.length > _maxHistory) {
+      final evicted = _history.removeAt(0);
+      if (evicted.ownedDir != null) _ffmpeg.cleanJobAt(evicted.ownedDir!);
+      _cursor--;
+    }
   }
 
   /// Empties the history and frees every temp dir it owns.

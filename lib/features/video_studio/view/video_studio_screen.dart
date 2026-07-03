@@ -280,9 +280,11 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                         children: [
                           Positioned.fill(
                             child: VideoPreview(
-                              key: ValueKey(_comparing
-                                  ? 'orig-${state.inputFile?.path}'
-                                  : state.sourceFile!.path),
+                              // No key: didUpdateWidget already swaps `file`
+                              // (see video_preview.dart) without tearing down
+                              // the player. A path-based key here forced a full
+                              // dispose/recreate of the native player on every
+                              // compare-button press.
                               file: _comparing
                                   ? (state.inputFile ?? state.sourceFile!)
                                   : state.sourceFile!,
