@@ -116,7 +116,7 @@ Video Studio's GIF pipeline.
 **Composite commands (Video Studio):**
 - `videoEdit` — crop · resize · speed · trim · text · audio in one pass; selects encoder from `VideoEncoder.platformCandidates()`. Accepts `List<DrawTextSpec>? textSpecs` (multi-layer, positioned before crop/scale so text transforms with content).
 - `videoStreamCopy` — no-op fast path: stream-copy when no edits.
-- `videoEditToGif` — bakes video layers (crop · fps · resize · speed · text) → GIF palette in one pass.
+- `videoEditToGif` — bakes video layers (crop · fps · resize · speed · cut) → GIF in two passes (palette pass → render pass) sharing one filter chain; two passes stream instead of FIFO-buffering every frame in RAM like a one-pass split graph. `-ss`/`-t` are input options; with cuts, `-t` = last keep-range end so decode stops there instead of source EOF.
 - `gifEdit` — applies crop · fps · resize · speed · text · trim · loop · boomerang to an existing GIF; `boomerang` appends a reversed stream via `concat=n=2` for ping-pong. `startMs`/`durationMs` emit `-ss`/`-t` as **input** options (before `-i`) — placed after `-i` they'd bind to the output and truncate the write instead of the read, silently chopping boomerang's reversed half.
 - `buildConcatFileContent` — generates concat demuxer file listing frames at a given fps.
 

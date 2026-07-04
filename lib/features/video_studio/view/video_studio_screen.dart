@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -61,13 +62,21 @@ class VideoStudioScreen extends ConsumerStatefulWidget {
 }
 
 class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
-  int _positionMs = 0;
+  // ValueNotifier (not setState) so a playback tick repaints only the
+  // small widgets below that read it, not the whole screen tree.
+  final ValueNotifier<int> _positionMs = ValueNotifier(0);
   bool _picking = false;
   // Preview zoom: null = Fit to window; otherwise a video-px scale.
   double? _zoom = 1.0;
   // Hold-to-peek: true while the compare button is pressed.
   bool _comparing = false;
   late final VideoPreviewController _previewCtrl;
+  // True from mount until setInput(initialFile) resolves. The provider is
+  // keep-alive, so without this gate the first frame mounts the preview on
+  // the PREVIOUS session's file — its Player.open(play:true) then races the
+  // dispose triggered by setInput's probing state, leaving an orphaned
+  // native player playing audio in the background.
+  bool _awaitingInitialFile = false;
   // Pan offset for the preview when zoomed past the pane. Owned so it can be
   // reset to identity when the frame shrinks back to fit (else stale pan keeps
   // the preview pushed off-screen and truncated).
@@ -93,12 +102,18 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
     super.initState();
     _previewCtrl = VideoPreviewController();
     if (widget.initialFile != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          ref
-              .read(videoStudioControllerProvider.notifier)
-              .setInput(widget.initialFile!);
-        }
+      _awaitingInitialFile = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        // Awaited fully (not fire-and-forget): setInput's first step now
+        // awaits the controller's own initial build (see setInput's doc) so
+        // its probing state no longer lands synchronously. Clearing the gate
+        // any earlier would show whatever stale state the keep-alive
+        // provider already held for one frame.
+        await ref
+            .read(videoStudioControllerProvider.notifier)
+            .setInput(widget.initialFile!);
+        if (mounted) setState(() => _awaitingInitialFile = false);
       });
     }
   }
@@ -107,6 +122,7 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
   void dispose() {
     _transform.dispose();
     _previewCtrl.dispose();
+    _positionMs.dispose();
     super.dispose();
   }
 
@@ -191,7 +207,7 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
     VideoStudioController ctrl,
     void Function(String) toast,
   ) {
-    if (state.isProbing) {
+    if (state.isProbing || _awaitingInitialFile) {
       return const Center(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           CircularProgressIndicator(color: AppColors.accentB),
@@ -300,8 +316,7 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                               interactive: !_comparing && cropActive,
                               onCropChanged: ctrl.setCrop,
                               controller: _previewCtrl,
-                              onPositionChanged: (ms) =>
-                                  setState(() => _positionMs = ms),
+                              onPositionChanged: (ms) => _positionMs.value = ms,
                               trimStartMs: _comparing ? 0 : state.trimStartMs,
                               trimEndMs: _comparing
                                   ? 0
@@ -316,6 +331,30 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                               left: 10,
                               child: _chip('ORIGINAL'),
                             ),
+                          // Live auto-fps-cap warning — video stage only, tied
+                          // to the current trim/cut selection so it updates as
+                          // the user drags the trim handles.
+                          if (!_comparing &&
+                              !state.isGif &&
+                              state.sourceDurationMs > 0)
+                            Positioned(
+                              top: 10,
+                              right: 10,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  _chip(
+                                      'GIF capped at ${state.maxGifFps} fps',
+                                      alpha: 0.6),
+                                  if (state.gifWidthCapped) ...[
+                                    const SizedBox(height: 4),
+                                    _chip(
+                                        'GIF capped at ${state.maxGifWidth}px wide',
+                                        alpha: 0.6),
+                                  ],
+                                ],
+                              ),
+                            ),
                           if (state.textItems.isNotEmpty && !_comparing)
                             Positioned.fill(
                               child: _StudioTextLayer(
@@ -329,77 +368,88 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                             ),
                           // Red tint + corner chip when playhead is inside a
                           // cut segment (hint only — marked for removal, not
-                          // an error state).
-                          if (!_comparing &&
-                              !state.isGif &&
-                              state.cutSegments.any((s) =>
-                                  _positionMs >= s.startMs &&
-                                  _positionMs < s.endMs))
-                            Positioned.fill(
-                              child: IgnorePointer(
-                                child: Stack(
-                                  children: [
-                                    const Positioned.fill(
-                                      child: ColoredBox(
-                                          color: Color(0x40FF0000)),
-                                    ),
-                                    Positioned(
-                                      top: 10,
-                                      left: 10,
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 8, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: Colors.red
-                                              .withValues(alpha: 0.85),
-                                          borderRadius:
-                                              BorderRadius.circular(6),
-                                        ),
-                                        child: const Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Icon(Icons.cut_rounded,
-                                                color: Colors.white,
-                                                size: 11),
-                                            SizedBox(width: 4),
-                                            Text('CUT',
-                                                style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 10,
-                                                    fontWeight:
-                                                        FontWeight.w700)),
-                                          ],
+                          // an error state). Only this leaf repaints per tick.
+                          ValueListenableBuilder<int>(
+                            valueListenable: _positionMs,
+                            builder: (_, pos, _) {
+                              final inCut = !_comparing &&
+                                  !state.isGif &&
+                                  state.cutSegments.any((s) =>
+                                      pos >= s.startMs && pos < s.endMs);
+                              if (!inCut) return const SizedBox.shrink();
+                              return Positioned.fill(
+                                child: IgnorePointer(
+                                  child: Stack(
+                                    children: [
+                                      const Positioned.fill(
+                                        child: ColoredBox(
+                                            color: Color(0x40FF0000)),
+                                      ),
+                                      Positioned(
+                                        top: 10,
+                                        left: 10,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: Colors.red
+                                                .withValues(alpha: 0.85),
+                                            borderRadius:
+                                                BorderRadius.circular(6),
+                                          ),
+                                          child: const Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.cut_rounded,
+                                                  color: Colors.white,
+                                                  size: 11),
+                                              SizedBox(width: 4),
+                                              Text('CUT',
+                                                  style: TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 10,
+                                                      fontWeight:
+                                                          FontWeight.w700)),
+                                            ],
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            ),
+                              );
+                            },
+                          ),
                           // Persistent position chip — drawn under the
                           // hover-chrome's own time row so it's occluded (not
                           // duplicated) while that chrome is visible; on GIF
                           // stage (no hover chrome) it's the only indicator.
-                          Positioned(
-                            left: 10,
-                            bottom: 8,
-                            child: _chip(
-                                '${_fmtMs(_positionMs)} / ${_fmtMs(state.sourceDurationMs)}',
-                                alpha: 0.55,
-                                weight: FontWeight.w600),
+                          ValueListenableBuilder<int>(
+                            valueListenable: _positionMs,
+                            builder: (_, pos, _) => Positioned(
+                              left: 10,
+                              bottom: 8,
+                              child: _chip(
+                                  '${_fmtMs(pos)} / ${_fmtMs(state.sourceDurationMs)}',
+                                  alpha: 0.55,
+                                  weight: FontWeight.w600),
+                            ),
                           ),
                           // YouTube-style controls — videos only, and only when
                           // no canvas tool (crop/text) owns the preview gestures.
                           if (!state.isGif && !cropActive && !textActive)
                             Positioned.fill(
-                              child: _VideoControlsOverlay(
-                                controller: _previewCtrl,
-                                positionMs: _positionMs,
-                                durationMs: state.sourceDurationMs,
-                                onSeek: (ms) {
-                                  _previewCtrl.seekTo(ms);
-                                  setState(() => _positionMs = ms);
-                                },
+                              child: ValueListenableBuilder<int>(
+                                valueListenable: _positionMs,
+                                builder: (_, pos, _) => _VideoControlsOverlay(
+                                  controller: _previewCtrl,
+                                  positionMs: pos,
+                                  durationMs: state.sourceDurationMs,
+                                  onSeek: (ms) {
+                                    _previewCtrl.seekTo(ms);
+                                    _positionMs.value = ms;
+                                  },
+                                ),
                               ),
                             ),
                         ],
@@ -472,7 +522,7 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
           positionMs: _positionMs,
           onSeekPreview: (ms) {
             _previewCtrl.seekTo(ms);
-            setState(() => _positionMs = ms);
+            _positionMs.value = ms;
           },
         ),
       ],
@@ -911,7 +961,7 @@ class _ControlDock extends StatelessWidget {
   final VideoStudioState state;
   final VideoStudioController ctrl;
   final void Function(String) toast;
-  final int positionMs;
+  final ValueListenable<int> positionMs;
   final void Function(int ms) onSeekPreview;
 
   @override
@@ -1097,7 +1147,7 @@ class _ToolPanel extends StatelessWidget {
   });
   final VideoStudioState state;
   final VideoStudioController ctrl;
-  final int positionMs;
+  final ValueListenable<int> positionMs;
   final void Function(int ms) onSeekPreview;
   final void Function(String) toast;
 
@@ -1172,21 +1222,27 @@ class _ToolPanel extends StatelessWidget {
           ],
         );
       case StudioTool.trim:
-        return _TrimPanel(
+        return ValueListenableBuilder<int>(
           key: const ValueKey('trim'),
-          state: state,
-          ctrl: ctrl,
-          positionMs: positionMs,
-          onSeekPreview: onSeekPreview,
+          valueListenable: positionMs,
+          builder: (_, pos, _) => _TrimPanel(
+            state: state,
+            ctrl: ctrl,
+            positionMs: pos,
+            onSeekPreview: onSeekPreview,
+          ),
         );
       case StudioTool.cut:
-        return _CutPanel(
+        return ValueListenableBuilder<int>(
           key: const ValueKey('cut'),
-          state: state,
-          ctrl: ctrl,
-          positionMs: positionMs,
-          onSeekPreview: onSeekPreview,
-          toast: toast,
+          valueListenable: positionMs,
+          builder: (_, pos, _) => _CutPanel(
+            state: state,
+            ctrl: ctrl,
+            positionMs: pos,
+            onSeekPreview: onSeekPreview,
+            toast: toast,
+          ),
         );
       case StudioTool.text:
         return _StudioTextPanel(
@@ -1230,7 +1286,6 @@ class _ToolPanel extends StatelessWidget {
 
 class _TrimPanel extends StatelessWidget {
   const _TrimPanel({
-    super.key,
     required this.state,
     required this.ctrl,
     required this.positionMs,
@@ -1295,6 +1350,17 @@ class _TrimPanel extends StatelessWidget {
               ),
           ],
         ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            const Icon(Icons.speed_rounded, size: 13, color: AppColors.textLo),
+            const SizedBox(width: 4),
+            Text(
+              'GIF will be capped at ${state.maxGifFps} fps for this length.',
+              style: const TextStyle(color: AppColors.textLo, fontSize: 11),
+            ),
+          ],
+        ),
       ],
     );
   }
@@ -1304,7 +1370,6 @@ class _TrimPanel extends StatelessWidget {
 
 class _CutPanel extends StatefulWidget {
   const _CutPanel({
-    super.key,
     required this.state,
     required this.ctrl,
     required this.positionMs,
@@ -1623,7 +1688,7 @@ class _StudioTextLayer extends StatelessWidget {
   }
 }
 
-class _StudioDraggableText extends ConsumerWidget {
+class _StudioDraggableText extends StatefulWidget {
   const _StudioDraggableText({
     required this.item,
     required this.selected,
@@ -1642,7 +1707,38 @@ class _StudioDraggableText extends ConsumerWidget {
   final VideoStudioController ctrl;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  State<_StudioDraggableText> createState() => _StudioDraggableTextState();
+}
+
+class _StudioDraggableTextState extends State<_StudioDraggableText> {
+  // Live position while dragging, committed to the controller once on
+  // release — writing to Riverpod state on every pointer-move (as this used
+  // to via ctrl.moveSelectedText) rebuilds the whole studio screen per frame.
+  double? _dragNx;
+  double? _dragNy;
+
+  @override
+  void didUpdateWidget(_StudioDraggableText old) {
+    super.didUpdateWidget(old);
+    // A committed drag (or an external move e.g. undo) landed — drop the
+    // local override so the widget tracks the real item again.
+    if (old.item.nx != widget.item.nx || old.item.ny != widget.item.ny) {
+      _dragNx = null;
+      _dragNy = null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final item = widget.item;
+    final fontFamily = widget.fontFamily;
+    final scale = widget.scale;
+    final renderW = widget.renderW;
+    final renderH = widget.renderH;
+    final selected = widget.selected;
+    final ctrl = widget.ctrl;
+    final nx = _dragNx ?? item.nx;
+    final ny = _dragNy ?? item.ny;
     final fs = item.fontSize * scale;
     // When the real font file is loaded its weight/style are baked in — don't
     // also synthesize bold/italic or it doubles up.
@@ -1698,21 +1794,26 @@ class _StudioDraggableText extends ConsumerWidget {
     );
 
     return Positioned(
-      left: item.nx * renderW,
-      top: item.ny * renderH - fs * _kTextTopBias,
+      left: nx * renderW,
+      top: ny * renderH - fs * _kTextTopBias,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => ctrl.selectText(item.id),
         onPanDown: (_) => ctrl.selectText(item.id),
-        onPanUpdate: (d) {
-          final cur =
-              ref.read(videoStudioControllerProvider).valueOrNull?.selectedText;
-          if (cur == null) return;
-          ctrl.moveSelectedText(
-            cur.nx + d.delta.dx / renderW,
-            cur.ny + d.delta.dy / renderH,
-          );
+        // Reads _dragNx/_dragNy fresh (not the build-time nx/ny above) —
+        // pointer-move can fire faster than rebuilds, and basing the delta on
+        // a stale build snapshot drops in-between movement, lagging the drag.
+        onPanUpdate: (d) => setState(() {
+          _dragNx = (_dragNx ?? item.nx) + d.delta.dx / renderW;
+          _dragNy = (_dragNy ?? item.ny) + d.delta.dy / renderH;
+        }),
+        onPanEnd: (_) {
+          if (_dragNx != null) ctrl.moveSelectedText(_dragNx!, _dragNy!);
         },
+        onPanCancel: () => setState(() {
+          _dragNx = null;
+          _dragNy = null;
+        }),
         child: Container(
           foregroundDecoration: selected
               ? BoxDecoration(
@@ -2198,13 +2299,13 @@ class _ActionBar extends StatelessWidget {
           icon: Icons.gif_box_rounded,
           label: 'Make GIF',
           onTap: () async {
-            if (state.effectiveOutputMs > 60000) {
+            if (state.effectiveOutputMs > 40000) {
               final proceed = await showDialog<bool>(
                 context: context,
                 builder: (_) => AlertDialog(
                   title: const Text('Video too long'),
                   content: const Text(
-                      'GIF is limited to 60 seconds. Trim the video first for best results, or only the first 60 seconds will be used.'),
+                      'GIF is limited to 40 seconds. Trim the video first for best results, or only the first 40 seconds will be used.'),
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.pop(context, false),
@@ -2212,7 +2313,7 @@ class _ActionBar extends StatelessWidget {
                     ),
                     TextButton(
                       onPressed: () => Navigator.pop(context, true),
-                      child: const Text('Use first 60s'),
+                      child: const Text('Use first 40s'),
                     ),
                   ],
                 ),

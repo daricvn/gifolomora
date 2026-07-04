@@ -373,15 +373,54 @@ void main() {
     });
 
     test('videoEditToGif: select first in filtergraph, before fps', () {
-      final args = FfmpegCommand.videoEditToGif(
+      final cmds = FfmpegCommand.videoEditToGif(
         inputPath: '/in.mp4',
         outputPath: '/out.gif',
+        palettePath: '/palette.png',
         keepRanges: twoRanges,
       );
+      final args = cmds.renderPass;
       final fc = args[args.indexOf('-filter_complex') + 1];
       expect(fc.indexOf('select='), lessThan(fc.indexOf('fps=')));
       expect(args, isNot(contains('-ss')));
-      expect(args, isNot(contains('-t')));
+      // Decode stops at the last keep range end (input-side -t).
+      expect(args.indexOf('-t'), lessThan(args.indexOf('-i')));
+      expect(args[args.indexOf('-t') + 1], equals('10.000'));
+    });
+
+    test('videoEditToGif: two passes share input opts and chain', () {
+      final cmds = FfmpegCommand.videoEditToGif(
+        inputPath: '/in.mp4',
+        outputPath: '/out.gif',
+        palettePath: '/palette.png',
+        startMs: 1000,
+        durationMs: 5000,
+        fps: 12,
+        scaleW: 800,
+      );
+      final pal = cmds.palettePass;
+      final ren = cmds.renderPass;
+      // -ss/-t are input-side (before -i) on both passes.
+      for (final args in [pal, ren]) {
+        expect(args.indexOf('-ss'), lessThan(args.indexOf('-i')));
+        expect(args[args.indexOf('-ss') + 1], equals('1.000'));
+        expect(args.indexOf('-t'), lessThan(args.indexOf('-i')));
+        expect(args[args.indexOf('-t') + 1], equals('5.000'));
+      }
+      // Palette pass: single chain into palettegen, writes the palette.
+      expect(pal.last, equals('/palette.png'));
+      final vf = pal[pal.indexOf('-vf') + 1];
+      expect(vf, contains('fps=12,scale=800:-1'));
+      expect(vf, contains('palettegen=stats_mode=diff'));
+      expect(vf, isNot(contains('split')));
+      // Render pass: palette is the second input, no split/palettegen.
+      expect(ren.last, equals('/out.gif'));
+      expect(ren.where((a) => a == '-i').length, equals(2));
+      expect(ren[ren.lastIndexOf('-i') + 1], equals('/palette.png'));
+      final fc = ren[ren.indexOf('-filter_complex') + 1];
+      expect(fc, contains('fps=12,scale=800:-1'));
+      expect(fc, contains('[1:v] paletteuse'));
+      expect(fc, isNot(contains('palettegen')));
     });
 
     test('null keepRanges → -ss/-t path unchanged (regression guard)', () {

@@ -334,12 +334,18 @@ abstract final class FfmpegCommand {
   }) =>
       ['-y', '-i', inputPath, '-c', 'copy', outputPath];
 
-  /// Bakes the video layers (crop · resize · speed · trim · text) into a GIF in one pass.
-  /// When keepRanges present: select/setpts first (cuts own window, no -ss/-t).
-  /// Otherwise: crop → fps → scale → setpts → drawtext → palettegen/paletteuse.
-  static List<String> videoEditToGif({
+  /// Bakes the video layers (crop · resize · speed · trim · cut) into a GIF in
+  /// two passes sharing one filter chain: the palette pass writes palettegen's
+  /// output to [palettePath], the render pass maps frames through it. Two
+  /// passes decode the window twice but stream frame-by-frame — the one-pass
+  /// split/palettegen graph FIFO-buffers every frame in RAM until EOF (~2.7 GB
+  /// for 40 s of HD), which dwarfs the second decode.
+  /// When keepRanges present: select/setpts first (before crop/fps).
+  /// Otherwise: crop → fps → scale → setpts.
+  static ({List<String> palettePass, List<String> renderPass}) videoEditToGif({
     required String inputPath,
     required String outputPath,
+    required String palettePath,
     int? cropX,
     int? cropY,
     int? cropW,
@@ -349,11 +355,6 @@ abstract final class FfmpegCommand {
     int fps = 15,
     int? startMs,
     int? durationMs,
-    String? drawText,
-    String? drawTextFont,
-    int drawTextSize = 36,
-    String drawTextColor = 'white',
-    String drawTextPosition = 'center',
     List<CutSegment>? keepRanges,
   }) {
     final hasCut = keepRanges != null && keepRanges.isNotEmpty;
@@ -371,28 +372,38 @@ abstract final class FfmpegCommand {
     if ((speedFactor - 1.0).abs() > 0.001) {
       pre.add('setpts=${(1.0 / speedFactor).toStringAsFixed(6)}*PTS');
     }
-    if (drawText != null && drawText.isNotEmpty && drawTextFont != null) {
-      final (x, y) = _textPosition(drawTextPosition, drawTextSize);
-      final escaped = _escapeText(drawText);
-      final escapedFont = _escapeFontPath(drawTextFont);
-      pre.add("drawtext=fontfile='$escapedFont':text='$escaped':x=$x:y=$y:fontsize=$drawTextSize:fontcolor=$drawTextColor:borderw=2:bordercolor=black@0.6");
-    }
-    final args = ['-y'];
+    final chain = pre.join(',');
+
+    final inputOpts = <String>[];
     if (!hasCut && startMs != null && startMs > 0) {
-      args.addAll(['-ss', (startMs / 1000).toStringAsFixed(3)]);
+      inputOpts.addAll(['-ss', (startMs / 1000).toStringAsFixed(3)]);
     }
-    args.addAll(['-i', inputPath]);
-    if (!hasCut && durationMs != null && durationMs > 0) {
-      args.addAll(['-t', (durationMs / 1000).toStringAsFixed(3)]);
+    // -t input-side: limits the decode, not the written stream. With cuts the
+    // select filter would otherwise decode to source EOF (keepRanges is sorted,
+    // so .last.endMs is where useful frames stop); with speed < 1 an
+    // output-side -t would truncate the slowed result.
+    if (hasCut) {
+      inputOpts
+          .addAll(['-t', (keepRanges.last.endMs / 1000).toStringAsFixed(3)]);
+    } else if (durationMs != null && durationMs > 0) {
+      inputOpts.addAll(['-t', (durationMs / 1000).toStringAsFixed(3)]);
     }
-    args.addAll([
-      '-filter_complex',
-      '[0:v] ${pre.join(',')},split [a][b];[a] palettegen=stats_mode=diff [p];[b][p] paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle',
-      '-loop', '0',
-      '-progress', 'pipe:1',
-      outputPath,
-    ]);
-    return args;
+
+    return (
+      palettePass: [
+        '-y', ...inputOpts, '-i', inputPath,
+        '-vf', '$chain,palettegen=stats_mode=diff',
+        palettePath,
+      ],
+      renderPass: [
+        '-y', ...inputOpts, '-i', inputPath, '-i', palettePath,
+        '-filter_complex',
+        '[0:v] $chain [x];[x][1:v] paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle',
+        '-loop', '0',
+        '-progress', 'pipe:1',
+        outputPath,
+      ],
+    );
   }
 
   /// Applies crop · resize · speed · text to an existing GIF in one pass.

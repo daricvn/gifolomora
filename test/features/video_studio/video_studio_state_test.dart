@@ -462,4 +462,51 @@ void main() {
       expect(cleared.selectedTextId, isNull);
     });
   });
+
+  group('GIF width cap', () {
+    test('maxGifWidthFor thresholds', () {
+      expect(maxGifWidthFor(14999), equals(1280));
+      expect(maxGifWidthFor(15000), equals(1280));
+      expect(maxGifWidthFor(24999), equals(1080));
+      expect(maxGifWidthFor(25000), equals(1080));
+      expect(maxGifWidthFor(40000), equals(800));
+    });
+
+    const hdInfo = MediaInfo(durationMs: 240000, width: 1920, height: 1080);
+
+    test('capped: HD source, 40s output', () {
+      const s = VideoStudioState(sourceInfo: hdInfo);
+      expect(s.gifOutputWidth, equals(1920));
+      expect(s.gifWidthCapped, isTrue);
+      expect(s.maxGifWidth, equals(800));
+    });
+
+    test('not capped: source narrower than cap', () {
+      const s = VideoStudioState(
+        sourceInfo: MediaInfo(durationMs: 240000, width: 640, height: 360),
+      );
+      expect(s.gifWidthCapped, isFalse);
+    });
+
+    test('resize wins over source width', () {
+      const s = VideoStudioState(sourceInfo: hdInfo, targetWidth: 480);
+      expect(s.gifOutputWidth, equals(480));
+      expect(s.gifWidthCapped, isFalse);
+    });
+
+    test('crop width counts toward cap', () {
+      const s = VideoStudioState(
+        sourceInfo: hdInfo,
+        cropNormalized: Rect.fromLTWH(0, 0, 0.25, 1),
+      );
+      expect(s.gifOutputWidth, equals(480));
+      expect(s.gifWidthCapped, isFalse);
+    });
+
+    test('short trim raises cap to 1280', () {
+      const s = VideoStudioState(sourceInfo: hdInfo, trimStartMs: 0, trimEndMs: 10000);
+      expect(s.maxGifWidth, equals(1280));
+      expect(s.gifWidthCapped, isTrue);
+    });
+  });
 }

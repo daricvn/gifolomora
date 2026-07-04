@@ -18,6 +18,26 @@ import '../../text_overlay/model/text_item.dart';
 /// Which artifact the studio is currently editing.
 enum EditStage { video, gif }
 
+/// Auto FPS cap for a video→GIF conversion, tuned by output length so long
+/// clips don't bloat: <15s→21, 15–20s→16, 20–25s→15, 25–30s→12, 30–40s→8.
+int maxGifFpsFor(int durationMs) {
+  final s = durationMs / 1000;
+  if (s < 15) return 21;
+  if (s < 20) return 16;
+  if (s < 25) return 15;
+  if (s < 30) return 12;
+  return 8;
+}
+
+/// Auto width cap for a video→GIF conversion, tuned by output length so long
+/// clips don't bloat: <15s→1280, 15–25s→1080, 25–40s→800.
+int maxGifWidthFor(int durationMs) {
+  final s = durationMs / 1000;
+  if (s <= 15) return 1280;
+  if (s <= 25) return 1080;
+  return 800;
+}
+
 /// The tool whose editor panel is open in the dock.
 enum StudioTool { crop, resize, speed, trim, cut, text, optimize, properties }
 
@@ -167,6 +187,23 @@ class VideoStudioState {
     if (hasTrim) return trimDurationMs;
     return sourceDurationMs;
   }
+
+  /// Auto FPS cap for the current trim/cut selection — see [maxGifFpsFor].
+  int get maxGifFps => maxGifFpsFor(effectiveOutputMs);
+
+  /// Auto width cap for the current trim/cut selection — see [maxGifWidthFor].
+  int get maxGifWidth => maxGifWidthFor(effectiveOutputMs);
+
+  /// Frame width the GIF bake would produce before the cap: resize wins, else
+  /// crop width, else source width.
+  int get gifOutputWidth {
+    if (targetWidth != null) return targetWidth!;
+    if (!isCropFull) return (cropNormalized.width * sourceWidth).round();
+    return sourceWidth;
+  }
+
+  /// True when the bake would downscale to [maxGifWidth].
+  bool get gifWidthCapped => gifOutputWidth > maxGifWidth;
 
   /// The keep ranges: complement of cutSegments within [trimStartMs, effectiveTrimEndMs].
   /// Used by the ffmpeg layer. Single-element list (full window) when no cuts.
@@ -465,6 +502,17 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
   // ── Input ──────────────────────────────────────────────────────────────
 
   Future<void> setInput(File file) async {
+    // Guards the cold-start race: the caller (VideoStudioScreen) reads this
+    // provider and calls setInput one frame later, while build()'s font-load
+    // await may still be pending. Riverpod's AsyncNotifier applies build()'s
+    // eventual return value to `state` unconditionally when it resolves —
+    // even if `state` was already reassigned in the meantime — so without
+    // this await, build()'s stale default state (sourceFile: null) would
+    // clobber the just-loaded video a moment after it appeared (the "loads,
+    // flashes, then reverts to the picker" symptom). Awaiting `future` first
+    // lets that resolution land before we touch state, so nothing overwrites
+    // us afterward.
+    await future;
     _ffmpeg.cleanCurrentJob();
     _clearHistory();
     _freeAppliedVideo();
@@ -777,7 +825,7 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
 
     final c = _cropPixels(s);
     final t = _trimParams(s);
-    const maxGifMs = 60000;
+    const maxGifMs = 40000;
     List<CutSegment>? kr;
     int? capDurationMs;
     int? capOutputMs;
@@ -793,9 +841,9 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
       cropY: c.y,
       cropW: c.w,
       cropH: c.h,
-      scaleW: s.targetWidth,
+      scaleW: s.gifWidthCapped ? s.maxGifWidth : s.targetWidth,
       speedFactor: s.speedFactor,
-      fps: s.fps,
+      fps: s.fps > s.maxGifFps ? s.maxGifFps : s.fps,
       totalMs: s.sourceDurationMs > 0 ? s.sourceDurationMs : null,
       startMs: s.hasCut ? null : t.startMs,
       durationMs: capDurationMs,

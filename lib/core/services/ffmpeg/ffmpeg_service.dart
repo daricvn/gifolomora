@@ -427,9 +427,11 @@ class FfmpegService {
     _currentJobDir = jobDir;
     try {
       final outputPath = await _temp.tempOutputPath(jobDir, 'gif');
-      final args = FfmpegCommand.videoEditToGif(
+      final palettePath = p.join(jobDir, 'palette.png');
+      final cmds = FfmpegCommand.videoEditToGif(
         inputPath: input.path,
         outputPath: outputPath,
+        palettePath: palettePath,
         cropX: cropX,
         cropY: cropY,
         cropW: cropW,
@@ -441,13 +443,18 @@ class FfmpegService {
         durationMs: durationMs,
         keepRanges: keepRanges,
       );
+      // Two passes: palette first (no progress — palettegen emits one frame at
+      // EOF, so ffmpeg's progress stream is meaningless), then the render pass
+      // drives the progress bar.
+      final palette = await _backend.run(cmds.palettePass, palettePath);
+      if (palette.isErr) return Err(palette.error);
       final effectiveTotalMs = keepRangesOutputMs ??
           (durationMs != null && durationMs > 0
               ? durationMs
               : (totalMs != null && (speedFactor - 1.0).abs() > 0.001
                   ? (totalMs / speedFactor).round()
                   : totalMs));
-      return await _backend.run(args, outputPath,
+      return await _backend.run(cmds.renderPass, outputPath,
           onProgress: onProgress, totalMs: effectiveTotalMs);
     } catch (e) {
       await _temp.cleanJob(jobDir);
