@@ -1416,10 +1416,15 @@ class _CutPanelState extends State<_CutPanel> {
     super.didUpdateWidget(old);
     final lo = widget.state.trimStartMs;
     final hi = widget.state.effectiveTrimEndMs;
-    if (_pendingStartMs < lo) _pendingStartMs = lo;
-    if (_pendingEndMs > hi) _pendingEndMs = hi;
-    if (_pendingEndMs - _pendingStartMs <= 0) {
+    // Clamp both ends into the (possibly shrunk) trim window before fixing
+    // order — clamping only the edge that moved (old code) could leave
+    // start > end when the window shrank past the *other* edge, drawing an
+    // inverted range.
+    _pendingStartMs = _pendingStartMs.clamp(lo, hi);
+    _pendingEndMs = _pendingEndMs.clamp(lo, hi);
+    if (_pendingEndMs <= _pendingStartMs) {
       _pendingEndMs = (_pendingStartMs + 1000).clamp(lo, hi);
+      if (_pendingEndMs <= _pendingStartMs) _pendingStartMs = _pendingEndMs;
     }
   }
 

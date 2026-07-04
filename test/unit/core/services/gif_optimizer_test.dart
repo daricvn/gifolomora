@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -288,6 +289,47 @@ void main() {
         () => GifOptimizer.optimize(input, output),
         throwsA(isA<FormatException>()),
       );
+    });
+
+    test('onProgress reports non-decreasing fractions up to completion',
+        () async {
+      final src = _buildSourceGif(24);
+      final input = File('${tmp.path}/progress_in.gif')
+        ..writeAsBytesSync(src);
+      final output = File('${tmp.path}/progress_out.gif');
+      final seen = <double>[];
+      await GifOptimizer.optimize(input, output,
+          colors: 32, onProgress: seen.add);
+      expect(seen, isNotEmpty);
+      expect(seen.first, 0.0);
+      for (var i = 1; i < seen.length; i++) {
+        expect(seen[i], greaterThanOrEqualTo(seen[i - 1]));
+      }
+      expect(seen.last, lessThan(1.0),
+          reason: 'sent before each frame — last index never reaches 1.0');
+    });
+
+    test(
+        'onProgress works even when the callback closes over an unsendable object',
+        () async {
+      // Regression: Isolate.run captures its whole enclosing lexical Context,
+      // not just the variables its own body names. A sibling closure over an
+      // unsendable object (here, a Future — real callers close over a
+      // Riverpod controller/Future chain) used to get dragged along and blow
+      // up with "object is unsendable" even though this closure never
+      // crosses the isolate boundary itself.
+      final src = _buildSourceGif(24);
+      final input = File('${tmp.path}/progress2_in.gif')
+        ..writeAsBytesSync(src);
+      final output = File('${tmp.path}/progress2_out.gif');
+      final guard = Completer<void>(); // unsendable
+      var calls = 0;
+      await GifOptimizer.optimize(input, output, colors: 32,
+          onProgress: (f) {
+        calls++;
+        guard.future.ignore();
+      });
+      expect(calls, greaterThan(0));
     });
   });
 }

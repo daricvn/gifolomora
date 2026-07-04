@@ -253,9 +253,16 @@ class VideoStudioState {
   }
 
   /// Whether Apply/Export would actually do anything beyond a straight save.
-  bool get hasPendingApply => isGif
-      ? (needsGifEdit || doOptimize || hasText)
-      : (hasEdits || hasTrim || hasText || hasVolumeChange || hasCut);
+  /// `editsApplied` short-circuits this: right after a bake, fields like
+  /// loopCount are intentionally left at their (non-default) baked value with
+  /// no separate "already applied" marker of their own — without this guard
+  /// a nonzero loopCount would read as pending forever, since it never
+  /// resets. Any setter clears editsApplied, so real new edits still count.
+  bool get hasPendingApply =>
+      !editsApplied &&
+      (isGif
+          ? (needsGifEdit || doOptimize || hasText)
+          : (hasEdits || hasTrim || hasText || hasVolumeChange || hasCut));
 
   /// Whether [tool]'s panel currently carries a non-default edit — drives the
   /// dot indicator on the tool selector.
@@ -875,6 +882,9 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
           fps: s.fps,
           loopCount: s.loopCount,
           boomerang: s.boomerang,
+          // Unused while editing the gif (no audio), carried through so
+          // discardGif can restore it if the user goes back to the video.
+          volume: s.volume,
         );
         state = AsyncData(baked);
         _pushVersion(baked, ownedDir: gif.parent.path);
@@ -908,6 +918,7 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
       fps: s?.fps ?? 16,
       loopCount: s?.loopCount ?? 0,
       boomerang: s?.boomerang ?? false,
+      volume: s?.volume ?? 1.0,
     ));
   }
 
@@ -998,6 +1009,7 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
         lossy: s.optimizeLossy,
         frameDrop: s.optimizeFrameDrop,
         loopCount: s.loopCount,
+        onProgress: _onProgress,
       );
       File? next;
       await result.fold(

@@ -158,6 +158,7 @@ class FfmpegService {
     int lossy = 40,
     int? loopCount,
     int frameDrop = 0,
+    void Function(FfmpegProgress)? onProgress,
   }) async {
     final jobDir = await _temp.createJobDir();
     _currentJobDir = jobDir;
@@ -170,6 +171,9 @@ class FfmpegService {
         lossy: lossy,
         loopCount: loopCount,
         frameDrop: frameDrop,
+        onProgress: onProgress == null
+            ? null
+            : (f) => onProgress(FfmpegProgress(fraction: f)),
       );
       return Ok(File(outputPath));
     } catch (e) {

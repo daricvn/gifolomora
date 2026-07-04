@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
@@ -42,19 +43,42 @@ class GifOptimizer {
     int lossy = 0,
     int? loopCount,
     int frameDrop = 0,
+    void Function(double fraction)? onProgress,
   }) async {
     final bytes = await input.readAsBytes();
-    final result = await Isolate.run(
-      () => _process(
-          bytes, colors.clamp(2, 256), lossy.clamp(0, 200), loopCount, frameDrop),
-    );
+    // ponytail: only the frame encode loop (step 4, the dominant cost)
+    // reports progress — decode/palette/color-map stay coarse. Good enough
+    // to turn an indeterminate spinner into a moving bar; per-phase weighting
+    // only worth it if users complain the bar jumps at the start.
+    ReceivePort? progressPort;
+    StreamSubscription? progressSub;
+    if (onProgress != null) {
+      progressPort = ReceivePort();
+      progressSub = progressPort.listen((msg) => onProgress(msg as double));
+    }
+    final result = await _spawn(bytes, colors.clamp(2, 256),
+        lossy.clamp(0, 200), loopCount, frameDrop, progressPort?.sendPort);
+    await progressSub?.cancel();
+    progressPort?.close();
     await output.writeAsBytes(result);
+  }
+
+  // Isolate.run captures its whole enclosing Context, not just the variables
+  // its closure body names — a sibling closure over `onProgress` (above, in
+  // optimize()) shares that Context, so the callback rides along and blows up
+  // ("object is unsendable") the moment the caller's onProgress closes over
+  // anything unsendable (a Future, a Riverpod ref, ...). A dedicated function
+  // whose scope never contains `onProgress` sidesteps it.
+  static Future<Uint8List> _spawn(Uint8List bytes, int colors, int lossy,
+      int? loopCount, int frameDrop, SendPort? progressPort) {
+    return Isolate.run(
+        () => _process(bytes, colors, lossy, loopCount, frameDrop, progressPort));
   }
 
   // ---- pipeline ------------------------------------------------------------
 
   static Uint8List _process(Uint8List bytes, int colors, int lossy,
-      int? loopOverride, int frameDrop) {
+      int? loopOverride, int frameDrop, SendPort? progressPort) {
     // 1. Decode raw frames and composite them ourselves. package:image's
     //    decode() mis-composites sub-rect disposal=1 frames that lack a local
     //    color table — it skips the previous-canvas copy, flooding the frame
@@ -329,6 +353,7 @@ class GifOptimizer {
     final outDurations = <int>[];
     Uint8List? prevOut; // erase mode: last kept frame, for duplicate folding
     for (var f = 0; f < frameCount; f++) {
+      progressPort?.send(f / frameCount);
       final cur = framesIndex[f];
       final curRgb = framesRgb[f];
       final curTrans = framesTransparent[f];
