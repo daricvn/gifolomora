@@ -39,7 +39,7 @@ int maxGifWidthFor(int durationMs) {
 }
 
 /// The tool whose editor panel is open in the dock.
-enum StudioTool { crop, resize, speed, trim, cut, text, optimize, properties }
+enum StudioTool { crop, resize, speed, trim, cut, text, gif, optimize, properties }
 
 class VideoStudioState {
   const VideoStudioState({
@@ -57,13 +57,17 @@ class VideoStudioState {
     this.selectedTextId,
     this.fontFiles = const {},
     this.fontFamilies = const {},
+    this.forceOriginalGifWidth = false,
     this.doOptimize = false,
     this.optimizeColors = 246,
     this.optimizeLossy = 15,
     this.optimizeFrameDrop = 0,
+    this.optimizeLocalPalettes = false,
     this.fps = 16,
     this.loopCount = 0,
     this.boomerang = false,
+    this.smoothLoop = false,
+    this.smoothLoopCrossfadeMs = 1000,
     this.volume = 1.0,
     this.activeTool = StudioTool.crop,
     this.progress,
@@ -88,6 +92,10 @@ class VideoStudioState {
   final int? targetWidth;
   final double speedFactor;
 
+  /// User override to skip the auto width cap and keep the GIF at source/
+  /// resize width. Only takes effect under 25s — see [forceOriginalGifWidthActive].
+  final bool forceOriginalGifWidth;
+
   /// Trim in/out points (ms). Both 0 = no trim (full duration).
   final int trimStartMs;
   final int trimEndMs;
@@ -110,6 +118,7 @@ class VideoStudioState {
   final int optimizeColors;
   final int optimizeLossy;
   final int optimizeFrameDrop; // 0 = keep all; 2/3/4 = remove 1 of every N
+  final bool optimizeLocalPalettes; // lossless per-frame color tables
 
   /// Output-GIF properties. [fps] is baked at make-GIF time (frames can't be
   /// added later). [loopCount] 0 = infinite. [boomerang] appends a reversed
@@ -117,6 +126,15 @@ class VideoStudioState {
   final int fps;
   final int loopCount;
   final bool boomerang;
+
+  /// Crossfades the last [smoothLoopCrossfadeMs] into the first
+  /// [smoothLoopCrossfadeMs], then drops that same span from the front, so
+  /// the loop point has no jump cut. GIF-stage only; mutually exclusive with
+  /// [boomerang] (both replace the tail of the filter graph).
+  final bool smoothLoop;
+
+  /// Crossfade span for [smoothLoop], 500–1000ms in 100ms steps.
+  final int smoothLoopCrossfadeMs;
 
   /// Audio volume multiplier for video export (1.0 = 100%, range 0–2.0). Baked
   /// into the encode's audio filter at apply/export; ignored for GIF (no audio).
@@ -205,6 +223,16 @@ class VideoStudioState {
   /// True when the bake would downscale to [maxGifWidth].
   bool get gifWidthCapped => gifOutputWidth > maxGifWidth;
 
+  /// Whether the "keep original width" checkbox should appear enabled — only
+  /// offered under 25s, and only when the cap would actually kick in.
+  bool get canForceOriginalGifWidth =>
+      effectiveOutputMs < 25000 && gifWidthCapped;
+
+  /// [forceOriginalGifWidth] only takes effect under 25s — at/after 25s the
+  /// cap always applies, even if the checkbox is left checked (disabled).
+  bool get forceOriginalGifWidthActive =>
+      forceOriginalGifWidth && effectiveOutputMs < 25000;
+
   /// The keep ranges: complement of cutSegments within [trimStartMs, effectiveTrimEndMs].
   /// Used by the ffmpeg layer. Single-element list (full window) when no cuts.
   List<CutSegment> get keepRanges {
@@ -249,8 +277,20 @@ class VideoStudioState {
   bool get needsGifEdit {
     final srcFps = sourceInfo?.fps;
     final fpsChanged = srcFps != null && (fps - srcFps).abs() >= 0.5;
-    return hasEdits || hasTrim || boomerang || fpsChanged || (loopCount != 0 && !doOptimize);
+    return hasEdits || hasTrim || boomerang || smoothLoop || fpsChanged || (loopCount != 0 && !doOptimize);
   }
+
+  /// UX gate: Smooth Loop only offered when the trimmed/cut target duration
+  /// exceeds 3s — not just the raw source (a trim can shrink the effective
+  /// GIF well under the source length).
+  bool get canSmoothLoop => effectiveOutputMs / speedFactor > 3000;
+
+  /// Hard safety floor: the post-speed/post-trim effective duration must
+  /// leave the crossfade's `mid` segment with real frames (>100ms), else the
+  /// filter graph's `concat` would run on an empty stream. Scales with the
+  /// user-adjustable [smoothLoopCrossfadeMs].
+  bool get smoothLoopValid =>
+      effectiveOutputMs / speedFactor > 2 * smoothLoopCrossfadeMs + 100;
 
   /// Whether Apply/Export would actually do anything beyond a straight save.
   /// `editsApplied` short-circuits this: right after a bake, fields like
@@ -280,10 +320,12 @@ class VideoStudioState {
         return hasCut;
       case StudioTool.text:
         return hasText;
+      case StudioTool.gif:
+        return fps != 16 || forceOriginalGifWidth;
       case StudioTool.optimize:
         return doOptimize;
       case StudioTool.properties:
-        return isGif ? (loopCount != 0 || boomerang) : hasVolumeChange;
+        return isGif ? (loopCount != 0 || boomerang || smoothLoop) : hasVolumeChange;
     }
   }
 
@@ -295,6 +337,7 @@ class VideoStudioState {
     Rect? cropNormalized,
     Object? targetWidth = _s,
     double? speedFactor,
+    bool? forceOriginalGifWidth,
     int? trimStartMs,
     int? trimEndMs,
     List<CutSegment>? cutSegments,
@@ -306,9 +349,12 @@ class VideoStudioState {
     int? optimizeColors,
     int? optimizeLossy,
     int? optimizeFrameDrop,
+    bool? optimizeLocalPalettes,
     int? fps,
     int? loopCount,
     bool? boomerang,
+    bool? smoothLoop,
+    int? smoothLoopCrossfadeMs,
     double? volume,
     Object? activeTool = _s,
     Object? progress = _s,
@@ -333,6 +379,7 @@ class VideoStudioState {
       targetWidth:
           identical(targetWidth, _s) ? this.targetWidth : targetWidth as int?,
       speedFactor: speedFactor ?? this.speedFactor,
+      forceOriginalGifWidth: forceOriginalGifWidth ?? this.forceOriginalGifWidth,
       trimStartMs: trimStartMs ?? this.trimStartMs,
       trimEndMs: trimEndMs ?? this.trimEndMs,
       cutSegments: cutSegments ?? this.cutSegments,
@@ -346,9 +393,12 @@ class VideoStudioState {
       optimizeColors: optimizeColors ?? this.optimizeColors,
       optimizeLossy: optimizeLossy ?? this.optimizeLossy,
       optimizeFrameDrop: optimizeFrameDrop ?? this.optimizeFrameDrop,
+      optimizeLocalPalettes: optimizeLocalPalettes ?? this.optimizeLocalPalettes,
       fps: fps ?? this.fps,
       loopCount: loopCount ?? this.loopCount,
       boomerang: boomerang ?? this.boomerang,
+      smoothLoop: smoothLoop ?? this.smoothLoop,
+      smoothLoopCrossfadeMs: smoothLoopCrossfadeMs ?? this.smoothLoopCrossfadeMs,
       volume: volume ?? this.volume,
       activeTool: identical(activeTool, _s)
           ? this.activeTool
@@ -571,7 +621,8 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
 
   void setSpeed(double factor) {
     final s = state.valueOrNull ?? const VideoStudioState();
-    state = AsyncData(s.copyWith(speedFactor: factor.clamp(0.1, 10.0), error: null));
+    state = AsyncData(_disableSmoothLoopIfInvalid(
+        s.copyWith(speedFactor: factor.clamp(0.1, 10.0), error: null)));
   }
 
   void setTrimStart(int ms) {
@@ -579,8 +630,8 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
     final max = s.effectiveTrimEndMs > 1000 ? s.effectiveTrimEndMs - 1000 : 0;
     final newStart = ms.clamp(0, max);
     final clipped = _clipSegments(s.cutSegments, newStart, s.effectiveTrimEndMs);
-    state = AsyncData(s.copyWith(
-        trimStartMs: newStart, cutSegments: clipped, error: null));
+    state = AsyncData(_disableSmoothLoopIfInvalid(s.copyWith(
+        trimStartMs: newStart, cutSegments: clipped, error: null)));
   }
 
   void setTrimEnd(int ms) {
@@ -589,9 +640,19 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
     final max = s.sourceDurationMs > 0 ? s.sourceDurationMs : ms;
     final newEnd = ms.clamp(min, max);
     final clipped = _clipSegments(s.cutSegments, s.trimStartMs, newEnd);
-    state = AsyncData(s.copyWith(
-        trimEndMs: newEnd, cutSegments: clipped, error: null));
+    state = AsyncData(_disableSmoothLoopIfInvalid(s.copyWith(
+        trimEndMs: newEnd, cutSegments: clipped, error: null)));
   }
+
+  /// Smooth Loop's crossfade needs a real `mid` segment, and the feature is
+  /// only offered past the 3s UX gate — if the user drags speed/trim/cut
+  /// into either unsafe zone after enabling it, turn it back off rather than
+  /// let a broken filter graph reach ffmpeg or leave a switch on that the UI
+  /// would otherwise disable.
+  VideoStudioState _disableSmoothLoopIfInvalid(VideoStudioState s) =>
+      s.smoothLoop && (!s.smoothLoopValid || !s.canSmoothLoop)
+          ? s.copyWith(smoothLoop: false)
+          : s;
 
   void resetTrim() {
     final s = state.valueOrNull ?? const VideoStudioState();
@@ -647,7 +708,8 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
         newSegs.fold(0, (sum, seg) => sum + (seg.endMs - seg.startMs));
     if (s.trimDurationMs - newCutDurationMs < 1000) return false;
 
-    state = AsyncData(s.copyWith(cutSegments: newSegs, error: null));
+    state = AsyncData(
+        _disableSmoothLoopIfInvalid(s.copyWith(cutSegments: newSegs, error: null)));
     return true;
   }
 
@@ -735,6 +797,11 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
     ));
   }
 
+  void setForceOriginalGifWidth(bool v) {
+    final s = state.valueOrNull ?? const VideoStudioState();
+    state = AsyncData(s.copyWith(forceOriginalGifWidth: v, error: null));
+  }
+
   void setDoOptimize(bool v) {
     final s = state.valueOrNull ?? const VideoStudioState();
     state = AsyncData(s.copyWith(doOptimize: v, error: null));
@@ -755,6 +822,11 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
     state = AsyncData(s.copyWith(optimizeFrameDrop: v, error: null));
   }
 
+  void setOptimizeLocalPalettes(bool v) {
+    final s = state.valueOrNull ?? const VideoStudioState();
+    state = AsyncData(s.copyWith(optimizeLocalPalettes: v, error: null));
+  }
+
   void setFps(int v) {
     final s = state.valueOrNull ?? const VideoStudioState();
     state = AsyncData(s.copyWith(fps: v.clamp(1, 60), error: null));
@@ -767,7 +839,22 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
 
   void setBoomerang(bool v) {
     final s = state.valueOrNull ?? const VideoStudioState();
-    state = AsyncData(s.copyWith(boomerang: v, error: null));
+    state = AsyncData(s.copyWith(
+        boomerang: v, smoothLoop: v ? false : s.smoothLoop, error: null));
+  }
+
+  void setSmoothLoop(bool v) {
+    final s = state.valueOrNull ?? const VideoStudioState();
+    state = AsyncData(s.copyWith(
+        smoothLoop: v, boomerang: v ? false : s.boomerang, error: null));
+  }
+
+  void setSmoothLoopCrossfadeMs(int v) {
+    final s = state.valueOrNull ?? const VideoStudioState();
+    final clamped = v.clamp(500, 1000);
+    final rounded = clamped - (clamped % 100);
+    state = AsyncData(_disableSmoothLoopIfInvalid(
+        s.copyWith(smoothLoopCrossfadeMs: rounded, error: null)));
   }
 
   void setVolume(double v) {
@@ -848,7 +935,9 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
       cropY: c.y,
       cropW: c.w,
       cropH: c.h,
-      scaleW: s.gifWidthCapped ? s.maxGifWidth : s.targetWidth,
+      scaleW: (s.gifWidthCapped && !s.forceOriginalGifWidthActive)
+          ? s.maxGifWidth
+          : s.targetWidth,
       speedFactor: s.speedFactor,
       fps: s.fps > s.maxGifFps ? s.maxGifFps : s.fps,
       totalMs: s.sourceDurationMs > 0 ? s.sourceDurationMs : null,
@@ -879,6 +968,7 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
           optimizeColors: s.optimizeColors,
           optimizeLossy: s.optimizeLossy,
           optimizeFrameDrop: s.optimizeFrameDrop,
+          optimizeLocalPalettes: s.optimizeLocalPalettes,
           fps: s.fps,
           loopCount: s.loopCount,
           boomerang: s.boomerang,
@@ -975,11 +1065,16 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
         scaleW: s.targetWidth,
         speedFactor: s.speedFactor,
         startMs: t.startMs,
-        durationMs: t.durationMs,
+        durationMs:
+            s.smoothLoop ? (t.durationMs ?? s.sourceDurationMs) : t.durationMs,
         totalMs: s.sourceDurationMs > 0 ? s.sourceDurationMs : null,
-        fps: fpsChanged ? s.fps : null,
+        fps: fpsChanged
+            ? s.fps
+            : (s.smoothLoop ? (srcFps?.round() ?? s.fps) : null),
         loopCount: s.loopCount,
         boomerang: s.boomerang,
+        smoothLoop: s.smoothLoop,
+        crossfadeMs: s.smoothLoopCrossfadeMs,
         onProgress: s.doOptimize ? null : _onProgress,
       );
       File? next;
@@ -1008,6 +1103,7 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
         colors: s.optimizeColors,
         lossy: s.optimizeLossy,
         frameDrop: s.optimizeFrameDrop,
+        localPalettes: s.optimizeLocalPalettes,
         loopCount: s.loopCount,
         onProgress: _onProgress,
       );
@@ -1232,9 +1328,11 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
       optimizeColors: s.optimizeColors,
       optimizeLossy: s.optimizeLossy,
       optimizeFrameDrop: s.optimizeFrameDrop,
+      optimizeLocalPalettes: s.optimizeLocalPalettes,
       fps: s.fps,
       loopCount: s.loopCount,
       boomerang: false,
+      smoothLoop: false,
       editsApplied: true,
     );
     // Re-snapshot the current history entry with the pre-apply editing state

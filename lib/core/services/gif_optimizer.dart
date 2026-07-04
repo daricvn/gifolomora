@@ -36,6 +36,13 @@ class GifOptimizer {
   ///              (2 → halve, 3 → drop a third, 4 → drop a quarter). The dropped
   ///              frame's duration is folded into the previous kept frame so
   ///              total playback time is unchanged. Frame 0 is always kept.
+  /// [localPalettes]  lossless extra pass (gifsicle optimize level 3 style):
+  ///              when a frame's diffed region uses few enough palette entries
+  ///              that a smaller LZW minimum code size becomes possible, the
+  ///              frame is re-encoded against a compact per-frame local color
+  ///              table, and kept only if LCT bytes + narrower codes beat the
+  ///              global-table encoding. Off by default (costs an extra encode
+  ///              per qualifying frame).
   static Future<void> optimize(
     File input,
     File output, {
@@ -43,6 +50,7 @@ class GifOptimizer {
     int lossy = 0,
     int? loopCount,
     int frameDrop = 0,
+    bool localPalettes = false,
     void Function(double fraction)? onProgress,
   }) async {
     final bytes = await input.readAsBytes();
@@ -56,8 +64,8 @@ class GifOptimizer {
       progressPort = ReceivePort();
       progressSub = progressPort.listen((msg) => onProgress(msg as double));
     }
-    final result = await _spawn(bytes, colors.clamp(2, 256),
-        lossy.clamp(0, 200), loopCount, frameDrop, progressPort?.sendPort);
+    final result = await _spawn(bytes, colors.clamp(2, 256), lossy.clamp(0, 200),
+        loopCount, frameDrop, localPalettes, progressPort?.sendPort);
     await progressSub?.cancel();
     progressPort?.close();
     await output.writeAsBytes(result);
@@ -70,15 +78,16 @@ class GifOptimizer {
   // anything unsendable (a Future, a Riverpod ref, ...). A dedicated function
   // whose scope never contains `onProgress` sidesteps it.
   static Future<Uint8List> _spawn(Uint8List bytes, int colors, int lossy,
-      int? loopCount, int frameDrop, SendPort? progressPort) {
-    return Isolate.run(
-        () => _process(bytes, colors, lossy, loopCount, frameDrop, progressPort));
+      int? loopCount, int frameDrop, bool localPalettes, SendPort? progressPort) {
+    return Isolate.run(() => _process(
+        bytes, colors, lossy, loopCount, frameDrop, localPalettes, progressPort));
   }
 
   // ---- pipeline ------------------------------------------------------------
 
   static Uint8List _process(Uint8List bytes, int colors, int lossy,
-      int? loopOverride, int frameDrop, SendPort? progressPort) {
+      int? loopOverride, int frameDrop, bool localPalettes,
+      SendPort? progressPort) {
     // 1. Decode raw frames and composite them ourselves. package:image's
     //    decode() mis-composites sub-rect disposal=1 frames that lack a local
     //    color table — it skips the previous-canvas copy, flooding the frame
@@ -351,6 +360,8 @@ class GifOptimizer {
     final boxes = <_Box>[];
     final imageData = <Uint8List>[];
     final outDurations = <int>[];
+    final localTables = <Uint8List?>[]; // padded RGB bytes, null = use GCT
+    final frameTransparents = <int?>[]; // null = no transparency flag
     Uint8List? prevOut; // erase mode: last kept frame, for duplicate folding
     for (var f = 0; f < frameCount; f++) {
       progressPort?.send(f / frameCount);
@@ -448,6 +459,56 @@ class GifOptimizer {
           }
         }
       }
+
+      // Optional lossless LCT pass: if the frame's region uses few enough
+      // palette entries for a smaller minimum code size, re-encode against a
+      // compact local color table. Remapping is a bijection on the used
+      // indices, so the LZW phrase structure — and code count — is identical;
+      // only the code widths shrink. Keep it only when LCT bytes + narrower
+      // codes actually beat the global-table encoding.
+      Uint8List? lct;
+      int? frameTransparent = transparentIndex;
+      if (localPalettes) {
+        final used = Uint8List(totalColors);
+        for (final v in finalIdx) {
+          used[v] = 1;
+        }
+        var usedCount = 0;
+        for (var i = 0; i < totalColors; i++) {
+          usedCount += used[i];
+        }
+        final lctMinCode = _minCodeSize(usedCount);
+        if (lctMinCode < minCodeSize) {
+          final remap = Uint8List(totalColors);
+          var next = 0;
+          for (var i = 0; i < totalColors; i++) {
+            if (used[i] == 1) remap[i] = next++;
+          }
+          final remapped = Uint8List(finalIdx.length);
+          for (var p = 0; p < finalIdx.length; p++) {
+            remapped[p] = remap[finalIdx[p]];
+          }
+          final lctEncoded = GifLzw.encode(remapped, lctMinCode);
+          final lctColors = 1 << (_gctSizeField(usedCount) + 1);
+          if (lctEncoded.length + lctColors * 3 < encoded.length) {
+            final table = Uint8List(lctColors * 3);
+            for (var i = 0; i < realColors; i++) {
+              if (used[i] == 0) continue;
+              final o = remap[i] * 3;
+              table[o] = pr[i];
+              table[o + 1] = pg[i];
+              table[o + 2] = pb[i];
+            }
+            encoded = lctEncoded;
+            lct = table;
+            frameTransparent =
+                used[transparentIndex] == 1 ? remap[transparentIndex] : null;
+          }
+        }
+      }
+      localTables.add(lct);
+      frameTransparents.add(frameTransparent);
+
       boxes.add(box);
       imageData.add(encoded);
       outDurations.add(durations[f]);
@@ -465,6 +526,8 @@ class GifOptimizer {
       imageData: imageData,
       durations: outDurations,
       loopCount: loopCount,
+      localTables: localTables,
+      frameTransparents: frameTransparents,
     );
   }
 
@@ -520,6 +583,8 @@ class GifOptimizer {
     required List<Uint8List> imageData,
     required List<int> durations,
     required int loopCount,
+    required List<Uint8List?> localTables,
+    required List<int?> frameTransparents,
   }) {
     final out = BytesBuilder(copy: false);
 
@@ -573,6 +638,8 @@ class GifOptimizer {
 
     for (var f = 0; f < imageData.length; f++) {
       final box = boxes[f];
+      final lct = localTables[f];
+      final ti = frameTransparents[f]; // null = frame has no transparent pixel
 
       // Graphic Control Extension. Disposal 1 (leave in place: transparent
       // pixels reveal the previous frame) or 2 (restore to background:
@@ -581,10 +648,10 @@ class GifOptimizer {
         ..addByte(0x21)
         ..addByte(0xF9)
         ..addByte(4)
-        ..addByte((disposal << 2) | 0x01); // disposal, transparency flag on
+        ..addByte((disposal << 2) | (ti != null ? 0x01 : 0x00));
       u16(durations[f]);
       out
-        ..addByte(transparentIndex & 0xff)
+        ..addByte((ti ?? 0) & 0xff)
         ..addByte(0);
 
       // Image Descriptor.
@@ -593,7 +660,14 @@ class GifOptimizer {
       u16(box.top);
       u16(box.width);
       u16(box.height);
-      out.addByte(0); // no local color table, no interlace
+      if (lct == null) {
+        out.addByte(0); // no local color table, no interlace
+      } else {
+        // LCT present; its length is 3·2^(field+1) bytes by construction.
+        final field = (lct.length ~/ 3).bitLength - 2;
+        out.addByte(0x80 | field);
+        out.add(lct);
+      }
 
       // Pre-encoded LZW image data (cropped to the bounding box).
       out.add(imageData[f]);

@@ -480,4 +480,125 @@ void main() {
       expect(content, contains('duration 0.100000'));
     });
   });
+
+  group('FfmpegCommand.gifEdit — smoothLoop', () {
+    test('smoothLoop true emits trim/xfade/concat/split=3 graph', () {
+      final args = FfmpegCommand.gifEdit(
+        inputPath: '/in.gif',
+        outputPath: '/out.gif',
+        durationMs: 8000,
+        fps: 15,
+        smoothLoop: true,
+      );
+      final filter = args[args.indexOf('-filter_complex') + 1];
+      expect(filter, contains('split=3'));
+      expect(filter, contains('xfade=transition=fade:duration=1.000'));
+      expect(filter, contains('concat=n=2:v=1'));
+    });
+
+    test('default (no smoothLoop) has none of the smoothLoop graph pieces', () {
+      final args = FfmpegCommand.gifEdit(
+        inputPath: '/in.gif',
+        outputPath: '/out.gif',
+      );
+      final filter = args[args.indexOf('-filter_complex') + 1];
+      expect(filter, isNot(contains('xfade')));
+      expect(filter, isNot(contains('split=3')));
+    });
+
+    test('trim boundary math: durationMs=8000, speedFactor=2.0 → D=4.0', () {
+      final args = FfmpegCommand.gifEdit(
+        inputPath: '/in.gif',
+        outputPath: '/out.gif',
+        durationMs: 8000,
+        speedFactor: 2.0,
+        fps: 15,
+        smoothLoop: true,
+      );
+      final filter = args[args.indexOf('-filter_complex') + 1];
+      expect(filter, contains('trim=3.000:4.000')); // tail
+      expect(filter, contains('trim=1.000:3.000')); // mid stops before tail
+    });
+
+    test('crossfadeMs=500 → 0.500s xfade/trim boundaries', () {
+      final args = FfmpegCommand.gifEdit(
+        inputPath: '/in.gif',
+        outputPath: '/out.gif',
+        durationMs: 8000,
+        fps: 15,
+        smoothLoop: true,
+        crossfadeMs: 500,
+      );
+      final filter = args[args.indexOf('-filter_complex') + 1];
+      expect(filter, contains('xfade=transition=fade:duration=0.500'));
+      expect(filter, contains('trim=0:0.500')); // head
+      expect(filter, contains('trim=7.500:8.000')); // tail
+      expect(filter, contains('trim=0.500:7.500')); // mid
+    });
+
+    test('throws when post-speed duration too short for crossfadeMs=500', () {
+      expect(
+        () => FfmpegCommand.gifEdit(
+          inputPath: '/in.gif',
+          outputPath: '/out.gif',
+          durationMs: 1000, // D=1.0s <= 2*0.5+0.1
+          fps: 15,
+          smoothLoop: true,
+          crossfadeMs: 500,
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('throws when smoothLoop combined with boomerang', () {
+      expect(
+        () => FfmpegCommand.gifEdit(
+          inputPath: '/in.gif',
+          outputPath: '/out.gif',
+          durationMs: 8000,
+          fps: 15,
+          smoothLoop: true,
+          boomerang: true,
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('throws when smoothLoop and durationMs is null', () {
+      expect(
+        () => FfmpegCommand.gifEdit(
+          inputPath: '/in.gif',
+          outputPath: '/out.gif',
+          fps: 15,
+          smoothLoop: true,
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('throws when smoothLoop and fps is null', () {
+      expect(
+        () => FfmpegCommand.gifEdit(
+          inputPath: '/in.gif',
+          outputPath: '/out.gif',
+          durationMs: 8000,
+          smoothLoop: true,
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('throws when post-speed duration too short (D <= 2.1s)', () {
+      expect(
+        () => FfmpegCommand.gifEdit(
+          inputPath: '/in.gif',
+          outputPath: '/out.gif',
+          durationMs: 2000,
+          fps: 15,
+          smoothLoop: true,
+        ),
+        throwsArgumentError,
+      );
+    });
+  });
 }

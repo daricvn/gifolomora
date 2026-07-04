@@ -54,6 +54,7 @@ class _StepwiseFfmpegService extends FakeFfmpegService {
     int lossy = 40,
     int? loopCount,
     int frameDrop = 0,
+    bool localPalettes = false,
     void Function(FfmpegProgress)? onProgress,
     int? totalMs,
   }) async {

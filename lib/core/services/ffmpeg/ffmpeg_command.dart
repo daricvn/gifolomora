@@ -427,7 +427,18 @@ abstract final class FfmpegCommand {
     int? fps,
     int loopCount = 0,
     bool boomerang = false,
+    bool smoothLoop = false,
+    int crossfadeMs = 1000,
   }) {
+    if (smoothLoop && boomerang) {
+      throw ArgumentError('smoothLoop and boomerang are mutually exclusive');
+    }
+    if (smoothLoop && (durationMs == null || durationMs <= 0)) {
+      throw ArgumentError('smoothLoop requires a positive durationMs');
+    }
+    if (smoothLoop && fps == null) {
+      throw ArgumentError('smoothLoop requires fps (xfade needs CFR input)');
+    }
     final pre = <String>[];
     if (cropX != null && cropY != null && cropW != null && cropH != null) {
       pre.add('crop=$cropW:$cropH:$cropX:$cropY');
@@ -444,11 +455,30 @@ abstract final class FfmpegCommand {
       pre.add("drawtext=fontfile='$escapedFont':text='$escaped':x=$x:y=$y:fontsize=$drawTextSize:fontcolor=$drawTextColor:borderw=2:bordercolor=black@0.6");
     }
     final chain = pre.isEmpty ? 'null' : pre.join(',');
-    // Boomerang: append a reversed copy of the (edited) stream so the GIF plays
-    // forward then backward → seamless ping-pong loop.
-    final body = boomerang
-        ? '$chain,split[fwd][r0];[r0]reverse[rev];[fwd][rev]concat=n=2:v=1,split[a][b]'
-        : '$chain,split[a][b]';
+    String body;
+    if (smoothLoop) {
+      final cf = crossfadeMs / 1000;
+      final d = durationMs! / 1000 / speedFactor;
+      if (d <= 2 * cf + 0.1) {
+        throw ArgumentError(
+            'smoothLoop: post-speed duration ${d}s too short for a ${cf}s crossfade');
+      }
+      String f(double v) => v.toStringAsFixed(3);
+      body = '$chain,split=3[p0][p1][p2];'
+          '[p0]trim=0:${f(cf)},setpts=PTS-STARTPTS[head];'
+          '[p1]trim=${f(d - cf)}:${f(d)},setpts=PTS-STARTPTS[tail];'
+          '[p2]trim=${f(cf)}:${f(d - cf)},setpts=PTS-STARTPTS[mid];'
+          '[tail][head]xfade=transition=fade:duration=${f(cf)}:offset=0[blend];'
+          '[mid][blend]concat=n=2:v=1[a0];'
+          '[a0]split[a][b]';
+    } else if (boomerang) {
+      // Boomerang: append a reversed copy of the (edited) stream so the GIF
+      // plays forward then backward → seamless ping-pong loop.
+      body =
+          '$chain,split[fwd][r0];[r0]reverse[rev];[fwd][rev]concat=n=2:v=1,split[a][b]';
+    } else {
+      body = '$chain,split[a][b]';
+    }
     final args = ['-y'];
     if (startMs != null && startMs > 0) {
       args.addAll(['-ss', (startMs / 1000).toStringAsFixed(3)]);

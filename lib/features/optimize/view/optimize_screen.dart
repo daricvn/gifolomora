@@ -9,6 +9,7 @@ import '../../../core/widgets/glass/glass_app_bar.dart';
 import '../../../core/widgets/glass/glass_container.dart';
 import '../../_shared/widgets/export_bottom_sheet.dart';
 import '../../_shared/widgets/file_drop_zone.dart';
+import '../../_shared/widgets/local_palettes_toggle.dart';
 import '../../_shared/widgets/media_preview.dart';
 import '../../_shared/widgets/option_slider.dart';
 import '../controller/optimize_controller.dart';
@@ -127,6 +128,11 @@ class OptimizeScreen extends ConsumerWidget {
                   _FrameDropSelector(
                     value: state.frameDrop,
                     onChanged: ctrl.setFrameDrop,
+                  ),
+                  const Divider(color: AppColors.glassStroke, height: 24),
+                  LocalPalettesToggle(
+                    value: state.localPalettes,
+                    onChanged: ctrl.setLocalPalettes,
                   ),
                 ],
               ),

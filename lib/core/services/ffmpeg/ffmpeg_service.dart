@@ -158,6 +158,7 @@ class FfmpegService {
     int lossy = 40,
     int? loopCount,
     int frameDrop = 0,
+    bool localPalettes = false,
     void Function(FfmpegProgress)? onProgress,
   }) async {
     final jobDir = await _temp.createJobDir();
@@ -171,6 +172,7 @@ class FfmpegService {
         lossy: lossy,
         loopCount: loopCount,
         frameDrop: frameDrop,
+        localPalettes: localPalettes,
         onProgress: onProgress == null
             ? null
             : (f) => onProgress(FfmpegProgress(fraction: f)),
@@ -488,6 +490,8 @@ class FfmpegService {
     int? fps,
     int loopCount = 0,
     bool boomerang = false,
+    bool smoothLoop = false,
+    int crossfadeMs = 1000,
   }) async {
     final jobDir = await _temp.createJobDir();
     _currentJobDir = jobDir;
@@ -512,12 +516,18 @@ class FfmpegService {
         fps: fps,
         loopCount: loopCount,
         boomerang: boomerang,
+        smoothLoop: smoothLoop,
+        crossfadeMs: crossfadeMs,
       );
       final baseMs = durationMs != null && durationMs > 0 ? durationMs : totalMs;
-      final effectiveTotalMs =
+      var effectiveTotalMs =
           baseMs != null && (speedFactor - 1.0).abs() > 0.001
               ? (baseMs / speedFactor).round()
               : baseMs;
+      if (smoothLoop && effectiveTotalMs != null) {
+        effectiveTotalMs =
+            (effectiveTotalMs - crossfadeMs).clamp(1, effectiveTotalMs);
+      }
       return await _backend.run(args, outputPath,
           onProgress: onProgress, totalMs: effectiveTotalMs);
     } catch (e) {

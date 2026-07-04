@@ -30,15 +30,20 @@ Future<void> main(List<String> args) async {
     final src = File('${outDir.path}/${e.key}_src.gif')
       ..writeAsBytesSync(e.value);
     for (final lossy in [0, 40, 80]) {
-      final out = File('${outDir.path}/${e.key}_l$lossy.gif');
-      final sw = Stopwatch()..start();
-      await GifOptimizer.optimize(src, out, colors: 128, lossy: lossy);
-      sw.stop();
-      final srcLen = e.value.length;
-      final outLen = out.lengthSync();
-      final pct = (100 * (srcLen - outLen) / srcLen).toStringAsFixed(1);
-      print('${e.key.padRight(10)} lossy=${lossy.toString().padLeft(3)}: '
-          '$srcLen -> $outLen bytes (-$pct%)  ${sw.elapsedMilliseconds}ms');
+      for (final lct in [false, true]) {
+        final suffix = lct ? '_lct' : '';
+        final out = File('${outDir.path}/${e.key}_l$lossy$suffix.gif');
+        final sw = Stopwatch()..start();
+        await GifOptimizer.optimize(src, out,
+            colors: 128, lossy: lossy, localPalettes: lct);
+        sw.stop();
+        final srcLen = e.value.length;
+        final outLen = out.lengthSync();
+        final pct = (100 * (srcLen - outLen) / srcLen).toStringAsFixed(1);
+        print('${e.key.padRight(10)} lossy=${lossy.toString().padLeft(3)}'
+            '${lct ? ' +lct' : '     '}: '
+            '$srcLen -> $outLen bytes (-$pct%)  ${sw.elapsedMilliseconds}ms');
+      }
     }
   }
 }

@@ -262,6 +262,102 @@ void main() {
       ctrl.setBoomerang(true);
       expect(_state(c).editsApplied, isFalse);
     });
+
+    test('setBoomerang true clears smoothLoop (mutual exclusion)', () async {
+      final ctrl = await _buildCtrl(c);
+      ctrl.setSmoothLoop(true);
+      ctrl.setBoomerang(true);
+      expect(_state(c).boomerang, isTrue);
+      expect(_state(c).smoothLoop, isFalse);
+    });
+  });
+
+  // ── setSmoothLoop ─────────────────────────────────────────────────────────
+  group('VideoStudio — setSmoothLoop', () {
+    late FakeFfmpegBackend backend;
+    late ProviderContainer c;
+
+    setUp(() {
+      backend = FakeFfmpegBackend()
+        ..nextResult = Ok(File('/fake/output.gif'))
+        ..nextProbeResult =
+            const MediaInfo(durationMs: 5000, width: 320, height: 240);
+      c = _makeContainer(backend);
+    });
+    tearDown(() => c.dispose());
+
+    test('setSmoothLoop true sets smoothLoop', () async {
+      final ctrl = await _buildCtrl(c);
+      ctrl.setSmoothLoop(true);
+      expect(_state(c).smoothLoop, isTrue);
+    });
+
+    test('setSmoothLoop true clears boomerang (mutual exclusion)', () async {
+      final ctrl = await _buildCtrl(c);
+      ctrl.setBoomerang(true);
+      ctrl.setSmoothLoop(true);
+      expect(_state(c).smoothLoop, isTrue);
+      expect(_state(c).boomerang, isFalse);
+    });
+
+    test('setSmoothLoopCrossfadeMs sets value', () async {
+      final ctrl = await _buildCtrl(c);
+      ctrl.setSmoothLoopCrossfadeMs(700);
+      expect(_state(c).smoothLoopCrossfadeMs, equals(700));
+    });
+
+    test('setSmoothLoopCrossfadeMs clamps below 500 to 500', () async {
+      final ctrl = await _buildCtrl(c);
+      ctrl.setSmoothLoopCrossfadeMs(100);
+      expect(_state(c).smoothLoopCrossfadeMs, equals(500));
+    });
+
+    test('setSmoothLoopCrossfadeMs clamps above 1000 to 1000', () async {
+      final ctrl = await _buildCtrl(c);
+      ctrl.setSmoothLoopCrossfadeMs(5000);
+      expect(_state(c).smoothLoopCrossfadeMs, equals(1000));
+    });
+
+    test('setSmoothLoopCrossfadeMs rounds down to nearest 100ms step',
+        () async {
+      final ctrl = await _buildCtrl(c);
+      ctrl.setSmoothLoopCrossfadeMs(750);
+      expect(_state(c).smoothLoopCrossfadeMs, equals(700));
+    });
+
+    test('setSmoothLoopCrossfadeMs clears editsApplied', () async {
+      final ctrl = await _loadGif(c);
+      ctrl.setLoopCount(1);
+      await ctrl.applyEdits();
+      expect(_state(c).editsApplied, isTrue);
+
+      ctrl.setSmoothLoopCrossfadeMs(600);
+      expect(_state(c).editsApplied, isFalse);
+    });
+
+    test('setSpeed auto-disables smoothLoop once duration falls under floor',
+        () async {
+      final ctrl = await _loadVideo(c); // sourceInfo durationMs = 5000
+      ctrl.setSmoothLoop(true);
+      expect(_state(c).smoothLoop, isTrue);
+      ctrl.setSpeed(4.0); // 5000ms/4 = 1250ms < 2100ms floor
+      expect(_state(c).smoothLoop, isFalse);
+    });
+
+    test('setTrimEnd auto-disables smoothLoop once trimmed target falls '
+        'under the 3s gate', () async {
+      final backend2 = FakeFfmpegBackend()
+        ..nextResult = Ok(File('/fake/output.gif'))
+        ..nextProbeResult =
+            const MediaInfo(durationMs: 20000, width: 320, height: 240);
+      final c2 = _makeContainer(backend2);
+      addTearDown(c2.dispose);
+      final ctrl = await _loadVideo(c2);
+      ctrl.setSmoothLoop(true);
+      expect(_state(c2).smoothLoop, isTrue);
+      ctrl.setTrimEnd(2000); // trimmed target 2s < 3s gate
+      expect(_state(c2).smoothLoop, isFalse);
+    });
   });
 
   // ── setVolume ─────────────────────────────────────────────────────────────

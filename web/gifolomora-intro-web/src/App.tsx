@@ -5,12 +5,12 @@ import { For, onCleanup, onMount } from 'solid-js';
 const DOWNLOAD_WIN = 'https://1drv.ms/u/c/15f9d9574a5f179d/IQB0HJhNzHUoSJ1p-Q8flNABAd6C3IPd_ZGdiROUsg75DyM?e=67yIPh';
 
 const features = [
-  { ico: '🎬', hue: '265', title: 'Video Studio', desc: 'Composite editor for video layers — crop, resize, speed, trim, text overlay. Export to video or GIF.', big: true },
+  { ico: '🎬', hue: '265', title: 'Video Studio', desc: 'Composite editor — crop, resize, speed, trim, cut, boomerang, smooth loop, volume, text overlay, full undo/redo. Export to video or GIF.', big: true },
   { ico: '🖼️', hue: '200', title: 'Images → GIF', desc: 'Build GIFs from image sequences with frame rate and scale control.' },
   { ico: '📐', hue: '330', title: 'Resize', desc: 'Scale GIFs to any custom dimensions while keeping quality.' },
   { ico: '✂️', hue: '35', title: 'Crop', desc: 'Trim GIF content by region with a live preview.' },
   { ico: '🔤', hue: '160', title: 'Text Overlay', desc: 'Add custom text with font and position control.' },
-  { ico: '⚡', hue: '265', wide: true, title: 'Optimize', desc: 'Shrink file size via palette quantization and inter-frame transparency. Pure-Dart, no binary.' },
+  { ico: '⚡', hue: '265', wide: true, title: 'Optimize', desc: 'Shrink file size via palette quantization and inter-frame transparency. Live progress, tuned for large video. Pure-Dart, no binary.' },
   { ico: '🌀', hue: '200', title: 'Effects', desc: 'Speed adjustment and frame reversal in one tap.' },
   { ico: '🕓', hue: '330', title: 'Recent Exports', desc: 'Live previews, progress tracking with cancel, and an export history.' },
 ];
@@ -103,11 +103,11 @@ const App: Component = () => {
       <nav class="nav glass">
         <div class="brand">
           <span class="dot" />
-          Gifolomora
+          <span class="brand-name">Gifolomora</span>
         </div>
-        <div>
+        <div class="nav-right">
           <a class="navlink" href="#features">Features</a>
-          <a class="navlink" href="#download">Download</a>
+          <a class="btn btn-primary btn-sm shine" href="#download">⬇ Download</a>
         </div>
       </nav>
 
@@ -125,7 +125,7 @@ const App: Component = () => {
         <div class="layer spark spark-3" data-depth="5" aria-hidden="true" />
 
         <div class="wrap hero-inner">
-          <span class="pill glass anim-1">✨ Glassmorphism GIF editor for Windows <em class="tag">Alpha</em></span>
+          <span class="pill glass anim-1"><i class="pulse" aria-hidden="true" /> Now available for Windows — free</span>
           <h1>
             <span class="line">
               <For each={HEADLINE_A}>
@@ -189,13 +189,13 @@ const App: Component = () => {
         <div class="download-ring reveal">
           <div class="download glass">
             <img class="app-icon float-b" src="./app.png" alt="" aria-hidden="true" />
-            <h2>Get Gifolomora <em class="tag">Alpha</em></h2>
-            <p class="lead">Free early build for Windows. Grab it and start making GIFs in seconds.</p>
+            <h2>Get Gifolomora</h2>
+            <p class="lead">Free for Windows. Grab it and start making GIFs in seconds.</p>
             <div class="cta">
               <a class="btn btn-primary shine" href={DOWNLOAD_WIN}>🪟 Download for Windows</a>
               <span class="btn btn-ghost disabled">🤖 Android — coming soon</span>
             </div>
-            <p class="meta">Windows (MSIX) · Alpha build, expect rough edges · Android in the works</p>
+            <p class="meta">Windows (MSIX) · Free · Android in the works</p>
           </div>
         </div>
       </section>

@@ -14,6 +14,7 @@ class OptimizeState {
     this.colors = 128,
     this.lossy = 40,
     this.frameDrop = 0,
+    this.localPalettes = false,
     this.outputGif,
     this.progress,
     this.isProcessing = false,
@@ -26,6 +27,7 @@ class OptimizeState {
   final int colors;
   final int lossy;
   final int frameDrop; // 0 = keep all; 2/3/4 = remove 1 of every N frames
+  final bool localPalettes; // lossless per-frame color tables
   final File? outputGif;
   final FfmpegProgress? progress;
   final bool isProcessing;
@@ -42,6 +44,7 @@ class OptimizeState {
     int? colors,
     int? lossy,
     int? frameDrop,
+    bool? localPalettes,
     Object? outputGif = _s,
     Object? progress = _s,
     bool? isProcessing,
@@ -54,6 +57,7 @@ class OptimizeState {
       colors: colors ?? this.colors,
       lossy: lossy ?? this.lossy,
       frameDrop: frameDrop ?? this.frameDrop,
+      localPalettes: localPalettes ?? this.localPalettes,
       outputGif: identical(outputGif, _s) ? this.outputGif : outputGif as File?,
       progress: identical(progress, _s) ? this.progress : progress as FfmpegProgress?,
       isProcessing: isProcessing ?? this.isProcessing,
@@ -94,6 +98,12 @@ class OptimizeController extends AsyncNotifier<OptimizeState> {
         AsyncData(s.copyWith(frameDrop: frameDrop, outputGif: null, error: null));
   }
 
+  void setLocalPalettes(bool localPalettes) {
+    final s = state.valueOrNull ?? const OptimizeState();
+    state = AsyncData(
+        s.copyWith(localPalettes: localPalettes, outputGif: null, error: null));
+  }
+
   Future<void> generate() async {
     final s = state.valueOrNull;
     if (s == null || s.inputFile == null || s.isProcessing) return;
@@ -106,6 +116,7 @@ class OptimizeController extends AsyncNotifier<OptimizeState> {
       colors: s.colors,
       lossy: s.lossy,
       frameDrop: s.frameDrop,
+      localPalettes: s.localPalettes,
     );
 
     final cur = state.valueOrNull ?? const OptimizeState();

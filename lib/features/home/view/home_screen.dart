@@ -37,6 +37,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _handleDrop(DropDoneDetails details) {
+    // Home stays mounted (offstage) under pushed routes, so its DropTarget
+    // keeps receiving drops even while e.g. Video Studio is on top. Ignore
+    // them here — the visible screen owns its own drop handling.
+    if (ModalRoute.of(context)?.isCurrent != true) return;
     if (details.files.isEmpty) return;
     final file = details.files.first;
     final ext = file.path.split('.').last.toLowerCase();

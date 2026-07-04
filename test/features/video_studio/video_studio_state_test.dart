@@ -509,4 +509,98 @@ void main() {
       expect(s.gifWidthCapped, isTrue);
     });
   });
+
+  // ── smoothLoop ────────────────────────────────────────────────────────────
+  group('VideoStudioState — smoothLoop', () {
+    test('canSmoothLoop false at/under 3s source', () {
+      const s = VideoStudioState(
+        sourceInfo: MediaInfo(durationMs: 3000, width: 320, height: 240),
+      );
+      expect(s.canSmoothLoop, isFalse);
+    });
+
+    test('canSmoothLoop true over 3s source', () {
+      const s = VideoStudioState(
+        sourceInfo: MediaInfo(durationMs: 3001, width: 320, height: 240),
+      );
+      expect(s.canSmoothLoop, isTrue);
+    });
+
+    test('canSmoothLoop false when trim shrinks target under 3s '
+        'even though raw source is longer', () {
+      const s = VideoStudioState(
+        sourceInfo: MediaInfo(durationMs: 20000, width: 320, height: 240),
+        trimStartMs: 0,
+        trimEndMs: 2000,
+      );
+      expect(s.canSmoothLoop, isFalse);
+    });
+
+    test('canSmoothLoop true when trim keeps target over 3s', () {
+      const s = VideoStudioState(
+        sourceInfo: MediaInfo(durationMs: 20000, width: 320, height: 240),
+        trimStartMs: 0,
+        trimEndMs: 6000,
+      );
+      expect(s.canSmoothLoop, isTrue);
+    });
+
+    test('smoothLoopValid true when effective/speed duration > 2100ms '
+        '(default 1000ms crossfade floor)', () {
+      const s = VideoStudioState(
+        sourceInfo: MediaInfo(durationMs: 6000, width: 320, height: 240),
+      );
+      expect(s.smoothLoopValid, isTrue);
+    });
+
+    test('smoothLoopValid false when speed shrinks duration below floor', () {
+      const s = VideoStudioState(
+        sourceInfo: MediaInfo(durationMs: 6000, width: 320, height: 240),
+        speedFactor: 4.0, // 6000/4 = 1500ms < 2100
+      );
+      expect(s.smoothLoopValid, isFalse);
+    });
+
+    test('smoothLoopCrossfadeMs defaults to 1000', () {
+      const s = VideoStudioState();
+      expect(s.smoothLoopCrossfadeMs, equals(1000));
+    });
+
+    test('smoothLoopValid floor scales down with a smaller crossfade', () {
+      // floor = 2*crossfade+100; at 1000ms floor=2100 (invalid @ 1600ms);
+      // at 500ms floor=1100 (valid @ 1600ms).
+      const wide = VideoStudioState(
+        sourceInfo: MediaInfo(durationMs: 1600, width: 320, height: 240),
+      );
+      expect(wide.smoothLoopValid, isFalse);
+
+      const narrow = VideoStudioState(
+        sourceInfo: MediaInfo(durationMs: 1600, width: 320, height: 240),
+        smoothLoopCrossfadeMs: 500,
+      );
+      expect(narrow.smoothLoopValid, isTrue);
+    });
+
+    test('copyWith preserves smoothLoopCrossfadeMs', () {
+      const s = VideoStudioState(smoothLoopCrossfadeMs: 700);
+      final s2 = s.copyWith(fps: 20);
+      expect(s2.smoothLoopCrossfadeMs, equals(700));
+    });
+
+    test('needsGifEdit true when smoothLoop set', () {
+      const s = VideoStudioState(stage: EditStage.gif, smoothLoop: true);
+      expect(s.needsGifEdit, isTrue);
+    });
+
+    test('isToolEdited(properties) true when smoothLoop set on gif stage', () {
+      const s = VideoStudioState(stage: EditStage.gif, smoothLoop: true);
+      expect(s.isToolEdited(StudioTool.properties), isTrue);
+    });
+
+    test('copyWith preserves smoothLoop', () {
+      const s = VideoStudioState(smoothLoop: true);
+      final s2 = s.copyWith(fps: 20);
+      expect(s2.smoothLoop, isTrue);
+    });
+  });
 }

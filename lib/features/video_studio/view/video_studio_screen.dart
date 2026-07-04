@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
@@ -14,6 +15,7 @@ import '../../../core/widgets/common/gradient_scaffold.dart';
 import '../../../core/widgets/glass/glass_app_bar.dart';
 import '../../../core/widgets/glass/glass_container.dart';
 import '../../_shared/widgets/file_drop_zone.dart';
+import '../../_shared/widgets/local_palettes_toggle.dart';
 import '../../_shared/widgets/option_slider.dart';
 import '../../_shared/widgets/text_overlay_controls.dart';
 import '../../_shared/widgets/video_preview.dart';
@@ -49,6 +51,12 @@ Widget _chip(String text, {double alpha = 0.7, FontWeight weight = FontWeight.w7
   );
 }
 
+// Visibility rule for the "keep original size" checkbox: under 25s it tracks
+// whether the cap would kick in; at/after 25s it only stays visible (and
+// disabled) if the user had already checked it.
+bool _showForceOriginalWidth(VideoStudioState s) =>
+    s.effectiveOutputMs < 25000 ? s.gifWidthCapped : s.forceOriginalGifWidth;
+
 const _kVideoExtensions = ['mp4', 'mov', 'mkv', 'avi', 'webm'];
 const _kAllExtensions = [..._kVideoExtensions, 'gif'];
 
@@ -81,6 +89,22 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
   // reset to identity when the frame shrinks back to fit (else stale pan keeps
   // the preview pushed off-screen and truncated).
   final TransformationController _transform = TransformationController();
+  bool _isDragHovering = false;
+
+  Future<void> _handleDrop(
+    DropDoneDetails details,
+    VideoStudioController ctrl,
+    void Function(String) toast,
+  ) async {
+    if (details.files.isEmpty) return;
+    final file = details.files.first;
+    final ext = file.path.split('.').last.toLowerCase();
+    if (!_kAllExtensions.contains(ext)) {
+      toast('.$ext is not supported. Drop a video or GIF.');
+      return;
+    }
+    await ctrl.setInput(File(file.path));
+  }
 
   Future<void> _pickFile(VideoStudioController ctrl) async {
     if (_picking) return;
@@ -138,6 +162,24 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
       _StudioToast.show(context, msg);
     }
 
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _isDragHovering = true),
+      onDragExited: (_) => setState(() => _isDragHovering = false),
+      onDragDone: (details) {
+        setState(() => _isDragHovering = false);
+        if (!state.isProcessing) _handleDrop(details, ctrl, toast);
+      },
+      child: _buildScaffold(context, state, ctrl, toast, topInset),
+    );
+  }
+
+  Widget _buildScaffold(
+    BuildContext context,
+    VideoStudioState state,
+    VideoStudioController ctrl,
+    void Function(String) toast,
+    double topInset,
+  ) {
     return GradientScaffold(
       appBar: GlassAppBar(
         title: 'Video Studio',
@@ -195,6 +237,46 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
               label: state.isGif ? 'Rendering GIF…' : 'Encoding…',
               progress: state.progress?.fraction,
               onCancel: ctrl.cancel,
+            ),
+          if (_isDragHovering && !state.isProcessing)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(
+                  color: AppColors.bg0.withValues(alpha: 0.6),
+                  padding: const EdgeInsets.all(16),
+                  child: Center(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        color: AppColors.accentB.withValues(alpha: 0.08),
+                        border: Border.all(
+                          color: AppColors.accentB.withValues(alpha: 0.6),
+                          width: 2,
+                        ),
+                      ),
+                      child: const Padding(
+                        padding: EdgeInsets.all(32),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.file_download_rounded,
+                                color: AppColors.accentB, size: 64),
+                            SizedBox(height: 12),
+                            Text(
+                              'Drop video or GIF',
+                              style: TextStyle(
+                                color: AppColors.textHi,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
         ],
       ),
@@ -330,30 +412,6 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                               top: 10,
                               left: 10,
                               child: _chip('ORIGINAL'),
-                            ),
-                          // Live auto-fps-cap warning — video stage only, tied
-                          // to the current trim/cut selection so it updates as
-                          // the user drags the trim handles.
-                          if (!_comparing &&
-                              !state.isGif &&
-                              state.sourceDurationMs > 0)
-                            Positioned(
-                              top: 10,
-                              right: 10,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  _chip(
-                                      'GIF capped at ${state.maxGifFps} fps',
-                                      alpha: 0.6),
-                                  if (state.gifWidthCapped) ...[
-                                    const SizedBox(height: 4),
-                                    _chip(
-                                        'GIF capped at ${state.maxGifWidth}px wide',
-                                        alpha: 0.6),
-                                  ],
-                                ],
-                              ),
                             ),
                           if (state.textItems.isNotEmpty && !_comparing)
                             Positioned.fill(
@@ -1048,6 +1106,7 @@ class _ToolSelector extends StatelessWidget {
       (StudioTool.text, Icons.title_rounded, 'Text'),
       if (isGif) (StudioTool.optimize, Icons.tune_rounded, 'Optimise'),
       (StudioTool.properties, Icons.settings_suggest_rounded, 'Props'),
+      if (!isGif) (StudioTool.gif, Icons.gif_box_rounded, 'GIF'),
     ];
     return Wrap(
       spacing: 6,
@@ -1056,13 +1115,19 @@ class _ToolSelector extends StatelessWidget {
         for (final t in tools)
           SizedBox(
             width: (MediaQuery.of(context).size.width - 44) / (tools.length + 1),
-            child: _ToolButton(
-              icon: t.$2,
-              label: t.$3,
-              selected: active == t.$1,
-              edited: state.isToolEdited(t.$1),
-              onTap: () => onSelect(active == t.$1 ? null : t.$1),
-            ),
+            child: t.$1 == StudioTool.gif
+                ? _GifToolButton(
+                    selected: active == t.$1,
+                    edited: state.isToolEdited(t.$1),
+                    onTap: () => onSelect(active == t.$1 ? null : t.$1),
+                  )
+                : _ToolButton(
+                    icon: t.$2,
+                    label: t.$3,
+                    selected: active == t.$1,
+                    edited: state.isToolEdited(t.$1),
+                    onTap: () => onSelect(active == t.$1 ? null : t.$1),
+                  ),
           ),
       ],
     );
@@ -1107,6 +1172,147 @@ class _ToolButton extends StatelessWidget {
                   fontSize: 11,
                   fontWeight: FontWeight.w600)),
         ],
+      ),
+    );
+    return GestureDetector(
+      onTap: onTap,
+      child: !edited
+          ? btn
+          : Stack(
+              clipBehavior: Clip.none,
+              fit: StackFit.passthrough,
+              children: [
+                btn,
+                Positioned(
+                  top: -2,
+                  right: -2,
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: selected ? Colors.white : AppColors.accentC,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.bg1, width: 1.5),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+// ── Animated accent gradient (GIF tool highlight) ────────────────────────────
+
+// Samples the accent wheel (violet → cyan → magenta → violet) at phase
+// [t] ∈ [0,1), wrapping, so two samples a fixed phase apart give a gradient
+// that drifts through the palette without ever jumping.
+Color _accentCycle(double t) {
+  const wheel = [AppColors.accentA, AppColors.accentB, AppColors.accentC];
+  final x = (t % 1.0) * wheel.length;
+  final i = x.floor();
+  return Color.lerp(wheel[i % wheel.length], wheel[(i + 1) % wheel.length],
+      x - i)!;
+}
+
+/// Rebuilds [builder] every frame with a slowly drifting two-stop accent
+/// gradient. One looping controller per instance; keep instances few (the GIF
+/// tool button and the Make GIF button).
+class _GradientCycle extends StatefulWidget {
+  const _GradientCycle({required this.builder});
+  final Widget Function(BuildContext context, LinearGradient gradient) builder;
+
+  @override
+  State<_GradientCycle> createState() => _GradientCycleState();
+}
+
+class _GradientCycleState extends State<_GradientCycle>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(seconds: 4))
+    ..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, _) => widget.builder(
+        context,
+        LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            _accentCycle(_c.value),
+            _accentCycle(_c.value + 1 / 3),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Standout variant of [_ToolButton] for the GIF tool: animated gradient
+// border (unselected) or fill (selected) plus a soft glow, so the export
+// entry point reads as the destination of the video stage.
+class _GifToolButton extends StatelessWidget {
+  const _GifToolButton({
+    required this.selected,
+    required this.edited,
+    required this.onTap,
+  });
+  final bool selected;
+  final bool edited;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final btn = _GradientCycle(
+      builder: (context, gradient) => Container(
+        decoration: BoxDecoration(
+          gradient: gradient,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: gradient.colors.first
+                  .withValues(alpha: selected ? 0.55 : 0.35),
+              blurRadius: selected ? 14 : 10,
+            ),
+          ],
+        ),
+        // Gradient border: outer gradient box, inset dark inner box. A plain
+        // Border.all can't take a gradient.
+        padding: const EdgeInsets.all(1.4),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8.6),
+          decoration: BoxDecoration(
+            color: selected ? Colors.transparent : AppColors.bg1,
+            borderRadius: BorderRadius.circular(10.6),
+          ),
+          child: Column(
+            children: [
+              selected
+                  ? const Icon(Icons.gif_box_rounded,
+                      size: 18, color: Colors.white)
+                  : ShaderMask(
+                      shaderCallback: (r) => gradient.createShader(r),
+                      child: const Icon(Icons.gif_box_rounded,
+                          size: 18, color: Colors.white),
+                    ),
+              const SizedBox(height: 3),
+              Text('GIF',
+                  style: TextStyle(
+                      color: selected ? Colors.white : AppColors.textHi,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700)),
+            ],
+          ),
+        ),
       ),
     );
     return GestureDetector(
@@ -1261,6 +1467,13 @@ class _ToolPanel extends StatelessWidget {
           key: const ValueKey('properties'),
           state: state,
           ctrl: ctrl,
+        );
+      case StudioTool.gif:
+        return _GifPanel(
+          key: const ValueKey('gif'),
+          state: state,
+          ctrl: ctrl,
+          toast: toast,
         );
       case null:
         return const SizedBox(width: double.infinity, key: ValueKey('none'));
@@ -2005,6 +2218,161 @@ class _ResizeChips extends StatelessWidget {
 
 // ── Optimize panel ────────────────────────────────────────────────────────────
 
+// ── GIF panel (video stage only): fps + size-cap warning + Make GIF action ──
+
+class _GifPanel extends StatelessWidget {
+  const _GifPanel({
+    super.key,
+    required this.state,
+    required this.ctrl,
+    required this.toast,
+  });
+  final VideoStudioState state;
+  final VideoStudioController ctrl;
+  final void Function(String) toast;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxFps = state.maxGifFps;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        OptionSlider(
+          label: 'Frame rate',
+          value: state.fps.toDouble().clamp(2, maxFps.toDouble()),
+          min: 2,
+          max: maxFps.toDouble(),
+          divisions: maxFps > 2 ? maxFps - 2 : 1,
+          displayValue: '${state.fps.clamp(2, maxFps)} fps',
+          onChanged: (v) => ctrl.setFps(v.round()),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Capped at $maxFps fps for this length.',
+          style: const TextStyle(color: AppColors.textLo, fontSize: 11),
+        ),
+        if (state.gifWidthCapped) ...[
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded,
+                  color: Colors.amber, size: 16),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'GIF capped at ${state.maxGifWidth}px wide',
+                  style: const TextStyle(color: AppColors.textLo, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ],
+        if (_showForceOriginalWidth(state)) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              const Expanded(
+                child: Text('Ignore GIF size limit',
+                    style: TextStyle(color: AppColors.textHi, fontSize: 14)),
+              ),
+              Switch(
+                value: state.forceOriginalGifWidth,
+                onChanged: state.effectiveOutputMs < 25000
+                    ? ctrl.setForceOriginalGifWidth
+                    : null,
+                activeThumbColor: AppColors.accentB,
+              ),
+            ],
+          ),
+          if (state.forceOriginalGifWidthActive)
+            const Text('Full size may run slow',
+                style: TextStyle(color: AppColors.textLo, fontSize: 11)),
+        ],
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          child: _MakeGifButton(
+            onTap: () async {
+              if (state.effectiveOutputMs > 40000) {
+                final proceed = await showDialog<bool>(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    title: const Text('Video too long'),
+                    content: const Text(
+                        'GIF is limited to 40 seconds. Trim the video first for best results, or only the first 40 seconds will be used.'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('Use first 40s'),
+                      ),
+                    ],
+                  ),
+                );
+                if (proceed != true) return;
+              }
+              final ok = await ctrl.makeGif();
+              if (!ok) toast('Could not create GIF');
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// The GIF panel's call to action: animated gradient fill + breathing glow so
+// the bake step is unmissable once the user opens the GIF tool.
+class _MakeGifButton extends StatelessWidget {
+  const _MakeGifButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return _GradientCycle(
+      builder: (context, gradient) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 15),
+          decoration: BoxDecoration(
+            gradient: gradient,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                color: gradient.colors.first.withValues(alpha: 0.45),
+                blurRadius: 18,
+                spreadRadius: 1,
+              ),
+              BoxShadow(
+                color: gradient.colors.last.withValues(alpha: 0.30),
+                blurRadius: 26,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 18),
+              SizedBox(width: 8),
+              Text('Make GIF',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _OptimizePanel extends StatelessWidget {
   const _OptimizePanel({
     super.key,
@@ -2087,6 +2455,11 @@ class _OptimizePanel extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10)),
               );
             }).toList(),
+          ),
+          const SizedBox(height: 14),
+          LocalPalettesToggle(
+            value: state.optimizeLocalPalettes,
+            onChanged: ctrl.setOptimizeLocalPalettes,
           ),
         ],
       ],
@@ -2193,7 +2566,7 @@ class _PropertiesPanel extends StatelessWidget {
           children: [
             Switch(
               value: state.boomerang,
-              onChanged: ctrl.setBoomerang,
+              onChanged: state.smoothLoop ? null : ctrl.setBoomerang,
               activeThumbColor: AppColors.accentB,
             ),
             const SizedBox(width: 8),
@@ -2203,6 +2576,43 @@ class _PropertiesPanel extends StatelessWidget {
             ),
           ],
         ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Switch(
+              value: state.smoothLoop,
+              onChanged: state.canSmoothLoop ? ctrl.setSmoothLoop : null,
+              activeThumbColor: AppColors.accentB,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                  'Smooth Loop — crossfade last ${state.smoothLoopCrossfadeMs}ms into first ${state.smoothLoopCrossfadeMs}ms',
+                  style: const TextStyle(color: AppColors.textHi, fontSize: 14)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          !state.canSmoothLoop
+              ? 'GIFs longer than 3s only.'
+              : (state.smoothLoop && !state.smoothLoopValid
+                  ? 'Speed/trim leave too little to crossfade — turn Smooth Loop off.'
+                  : 'Loops seamlessly by dissolving the tail into the head.'),
+          style: const TextStyle(color: AppColors.textLo, fontSize: 11),
+        ),
+        if (state.smoothLoop) ...[
+          const SizedBox(height: 8),
+          OptionSlider(
+            label: 'Crossfade duration',
+            value: state.smoothLoopCrossfadeMs.toDouble(),
+            min: 500,
+            max: 1000,
+            divisions: 5,
+            displayValue: '${state.smoothLoopCrossfadeMs}ms',
+            onChanged: (v) => ctrl.setSmoothLoopCrossfadeMs(v.round()),
+          ),
+        ],
       ],
     );
   }
@@ -2300,36 +2710,6 @@ class _ActionBar extends StatelessWidget {
     }
     return Row(
       children: [
-        _SecondaryButton(
-          icon: Icons.gif_box_rounded,
-          label: 'Make GIF',
-          onTap: () async {
-            if (state.effectiveOutputMs > 40000) {
-              final proceed = await showDialog<bool>(
-                context: context,
-                builder: (_) => AlertDialog(
-                  title: const Text('Video too long'),
-                  content: const Text(
-                      'GIF is limited to 40 seconds. Trim the video first for best results, or only the first 40 seconds will be used.'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, false),
-                      child: const Text('Cancel'),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, true),
-                      child: const Text('Use first 40s'),
-                    ),
-                  ],
-                ),
-              );
-              if (proceed != true) return;
-            }
-            final ok = await ctrl.makeGif();
-            if (!ok) toast('Could not create GIF');
-          },
-        ),
-        const SizedBox(width: 10),
         Expanded(
           child: _SecondaryButton(
             icon: Icons.auto_fix_high_rounded,
