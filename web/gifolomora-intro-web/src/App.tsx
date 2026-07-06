@@ -3,6 +3,8 @@ import { createSignal, For, lazy, onCleanup, onMount, Show, Suspense } from 'sol
 
 // code-split: slideshow chunk (and its image URLs) load only when the section nears the viewport
 const Showcase = lazy(() => import('./Showcase'));
+// code-split: changelog dialog loads only when opened
+const Changelog = lazy(() => import('./Changelog'));
 
 // ponytail: fill with real release URL when available
 const DOWNLOAD_WIN = 'https://1drv.ms/u/c/15f9d9574a5f179d/IQB0HJhNzHUoSJ1p-Q8flNABAd6C3IPd_ZGdiROUsg75DyM?e=67yIPh';
@@ -33,6 +35,8 @@ const App: Component = () => {
 
   // gate for the lazy slideshow chunk
   const [showcaseNear, setShowcaseNear] = createSignal(false);
+  // gate for the lazy changelog dialog — only mounted once opened
+  const [changelogOpen, setChangelogOpen] = createSignal(false);
 
   onMount(() => {
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -134,6 +138,7 @@ const App: Component = () => {
           <a class="navlink" href="#features">Features</a>
           <a class="navlink" href="#showcase">Showcase</a>
           <button class="navlink navlink-btn" onClick={() => aboutEl?.showModal()}>About</button>
+          <button class="navlink navlink-btn" onClick={() => setChangelogOpen(true)}>Changelog</button>
           <a class="btn btn-primary btn-sm shine" href="#download">⬇ Download</a>
         </div>
       </nav>
@@ -243,7 +248,7 @@ const App: Component = () => {
       </section>
 
       <footer class="footer wrap">
-        Gifolomora — proprietary software by Takayoshi Code. <button class="footer-link" onClick={() => aboutEl?.showModal()}>About</button>
+        Gifolomora — proprietary software by Takayoshi Code. <button class="footer-link" onClick={() => aboutEl?.showModal()}>About</button> · <button class="footer-link" onClick={() => setChangelogOpen(true)}>Changelog</button>
       </footer>
 
       <dialog class="about glass" ref={aboutEl} onClick={(e) => { if (e.target === aboutEl) aboutEl.close(); }}>
@@ -273,6 +278,12 @@ const App: Component = () => {
           </p>
         </div>
       </dialog>
+
+      <Show when={changelogOpen()}>
+        <Suspense>
+          <Changelog onClose={() => setChangelogOpen(false)} />
+        </Suspense>
+      </Show>
     </>
   );
 };

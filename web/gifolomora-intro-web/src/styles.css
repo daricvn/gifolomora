@@ -961,6 +961,23 @@ img.float-b { animation: float-b 7s ease-in-out infinite; }
 .about a:hover {
   text-decoration: underline;
 }
+.changelog-entry {
+  text-align: left;
+  margin: 0 0 18px;
+}
+.changelog-entry:last-child {
+  margin-bottom: 0;
+}
+.changelog-entry ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.65;
+}
+.changelog-entry li {
+  margin-bottom: 4px;
+}
 
 /* ---- reduced motion: static but complete ---- */
 @media (prefers-reduced-motion: reduce) {
