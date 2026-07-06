@@ -29,6 +29,7 @@ const App: Component = () => {
   let heroEl: HTMLElement | undefined;
   let bannerWrap: HTMLDivElement | undefined;
   let showcaseEl: HTMLElement | undefined;
+  let aboutEl: HTMLDialogElement | undefined;
 
   // gate for the lazy slideshow chunk
   const [showcaseNear, setShowcaseNear] = createSignal(false);
@@ -132,6 +133,7 @@ const App: Component = () => {
         <div class="nav-right">
           <a class="navlink" href="#features">Features</a>
           <a class="navlink" href="#showcase">Showcase</a>
+          <button class="navlink navlink-btn" onClick={() => aboutEl?.showModal()}>About</button>
           <a class="btn btn-primary btn-sm shine" href="#download">⬇ Download</a>
         </div>
       </nav>
@@ -165,7 +167,7 @@ const App: Component = () => {
           </h1>
           <p class="sub anim-3">
             Gifolomora turns videos and image sequences into polished GIFs using 9 specialized
-            tools — all wrapped in a beautiful glass-themed UI. Fast, private, cross-platform.
+            tools — all wrapped in a beautiful glass-themed UI. Fast, private, easy to use.
           </p>
           <div class="cta anim-4">
             <a class="btn btn-primary shine" href="#download">⬇ Download free</a>
@@ -241,8 +243,36 @@ const App: Component = () => {
       </section>
 
       <footer class="footer wrap">
-        Gifolomora — proprietary software by Takayoshi Code.
+        Gifolomora — proprietary software by Takayoshi Code. <button class="footer-link" onClick={() => aboutEl?.showModal()}>About</button>
       </footer>
+
+      <dialog class="about glass" ref={aboutEl} onClick={(e) => { if (e.target === aboutEl) aboutEl.close(); }}>
+        <div class="about-body">
+          <button class="about-close" aria-label="Close" onClick={() => aboutEl?.close()}>✕</button>
+          <img class="about-icon" src="./app.png" alt="" aria-hidden="true" />
+          <h2>About Gifolomora</h2>
+
+          <p>
+            Gifolomora is a windows video &amp; GIF editor built with
+            {' '}<strong>Flutter</strong> and powered by <strong>FFmpeg</strong>.
+          </p>
+          <p>
+            Made by <strong>Takayoshi Code</strong>.
+          </p>
+
+          <h3>Why is this app free?</h3>
+          <p>
+            I grew up using a lot of applications for free — to learn and to grow.
+            Gifolomora should be free and bring the best experience to the users. <br />
+            It is free, and will always be free. 
+          </p>
+
+          <p class="about-feedback">
+            Feedback? Reach out at{' '}
+            <a href="mailto:takayoshi.code@gmail.com">takayoshi.code@gmail.com</a>
+          </p>
+        </div>
+      </dialog>
     </>
   );
 };
