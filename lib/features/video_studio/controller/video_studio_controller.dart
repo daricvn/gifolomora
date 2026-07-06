@@ -317,6 +317,17 @@ class VideoStudioState {
               hasCut ||
               smoothLoop));
 
+  /// Whether the preview currently differs from the original — the gate for
+  /// the Compare button. Unlike [hasPendingApply], not suppressed by
+  /// [editsApplied]: a bake resets the live edit fields to default but
+  /// `sourceFile` is still the baked (changed) result, so there is still
+  /// something to compare against `inputFile`.
+  bool get hasComparableEdit =>
+      editsApplied ||
+      (isGif
+          ? (needsGifEdit || doOptimize || hasText)
+          : (hasEdits || hasTrim || hasText || hasVolumeChange || hasCut || smoothLoop));
+
   /// Whether [tool]'s panel currently carries a non-default edit — drives the
   /// dot indicator on the tool selector.
   bool isToolEdited(StudioTool tool) {

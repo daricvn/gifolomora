@@ -32,7 +32,10 @@ Page<void> _slide(GoRouterState state, Widget child) =>
       },
     );
 
+final rootNavigatorKey = GlobalKey<NavigatorState>();
+
 final appRouter = GoRouter(
+  navigatorKey: rootNavigatorKey,
   initialLocation: '/',
   routes: [
     GoRoute(

@@ -93,6 +93,14 @@ class NativeWindowChannel {
   Future<void> hideRecordingIndicator() =>
       _channel.invokeMethod('hideRecordingIndicator');
 
+  /// Briefly identifies each monitor: a transparent, click-through overlay
+  /// per monitor showing a big white (black-outlined) number in its top-left
+  /// corner for ~2s, then a quick fade-out. Self-dismissing — no hide call
+  /// needed. [spots] are `{'x', 'y', 'number'}` maps in **physical** px
+  /// (same space as `RecordTarget`), one per monitor.
+  Future<void> showMonitorNumbers(List<Map<String, int>> spots) =>
+      _channel.invokeMethod('showMonitorNumbers', {'spots': spots});
+
   /// Starts WASAPI loopback capture of the default render device, writing
   /// 48kHz float WAV to [path].
   Future<void> startLoopback(String path) =>

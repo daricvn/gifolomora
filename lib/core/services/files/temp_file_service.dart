@@ -10,6 +10,13 @@ class TempFileService {
 
   String? _base;
 
+  /// Job dirs created outside the shared base (a `baseDirOverride` — Screen
+  /// Record's custom save folder). [wipeAll] deletes only the base dir, so
+  /// these must be tracked and deleted individually or they survive app
+  /// exit. Static because the exit path constructs its own fresh
+  /// [TempFileService] instance (see `app.dart`'s `onWindowClose`).
+  static final Set<String> _overrideJobDirs = {};
+
   Future<String> get _baseDir async {
     if (_base != null) return _base!;
     final tmp = await getTemporaryDirectory();
@@ -26,6 +33,7 @@ class TempFileService {
     final id = DateTime.now().microsecondsSinceEpoch.toString();
     final dir = Directory(p.join(base, id));
     await dir.create(recursive: true);
+    if (baseDirOverride != null) _overrideJobDirs.add(dir.path);
     return dir.path;
   }
 
@@ -51,8 +59,34 @@ class TempFileService {
     try {
       final dir = Directory(jobDir);
       if (await dir.exists()) await dir.delete(recursive: true);
+      _overrideJobDirs.remove(jobDir);
     } catch (e) {
       Log.e(_tag, 'cleanJob failed for $jobDir', e);
+    }
+  }
+
+  /// Deletes the whole job base dir (every job, regardless of age/owner)
+  /// plus every tracked override job dir — a custom-save-folder recording
+  /// lives outside the base, so deleting the base alone leaves it behind.
+  /// Call on app exit — per-job cleanup only ever frees the caller's own
+  /// dir, leaving sibling dirs (other controllers' history/working dirs)
+  /// orphaned on disk.
+  Future<void> wipeAll() async {
+    for (final jobDir in _overrideJobDirs.toList()) {
+      try {
+        final dir = Directory(jobDir);
+        if (await dir.exists()) await dir.delete(recursive: true);
+        _overrideJobDirs.remove(jobDir);
+      } catch (e) {
+        Log.e(_tag, 'wipeAll failed for override dir $jobDir', e);
+      }
+    }
+    try {
+      final base = await _baseDir;
+      final dir = Directory(base);
+      if (await dir.exists()) await dir.delete(recursive: true);
+    } catch (e) {
+      Log.e(_tag, 'wipeAll failed', e);
     }
   }
 

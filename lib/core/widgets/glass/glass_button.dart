@@ -11,6 +11,7 @@ class GlassButton extends StatelessWidget {
     this.icon,
     this.isPrimary = false,
     this.width,
+    this.borderRadius = 12,
   });
 
   final String label;
@@ -18,6 +19,7 @@ class GlassButton extends StatelessWidget {
   final IconData? icon;
   final bool isPrimary;
   final double? width;
+  final double borderRadius;
 
   @override
   Widget build(BuildContext context) {
@@ -46,7 +48,7 @@ class GlassButton extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             gradient: AppGradients.primaryButton,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(borderRadius),
             boxShadow: [
               BoxShadow(
                 color: AppColors.accentA.withValues(alpha: 0.4),
@@ -57,10 +59,10 @@ class GlassButton extends StatelessWidget {
           ),
           child: Material(
             color: Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(borderRadius),
             child: InkWell(
               onTap: onPressed,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(borderRadius),
               splashColor: Colors.white.withValues(alpha: 0.15),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
@@ -76,12 +78,12 @@ class GlassButton extends StatelessWidget {
       width: width,
       child: GlassContainer(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        borderRadius: 12,
+        borderRadius: borderRadius,
         child: Material(
           color: Colors.transparent,
           child: InkWell(
             onTap: onPressed,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(borderRadius),
             child: content,
           ),
         ),

@@ -75,6 +75,7 @@ class RecordController extends AsyncNotifier<RecordState> {
   late final HotkeyService _hotkeyService =
       HotkeyService(ref.read(nativeWindowChannelProvider));
   final Set<String> _activeScopes = {};
+  bool _hotkeysSuspended = false;
   StreamSubscription<RecordStatus>? _statusSub;
   StreamSubscription<String>? _errorSub;
   Timer? _elapsedTicker;
@@ -180,6 +181,26 @@ class RecordController extends AsyncNotifier<RecordState> {
     final s = state.valueOrNull;
     if (s == null) return;
     state = AsyncData(s.copyWith(selected: target));
+    _showMonitorNumbers(s.monitors);
+  }
+
+  /// "Identify displays"-style overlay so the user can match the numbered
+  /// picker rows/sketch to the physical monitors. No-op below 2 monitors —
+  /// nothing to disambiguate with only one.
+  Future<void> _showMonitorNumbers(List<RecordTarget> monitors) async {
+    if (!Platform.isWindows || monitors.length < 2) return;
+    try {
+      await ref.read(nativeWindowChannelProvider).showMonitorNumbers([
+        for (var i = 0; i < monitors.length; i++)
+          {
+            'x': monitors[i].physicalX,
+            'y': monitors[i].physicalY,
+            'number': i + 1,
+          },
+      ]).timeout(_kIndicatorCallTimeout);
+    } catch (e, st) {
+      Log.e(_tag, 'showMonitorNumbers failed', e, st);
+    }
   }
 
   Future<void> setCaptureSystemAudio(bool value) async {
@@ -277,11 +298,29 @@ class RecordController extends AsyncNotifier<RecordState> {
     await _syncHotkeyRegistration();
   }
 
+  /// The global low-level keyboard hook fires regardless of which window has
+  /// focus, so while the "press keys to assign" dialog is open, the *current*
+  /// Start/Stop/Pause-Resume combo being reassigned would both trigger its
+  /// live action (e.g. start a recording) and get captured by the recorder —
+  /// call this before showing that dialog, and [resumeHotkeysAfterEditing]
+  /// once it closes.
+  Future<void> suspendHotkeysForEditing() async {
+    _hotkeysSuspended = true;
+    await _hotkeyService.unregisterAll();
+  }
+
+  Future<void> resumeHotkeysAfterEditing() async {
+    _hotkeysSuspended = false;
+    await _syncHotkeyRegistration();
+  }
+
   /// Throwing version — [setHotkey] needs the failure to propagate so it can
   /// report a conflict/OS-registration failure back to its caller as `false`.
   Future<void> _syncHotkeyRegistrationOrThrow() async {
     final s = state.valueOrNull;
-    if (s == null || (_activeScopes.isEmpty && !s.isRecording)) {
+    if (_hotkeysSuspended ||
+        s == null ||
+        (_activeScopes.isEmpty && !s.isRecording)) {
       await _hotkeyService.unregisterAll();
       return;
     }
@@ -375,12 +414,10 @@ class RecordController extends AsyncNotifier<RecordState> {
     }
   }
 
-  /// Called from the window-close handler — kills a live ffmpeg segment and,
-  /// unless the user disabled "Delete temporary video on exit", deletes its
-  /// temp job dir so nothing orphans on disk. No-op if idle.
+  /// Called from the window-close handler — kills a live ffmpeg segment.
+  /// Temp dir cleanup happens separately via `TempFileService.wipeAll()`.
   Future<void> cleanupForAppExit() async {
-    final deleteTemp = state.valueOrNull?.settings.deleteTempOnExit ?? true;
-    await _recorderInstance?.cleanupOnShutdown(deleteTemp: deleteTemp);
+    await _recorderInstance?.cleanupOnShutdown();
   }
 
   Future<void> stopRecording() async {

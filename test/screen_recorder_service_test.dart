@@ -68,4 +68,12 @@ void main() {
     expect(service.status, RecordStatus.idle);
     service.dispose();
   });
+
+  test('cleanupOnShutdown() is safe to call while idle (app-exit path)',
+      () async {
+    final service = ScreenRecorderService();
+    await service.cleanupOnShutdown();
+    expect(service.status, RecordStatus.idle);
+    service.dispose();
+  });
 }

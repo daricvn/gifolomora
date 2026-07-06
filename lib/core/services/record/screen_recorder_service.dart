@@ -375,18 +375,16 @@ class ScreenRecorderService {
     _setStatus(RecordStatus.idle);
   }
 
-  /// Kills a live ffmpeg segment and deletes its job dir on app shutdown.
-  /// No-op when idle — a finished job's `_jobDir` may still be the source
-  /// file Video Studio is editing, so only an in-progress recording's temp
-  /// segments are fair game here. [deleteTemp] gates the dir deletion —
-  /// the "Delete temporary video on exit" setting.
-  Future<void> cleanupOnShutdown({bool deleteTemp = true}) async {
-    if (_status == RecordStatus.idle) return;
+  /// Kills a live ffmpeg segment (if any) on app shutdown. Dir cleanup is
+  /// handled by `TempFileService.wipeAll()` right after this call (see
+  /// `app.dart`'s `onWindowClose`), which deletes the whole job base dir —
+  /// no need to clean `_jobDir` individually here too.
+  Future<void> cleanupOnShutdown() async {
     _capTimer?.cancel();
     _expectingExit = true;
     _process?.kill();
     _process = null;
-    if (deleteTemp && _jobDir != null) await _temp.cleanJob(_jobDir!);
+    _jobDir = null;
   }
 
   void dispose() {

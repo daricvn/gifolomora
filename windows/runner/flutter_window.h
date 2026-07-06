@@ -10,6 +10,7 @@
 
 #include "audio_loopback.h"
 #include "global_hotkey_hook.h"
+#include "monitor_number_overlay.h"
 #include "recording_indicator.h"
 #include "win32_window.h"
 
@@ -45,6 +46,7 @@ class FlutterWindow : public Win32Window {
       native_window_channel_;
   std::unique_ptr<AudioLoopback> audio_loopback_;
   std::unique_ptr<RecordingIndicator> recording_indicator_;
+  std::unique_ptr<MonitorNumberOverlay> monitor_number_overlay_;
   std::unique_ptr<GlobalHotkeyHook> global_hotkey_hook_;
 };
 

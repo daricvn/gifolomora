@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:desktop_drop/desktop_drop.dart';
+import 'package:flutter/rendering.dart' show RenderProxyBox;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
@@ -29,21 +31,21 @@ import 'export_format_screen.dart';
 // page is a Navigator push (a sub-flow of Export, not a top-level GoRoute) so
 // it can't reuse that private helper directly.
 PageRouteBuilder<T> _formatPageRoute<T>(Widget child) => PageRouteBuilder<T>(
-      transitionDuration: const Duration(milliseconds: 240),
-      reverseTransitionDuration: const Duration(milliseconds: 200),
-      pageBuilder: (context, animation, secondaryAnimation) => child,
-      transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        final fade = CurveTween(curve: Curves.easeOut).animate(animation);
-        final slide = Tween<Offset>(
-          begin: const Offset(0.04, 0),
-          end: Offset.zero,
-        ).animate(CurveTween(curve: Curves.easeOut).animate(animation));
-        return FadeTransition(
-          opacity: fade,
-          child: SlideTransition(position: slide, child: child),
-        );
-      },
+  transitionDuration: const Duration(milliseconds: 240),
+  reverseTransitionDuration: const Duration(milliseconds: 200),
+  pageBuilder: (context, animation, secondaryAnimation) => child,
+  transitionsBuilder: (context, animation, secondaryAnimation, child) {
+    final fade = CurveTween(curve: Curves.easeOut).animate(animation);
+    final slide = Tween<Offset>(
+      begin: const Offset(0.04, 0),
+      end: Offset.zero,
+    ).animate(CurveTween(curve: Curves.easeOut).animate(animation));
+    return FadeTransition(
+      opacity: fade,
+      child: SlideTransition(position: slide, child: child),
     );
+  },
+);
 
 // ffmpeg drawtext anchors the glyph top at y; Flutter's line box keeps ~0.1em
 // of ascent above caps. Lift the preview text so the on-screen top matches the
@@ -58,7 +60,11 @@ String _fmtMs(int ms) {
 
 // Small black rounded label used for preview overlay chips (ORIGINAL badge,
 // position readout).
-Widget _chip(String text, {double alpha = 0.7, FontWeight weight = FontWeight.w700}) {
+Widget _chip(
+  String text, {
+  double alpha = 0.7,
+  FontWeight weight = FontWeight.w700,
+}) {
   return IgnorePointer(
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -66,8 +72,10 @@ Widget _chip(String text, {double alpha = 0.7, FontWeight weight = FontWeight.w7
         color: Colors.black.withValues(alpha: alpha),
         borderRadius: BorderRadius.circular(6),
       ),
-      child: Text(text,
-          style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: weight)),
+      child: Text(
+        text,
+        style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: weight),
+      ),
     ),
   );
 }
@@ -98,7 +106,8 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
   // can hide while the hover chrome (which has its own time readout) is up.
   final ValueNotifier<bool> _controlsVisible = ValueNotifier(false);
   bool _picking = false;
-  // Preview zoom: null = Fit to window; otherwise a video-px scale.
+  // Preview zoom: null = Fit to window; otherwise a video-px scale. Defaults
+  // to 100% (not Fit) so the initial preview shows true pixel size.
   double? _zoom = 1.0;
   // Hold-to-peek: true while the compare button is pressed.
   bool _comparing = false;
@@ -114,6 +123,10 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
   // the preview pushed off-screen and truncated).
   final TransformationController _transform = TransformationController();
   bool _isDragHovering = false;
+  // Measured height of the glass control dock. The preview pane extends under
+  // the dock (bottom edge shows through the blur), so Fit mode subtracts this
+  // to keep the whole frame visible above it.
+  final ValueNotifier<double> _dockHeight = ValueNotifier(0);
 
   Future<void> _handleDrop(
     DropDoneDetails details,
@@ -172,12 +185,14 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
     _previewCtrl.dispose();
     _positionMs.dispose();
     _controlsVisible.dispose();
+    _dockHeight.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(videoStudioControllerProvider).valueOrNull ??
+    final state =
+        ref.watch(videoStudioControllerProvider).valueOrNull ??
         const VideoStudioState();
     final ctrl = ref.read(videoStudioControllerProvider.notifier);
     final topInset = MediaQuery.of(context).padding.top;
@@ -214,9 +229,11 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
             alignment: Alignment.centerLeft,
             child: IconButton(
               iconSize: 20,
-              icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                color: AppColors.textHi),
-            onPressed: () => Navigator.of(context).maybePop(),
+              icon: const Icon(
+                Icons.arrow_back_ios_new_rounded,
+                color: AppColors.textHi,
+              ),
+              onPressed: () => Navigator.of(context).maybePop(),
             ),
           ),
         ),
@@ -224,15 +241,19 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
           if (state.hasInput && !state.isProcessing)
             IconButton(
               tooltip: 'Start over',
-              icon: const Icon(Icons.restart_alt_rounded,
-                  color: AppColors.textLo, size: 22),
+              icon: const Icon(
+                Icons.restart_alt_rounded,
+                color: AppColors.textLo,
+                size: 22,
+              ),
               onPressed: () async {
                 final ok = await showDialog<bool>(
                   context: context,
                   builder: (_) => AlertDialog(
                     title: const Text('Start over?'),
                     content: const Text(
-                        'This discards the loaded file and all edits.'),
+                      'This discards the loaded file and all edits.',
+                    ),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(context, false),
@@ -240,8 +261,10 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                       ),
                       TextButton(
                         onPressed: () => Navigator.pop(context, true),
-                        child: const Text('Start over',
-                            style: TextStyle(color: Colors.redAccent)),
+                        child: const Text(
+                          'Start over',
+                          style: TextStyle(color: Colors.redAccent),
+                        ),
                       ),
                     ],
                   ),
@@ -284,8 +307,11 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.file_download_rounded,
-                                color: AppColors.accentB, size: 64),
+                            Icon(
+                              Icons.file_download_rounded,
+                              color: AppColors.accentB,
+                              size: 64,
+                            ),
                             SizedBox(height: 12),
                             Text(
                               'Drop video or GIF',
@@ -316,12 +342,17 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
   ) {
     if (state.isProbing || _awaitingInitialFile) {
       return const Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          CircularProgressIndicator(color: AppColors.accentB),
-          SizedBox(height: 12),
-          Text('Reading file…',
-              style: TextStyle(color: AppColors.textLo, fontSize: 13)),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: AppColors.accentB),
+            SizedBox(height: 12),
+            Text(
+              'Reading file…',
+              style: TextStyle(color: AppColors.textLo, fontSize: 13),
+            ),
+          ],
+        ),
       );
     }
 
@@ -345,276 +376,357 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
       children: [
         _StageBanner(
           state: state,
-          onChangeVideo: state.isProcessing || _picking ? null : () => _pickFile(ctrl),
+          onChangeVideo: state.isProcessing || _picking
+              ? null
+              : () => _pickFile(ctrl),
         ),
         Expanded(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final cropActive = state.activeTool == StudioTool.crop;
-                final srcW = state.sourceWidth;
-                final srcH = state.sourceHeight;
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                  child: ValueListenableBuilder<double>(
+                    valueListenable: _dockHeight,
+                    builder: (context, dockH, _) => LayoutBuilder(
+                      builder: (context, constraints) {
+                        final cropActive = state.activeTool == StudioTool.crop;
+                        final srcW = state.sourceWidth;
+                        final srcH = state.sourceHeight;
 
-                // Output dimensions after Resize (aspect preserved — the tool
-                // only scales width). Zoom presets are relative to these, so
-                // 100% renders at the resized pixel size the Resize tool
-                // reports (e.g. 800px wide -> 800 logical px at 100%, 400 at
-                // 50%). Fit ignores this and fills the pane.
-                double baseW = srcW.toDouble();
-                double baseH = srcH.toDouble();
-                final tw = state.targetWidth;
-                if (tw != null && srcW > 0) {
-                  baseW = tw.toDouble();
-                  baseH = srcH * tw / srcW;
-                }
+                        // Output dimensions after Resize (aspect preserved — the tool
+                        // only scales width). Zoom presets are relative to these, so
+                        // 100% renders at the resized pixel size the Resize tool
+                        // reports (e.g. 800px wide -> 800 logical px at 100%, 400 at
+                        // 50%). Fit ignores this and fills the pane.
+                        double baseW = srcW.toDouble();
+                        double baseH = srcH.toDouble();
+                        final tw = state.targetWidth;
+                        if (tw != null && srcW > 0) {
+                          baseW = tw.toDouble();
+                          baseH = srcH * tw / srcW;
+                        }
 
-                // Scale that fits the output frame inside the preview pane.
-                double fitScale = 1.0;
-                if (baseW > 0 && baseH > 0) {
-                  fitScale = math.min(
-                    constraints.maxWidth / baseW,
-                    constraints.maxHeight / baseH,
-                  );
-                }
+                        // Scale that fits the output frame inside the preview pane.
+                        // The pane extends under the glass dock, so Fit targets the
+                        // area above it — zoomed frames may slide beneath the blur.
+                        final visibleH = math.max(
+                          1.0,
+                          constraints.maxHeight - dockH,
+                        );
+                        double fitScale = 1.0;
+                        if (baseW > 0 && baseH > 0) {
+                          fitScale = math.min(
+                            constraints.maxWidth / baseW,
+                            visibleH / baseH,
+                          );
+                        }
 
-                // output-px -> logical-px scale for the rendered preview.
-                final bool fitMode = _zoom == null;
-                final double renderScale = fitMode ? fitScale : _zoom!;
+                        // output-px -> logical-px scale for the rendered preview.
+                        final bool fitMode = _zoom == null;
+                        final double renderScale = fitMode ? fitScale : _zoom!;
 
-                double renderW = constraints.maxWidth;
-                double renderH = constraints.maxHeight;
-                if (baseW > 0 && baseH > 0) {
-                  renderW = baseW * renderScale;
-                  renderH = baseH * renderScale;
-                }
+                        double renderW = constraints.maxWidth;
+                        double renderH = constraints.maxHeight;
+                        if (baseW > 0 && baseH > 0) {
+                          renderW = baseW * renderScale;
+                          renderH = baseH * renderScale;
+                        }
 
-                final textActive = state.activeTool == StudioTool.text;
+                        // Compare button unmounts when there's nothing left to
+                        // compare (e.g. edits cleared mid-hold) — drop the
+                        // stuck hold-to-peek flag so preview doesn't stay
+                        // pinned to the original with no control left to undo it.
+                        if (_comparing &&
+                            !(state.inputFile != null &&
+                                state.hasComparableEdit)) {
+                          _comparing = false;
+                        }
 
-                final preview = SizedBox(
-                  width: renderW,
-                  height: renderH,
-                  child: GlassContainer(
-                    borderRadius: 20,
-                    padding: EdgeInsets.zero,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(20),
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
-                            child: VideoPreview(
-                              // No key: didUpdateWidget already swaps `file`
-                              // (see video_preview.dart) without tearing down
-                              // the player. A path-based key here forced a full
-                              // dispose/recreate of the native player on every
-                              // compare-button press.
-                              file: _comparing
-                                  ? (state.inputFile ?? state.sourceFile!)
-                                  : state.sourceFile!,
-                              videoWidth: srcW,
-                              videoHeight: srcH,
-                              speedRate: _comparing ? 1.0 : state.speedFactor,
-                              volume: _comparing ? 1.0 : state.volume,
-                              cropRect: _comparing
-                                  ? null
-                                  : (cropActive || !state.isCropFull)
-                                      ? state.cropNormalized
-                                      : null,
-                              interactive: !_comparing && cropActive,
-                              onCropChanged: ctrl.setCrop,
-                              controller: _previewCtrl,
-                              onPositionChanged: (ms) => _positionMs.value = ms,
-                              trimStartMs: _comparing ? 0 : state.trimStartMs,
-                              trimEndMs: _comparing
-                                  ? 0
-                                  : state.sourceDurationMs > 0
-                                      ? state.effectiveTrimEndMs
-                                      : 0,
-                            ),
-                          ),
-                          if (_comparing)
-                            Positioned(
-                              top: 10,
-                              left: 10,
-                              child: _chip('ORIGINAL'),
-                            ),
-                          if (state.textItems.isNotEmpty && !_comparing)
-                            Positioned.fill(
-                              child: _StudioTextLayer(
-                                state: state,
-                                ctrl: ctrl,
-                                renderW: renderW,
-                                renderH: renderH,
-                                srcW: srcW,
-                                interactive: textActive,
-                              ),
-                            ),
-                          // Red tint + corner chip when playhead is inside a
-                          // cut segment (hint only — marked for removal, not
-                          // an error state). Only this leaf repaints per tick.
-                          ValueListenableBuilder<int>(
-                            valueListenable: _positionMs,
-                            builder: (_, pos, _) {
-                              final inCut = !_comparing &&
-                                  !state.isGif &&
-                                  state.cutSegments.any((s) =>
-                                      pos >= s.startMs && pos < s.endMs);
-                              if (!inCut) return const SizedBox.shrink();
-                              return Positioned.fill(
-                                child: IgnorePointer(
-                                  child: Stack(
-                                    children: [
-                                      const Positioned.fill(
-                                        child: ColoredBox(
-                                            color: Color(0x40FF0000)),
+                        final textActive = state.activeTool == StudioTool.text;
+
+                        final preview = SizedBox(
+                          width: renderW,
+                          height: renderH,
+                          child: GlassContainer(
+                            borderRadius: 20,
+                            padding: EdgeInsets.zero,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(20),
+                              child: Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: VideoPreview(
+                                      // No key: didUpdateWidget already swaps `file`
+                                      // (see video_preview.dart) without tearing down
+                                      // the player. A path-based key here forced a full
+                                      // dispose/recreate of the native player on every
+                                      // compare-button press.
+                                      file: _comparing
+                                          ? (state.inputFile ??
+                                                state.sourceFile!)
+                                          : state.sourceFile!,
+                                      videoWidth: srcW,
+                                      videoHeight: srcH,
+                                      speedRate: _comparing
+                                          ? 1.0
+                                          : state.speedFactor,
+                                      volume: _comparing ? 1.0 : state.volume,
+                                      cropRect: _comparing
+                                          ? null
+                                          : (cropActive || !state.isCropFull)
+                                          ? state.cropNormalized
+                                          : null,
+                                      interactive: !_comparing && cropActive,
+                                      onCropChanged: ctrl.setCrop,
+                                      controller: _previewCtrl,
+                                      onPositionChanged: (ms) =>
+                                          _positionMs.value = ms,
+                                      trimStartMs: _comparing
+                                          ? 0
+                                          : state.trimStartMs,
+                                      trimEndMs: _comparing
+                                          ? 0
+                                          : state.sourceDurationMs > 0
+                                          ? state.effectiveTrimEndMs
+                                          : 0,
+                                    ),
+                                  ),
+                                  if (_comparing)
+                                    Positioned(
+                                      top: 10,
+                                      left: 10,
+                                      child: _chip('ORIGINAL'),
+                                    ),
+                                  if (state.textItems.isNotEmpty && !_comparing)
+                                    Positioned.fill(
+                                      child: _StudioTextLayer(
+                                        state: state,
+                                        ctrl: ctrl,
+                                        renderW: renderW,
+                                        renderH: renderH,
+                                        srcW: srcW,
+                                        interactive: textActive,
                                       ),
-                                      Positioned(
-                                        top: 10,
-                                        left: 10,
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 4),
-                                          decoration: BoxDecoration(
-                                            color: Colors.red
-                                                .withValues(alpha: 0.85),
-                                            borderRadius:
-                                                BorderRadius.circular(6),
-                                          ),
-                                          child: const Row(
-                                            mainAxisSize: MainAxisSize.min,
+                                    ),
+                                  // Red tint + corner chip when playhead is inside a
+                                  // cut segment (hint only — marked for removal, not
+                                  // an error state). Only this leaf repaints per tick.
+                                  ValueListenableBuilder<int>(
+                                    valueListenable: _positionMs,
+                                    builder: (_, pos, _) {
+                                      final inCut =
+                                          !_comparing &&
+                                          !state.isGif &&
+                                          state.cutSegments.any(
+                                            (s) =>
+                                                pos >= s.startMs &&
+                                                pos < s.endMs,
+                                          );
+                                      if (!inCut) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      return Positioned.fill(
+                                        child: IgnorePointer(
+                                          child: Stack(
                                             children: [
-                                              Icon(Icons.cut_rounded,
-                                                  color: Colors.white,
-                                                  size: 11),
-                                              SizedBox(width: 4),
-                                              Text('CUT',
-                                                  style: TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 10,
-                                                      fontWeight:
-                                                          FontWeight.w700)),
+                                              const Positioned.fill(
+                                                child: ColoredBox(
+                                                  color: Color(0x40FF0000),
+                                                ),
+                                              ),
+                                              Positioned(
+                                                top: 10,
+                                                left: 10,
+                                                child: Container(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 8,
+                                                        vertical: 4,
+                                                      ),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.red
+                                                        .withValues(
+                                                          alpha: 0.85,
+                                                        ),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          6,
+                                                        ),
+                                                  ),
+                                                  child: const Row(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      Icon(
+                                                        Icons.cut_rounded,
+                                                        color: Colors.white,
+                                                        size: 11,
+                                                      ),
+                                                      SizedBox(width: 4),
+                                                      Text(
+                                                        'CUT',
+                                                        style: TextStyle(
+                                                          color: Colors.white,
+                                                          fontSize: 10,
+                                                          fontWeight:
+                                                              FontWeight.w700,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
                                             ],
                                           ),
                                         ),
-                                      ),
-                                    ],
+                                      );
+                                    },
                                   ),
-                                ),
-                              );
-                            },
-                          ),
-                          // Persistent position chip — hidden while the
-                          // hover-chrome (which has its own time row) is up,
-                          // so the two don't visually overlap; on GIF stage
-                          // (no hover chrome) it's the only indicator.
-                          ValueListenableBuilder<bool>(
-                            valueListenable: _controlsVisible,
-                            builder: (_, controlsVisible, _) {
-                              if (controlsVisible) return const SizedBox.shrink();
-                              return ValueListenableBuilder<int>(
-                                valueListenable: _positionMs,
-                                builder: (_, pos, _) => Positioned(
-                                  left: 10,
-                                  bottom: 8,
-                                  child: _chip(
-                                      '${_fmtMs(pos)} / ${_fmtMs(state.sourceDurationMs)}',
-                                      alpha: 0.55,
-                                      weight: FontWeight.w600),
-                                ),
-                              );
-                            },
-                          ),
-                          // YouTube-style controls — videos only, and only when
-                          // no canvas tool (crop/text) owns the preview gestures.
-                          if (!state.isGif && !cropActive && !textActive)
-                            Positioned.fill(
-                              child: ValueListenableBuilder<int>(
-                                valueListenable: _positionMs,
-                                builder: (_, pos, _) => _VideoControlsOverlay(
-                                  controller: _previewCtrl,
-                                  positionMs: pos,
-                                  durationMs: state.sourceDurationMs,
-                                  onSeek: (ms) {
-                                    _previewCtrl.seekTo(ms);
-                                    _positionMs.value = ms;
-                                  },
-                                  onVisibleChanged: (v) =>
-                                      _controlsVisible.value = v,
-                                ),
+                                  // Persistent position chip — hidden while the
+                                  // hover-chrome (which has its own time row) is up,
+                                  // so the two don't visually overlap; on GIF stage
+                                  // (no hover chrome) it's the only indicator.
+                                  ValueListenableBuilder<bool>(
+                                    valueListenable: _controlsVisible,
+                                    builder: (_, controlsVisible, _) {
+                                      if (controlsVisible) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      return ValueListenableBuilder<int>(
+                                        valueListenable: _positionMs,
+                                        builder: (_, pos, _) => Positioned(
+                                          left: 10,
+                                          bottom: 8,
+                                          child: _chip(
+                                            '${_fmtMs(pos)} / ${_fmtMs(state.sourceDurationMs)}',
+                                            alpha: 0.55,
+                                            weight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  // YouTube-style controls — videos only, and only when
+                                  // no canvas tool (crop/text) owns the preview gestures.
+                                  if (!state.isGif &&
+                                      !cropActive &&
+                                      !textActive)
+                                    Positioned.fill(
+                                      child: ValueListenableBuilder<int>(
+                                        valueListenable: _positionMs,
+                                        builder: (_, pos, _) =>
+                                            _VideoControlsOverlay(
+                                              controller: _previewCtrl,
+                                              positionMs: pos,
+                                              durationMs:
+                                                  state.sourceDurationMs,
+                                              onSeek: (ms) {
+                                                _previewCtrl.seekTo(ms);
+                                                _positionMs.value = ms;
+                                              },
+                                              onVisibleChanged: (v) =>
+                                                  _controlsVisible.value = v,
+                                            ),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
-                        ],
-                      ),
+                          ),
+                        );
+
+                        final overflowX = renderW > constraints.maxWidth + 0.5;
+                        // Against the area above the dock — anything hidden
+                        // under the glass must be pannable back into view.
+                        final overflowY = renderH > visibleH + 0.5;
+                        // Crop's drag gesture owns the whole frame, so pan stays off
+                        // during crop to avoid fighting the handles.
+                        final canPan =
+                            !fitMode &&
+                            !cropActive &&
+                            !textActive &&
+                            (overflowX || overflowY);
+
+                        // Frame now fits the pane but a prior pan left a stale
+                        // translation — recenter so it isn't truncated to one edge.
+                        if (!canPan && !_transform.value.isIdentity()) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted) _transform.value = Matrix4.identity();
+                          });
+                        }
+
+                        final pane = ClipRect(
+                          child: InteractiveViewer(
+                            transformationController: _transform,
+                            constrained: false,
+                            scaleEnabled: false,
+                            panEnabled: canPan,
+                            child: SizedBox(
+                              width: math.max(renderW, constraints.maxWidth),
+                              // Constant dock-height tail below the frame:
+                              // small frames center above the dock; oversized
+                              // ones start under the glass but pan up until
+                              // the bottom edge clears it.
+                              height: math.max(
+                                  renderH + dockH, constraints.maxHeight),
+                              child: Padding(
+                                padding: EdgeInsets.only(bottom: dockH),
+                                child: Center(child: preview),
+                              ),
+                            ),
+                          ),
+                        );
+
+                        return Stack(
+                          children: [
+                            Positioned.fill(child: pane),
+                            if (state.inputFile != null &&
+                                state.hasComparableEdit)
+                              Positioned(
+                                top: 8,
+                                left: 8,
+                                child: _CompareButton(
+                                  active: _comparing,
+                                  onHoldChanged: (v) =>
+                                      setState(() => _comparing = v),
+                                ),
+                              ),
+                            Positioned(
+                              top: 8,
+                              right: 8,
+                              child: _ZoomControl(
+                                zoom: _zoom,
+                                onChanged: (v) => setState(() => _zoom = v),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ),
-                );
-
-                final overflowX = renderW > constraints.maxWidth + 0.5;
-                final overflowY = renderH > constraints.maxHeight + 0.5;
-                // Crop's drag gesture owns the whole frame, so pan stays off
-                // during crop to avoid fighting the handles.
-                final canPan = !fitMode &&
-                    !cropActive &&
-                    !textActive &&
-                    (overflowX || overflowY);
-
-                // Frame now fits the pane but a prior pan left a stale
-                // translation — recenter so it isn't truncated to one edge.
-                if (!canPan && !_transform.value.isIdentity()) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (mounted) _transform.value = Matrix4.identity();
-                  });
-                }
-
-                final pane = ClipRect(
-                  child: InteractiveViewer(
-                    transformationController: _transform,
-                    constrained: false,
-                    scaleEnabled: false,
-                    panEnabled: canPan,
-                    child: SizedBox(
-                      width: math.max(renderW, constraints.maxWidth),
-                      height: math.max(renderH, constraints.maxHeight),
-                      child: Center(child: preview),
-                    ),
+                ),
+              ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: _SizeReporter(
+                  onSize: (s) {
+                    if (mounted) _dockHeight.value = s.height;
+                  },
+                  child: _ControlDock(
+                    state: state,
+                    ctrl: ctrl,
+                    toast: toast,
+                    positionMs: _positionMs,
+                    onSeekPreview: (ms) {
+                      _previewCtrl.seekTo(ms);
+                      _positionMs.value = ms;
+                    },
                   ),
-                );
-
-                return Stack(
-                  children: [
-                    Positioned.fill(child: pane),
-                    if (state.inputFile != null)
-                      Positioned(
-                        top: 8,
-                        left: 8,
-                        child: _CompareButton(
-                          active: _comparing,
-                          onHoldChanged: (v) => setState(() => _comparing = v),
-                        ),
-                      ),
-                    Positioned(
-                      top: 8,
-                      right: 8,
-                      child: _ZoomControl(
-                        zoom: _zoom,
-                        onChanged: (v) => setState(() => _zoom = v),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
+                ),
+              ),
+            ],
           ),
-        ),
-        _ControlDock(
-          state: state,
-          ctrl: ctrl,
-          toast: toast,
-          positionMs: _positionMs,
-          onSeekPreview: (ms) {
-            _previewCtrl.seekTo(ms);
-            _positionMs.value = ms;
-          },
         ),
       ],
     );
@@ -641,32 +753,37 @@ class _StageBanner extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
               gradient: state.isGif ? null : AppGradients.primaryButton,
-              color: state.isGif ? AppColors.accentC.withValues(alpha: 0.25) : null,
+              color: state.isGif
+                  ? AppColors.accentC.withValues(alpha: 0.25)
+                  : null,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(
-                state.isGif ? Icons.gif_box_rounded : Icons.movie_rounded,
-                color: Colors.white,
-                size: 15,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                state.isGif ? 'Editing GIF' : 'Editing video',
-                style: const TextStyle(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  state.isGif ? Icons.gif_box_rounded : Icons.movie_rounded,
+                  color: Colors.white,
+                  size: 15,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  state.isGif ? 'Editing GIF' : 'Editing video',
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 12,
-                    fontWeight: FontWeight.w700),
-              ),
-            ]),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               [
                 if (dims.isNotEmpty) dims,
-                if (!state.isGif)
-                  state.hasAudio ? 'audio' : 'no audio',
+                if (!state.isGif) state.hasAudio ? 'audio' : 'no audio',
               ].join(' · '),
               style: const TextStyle(color: AppColors.textLo, fontSize: 12),
               maxLines: 1,
@@ -681,10 +798,15 @@ class _StageBanner extends StatelessWidget {
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              icon: const Icon(Icons.video_library_rounded,
-                  size: 15, color: AppColors.accentB),
-              label: const Text('Change',
-                  style: TextStyle(color: AppColors.accentB, fontSize: 12)),
+              icon: const Icon(
+                Icons.video_library_rounded,
+                size: 15,
+                color: AppColors.accentB,
+              ),
+              label: const Text(
+                'Change',
+                style: TextStyle(color: AppColors.accentB, fontSize: 12),
+              ),
             ),
         ],
       ),
@@ -767,19 +889,26 @@ class _ZoomControl extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.zoom_in_rounded,
-                size: 15, color: AppColors.accentB),
+            const Icon(
+              Icons.zoom_in_rounded,
+              size: 15,
+              color: AppColors.accentB,
+            ),
             const SizedBox(width: 5),
             Text(
               _label,
               style: const TextStyle(
-                  color: AppColors.textHi,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700),
+                color: AppColors.textHi,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(width: 2),
-            const Icon(Icons.arrow_drop_down_rounded,
-                size: 18, color: AppColors.textLo),
+            const Icon(
+              Icons.arrow_drop_down_rounded,
+              size: 18,
+              color: AppColors.textLo,
+            ),
           ],
         ),
       ),
@@ -807,16 +936,19 @@ class _CompareButton extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.visibility_rounded,
-                size: 15,
-                color: active ? AppColors.accentB : AppColors.textHi),
+            Icon(
+              Icons.visibility_rounded,
+              size: 15,
+              color: active ? AppColors.accentB : AppColors.textHi,
+            ),
             const SizedBox(width: 5),
             Text(
               active ? 'Original' : 'Compare',
               style: TextStyle(
-                  color: active ? AppColors.accentB : AppColors.textHi,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700),
+                color: active ? AppColors.accentB : AppColors.textHi,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ],
         ),
@@ -981,8 +1113,10 @@ class _VideoControlsOverlayState extends State<_VideoControlsOverlay> {
           bottom: 4,
           child: Row(
             children: [
-              Text(_fmtMs(pos.round()),
-                  style: const TextStyle(color: Colors.white, fontSize: 11)),
+              Text(
+                _fmtMs(pos.round()),
+                style: const TextStyle(color: Colors.white, fontSize: 11),
+              ),
               Expanded(
                 child: SliderTheme(
                   data: SliderThemeData(
@@ -990,10 +1124,12 @@ class _VideoControlsOverlayState extends State<_VideoControlsOverlay> {
                     activeTrackColor: Colors.red,
                     inactiveTrackColor: Colors.white.withValues(alpha: 0.3),
                     thumbColor: Colors.red,
-                    thumbShape:
-                        const RoundSliderThumbShape(enabledThumbRadius: 6),
-                    overlayShape:
-                        const RoundSliderOverlayShape(overlayRadius: 12),
+                    thumbShape: const RoundSliderThumbShape(
+                      enabledThumbRadius: 6,
+                    ),
+                    overlayShape: const RoundSliderOverlayShape(
+                      overlayRadius: 12,
+                    ),
                     overlayColor: Colors.red.withValues(alpha: 0.2),
                   ),
                   child: Slider(
@@ -1011,8 +1147,10 @@ class _VideoControlsOverlayState extends State<_VideoControlsOverlay> {
                   ),
                 ),
               ),
-              Text(_fmtMs(dur),
-                  style: const TextStyle(color: Colors.white, fontSize: 11)),
+              Text(
+                _fmtMs(dur),
+                style: const TextStyle(color: Colors.white, fontSize: 11),
+              ),
             ],
           ),
         ),
@@ -1065,71 +1203,94 @@ class _ControlDock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      child: Container(
-        decoration: const BoxDecoration(
-          color: AppColors.bg1,
-          border: Border(
-              top: BorderSide(color: AppColors.glassStroke, width: 0.5)),
-        ),
-        child: Stack(
-          children: [
-            const Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              height: 48,
-              child: IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(gradient: AppGradients.cardSheen),
-                ),
-              ),
+    // Glassy overlay (GlassAppBar-style blur): the dock floats over the
+    // preview pane, so an oversized video's bottom edge stays visible,
+    // blurred, behind it.
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.bg1.withValues(alpha: 0.55),
+            border: const Border(
+              top: BorderSide(color: AppColors.glassStroke, width: 0.5),
             ),
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                  16, 12, 16, 12 + MediaQuery.of(context).padding.bottom),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _ToolSelector(
+          ),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              12,
+              16,
+              12 + MediaQuery.of(context).padding.bottom,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _ToolSelector(state: state, onSelect: ctrl.setActiveTool),
+                const SizedBox(height: 12),
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  alignment: Alignment.topCenter,
+                  child: _ToolPanel(
                     state: state,
-                    onSelect: ctrl.setActiveTool,
+                    ctrl: ctrl,
+                    positionMs: positionMs,
+                    onSeekPreview: onSeekPreview,
+                    toast: toast,
                   ),
-                  const SizedBox(height: 12),
-                  AnimatedSize(
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOut,
-                    alignment: Alignment.topCenter,
-                    child: _ToolPanel(
-                      state: state,
-                      ctrl: ctrl,
-                      positionMs: positionMs,
-                      onSeekPreview: onSeekPreview,
-                      toast: toast,
-                    ),
-                  ),
-                  if (state.error != null) ...[
-                    const SizedBox(height: 10),
-                    _ErrorCard(message: state.error!),
-                  ],
-                  const SizedBox(height: 12),
-                  _ActionBar(state: state, ctrl: ctrl, toast: toast),
+                ),
+                if (state.error != null) ...[
+                  const SizedBox(height: 10),
+                  _ErrorCard(message: state.error!),
                 ],
-              ),
+                const SizedBox(height: 12),
+                _ActionBar(state: state, ctrl: ctrl, toast: toast),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
+// Reports the child's laid-out size (post-frame) so the preview pane can
+// subtract the dock height when computing Fit.
+class _SizeReporter extends SingleChildRenderObjectWidget {
+  const _SizeReporter({required this.onSize, required Widget child})
+    : super(child: child);
+  final ValueChanged<Size> onSize;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderSizeReporter(onSize);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderSizeReporter renderObject,
+  ) => renderObject.onSize = onSize;
+}
+
+class _RenderSizeReporter extends RenderProxyBox {
+  _RenderSizeReporter(this.onSize);
+  ValueChanged<Size> onSize;
+  Size? _last;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    if (_last != size) {
+      _last = size;
+      final s = size;
+      WidgetsBinding.instance.addPostFrameCallback((_) => onSize(s));
+    }
+  }
+}
+
 class _ToolSelector extends StatelessWidget {
-  const _ToolSelector({
-    required this.state,
-    required this.onSelect,
-  });
+  const _ToolSelector({required this.state, required this.onSelect});
   final VideoStudioState state;
   final void Function(StudioTool?) onSelect;
 
@@ -1156,7 +1317,8 @@ class _ToolSelector extends StatelessWidget {
       children: [
         for (final t in tools)
           SizedBox(
-            width: (MediaQuery.of(context).size.width - 44) / (tools.length + 1),
+            width:
+                (MediaQuery.of(context).size.width - 44) / (tools.length + 1),
             child: (t.$1 == StudioTool.gif || t.$1 == StudioTool.webm)
                 ? _AccentToolButton(
                     icon: t.$2,
@@ -1210,11 +1372,14 @@ class _ToolButton extends StatelessWidget {
         children: [
           Icon(icon, size: 18, color: effectiveColor),
           const SizedBox(height: 3),
-          Text(label,
-              style: TextStyle(
-                  color: effectiveColor,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600)),
+          Text(
+            label,
+            style: TextStyle(
+              color: effectiveColor,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );
@@ -1255,8 +1420,11 @@ Color _accentCycle(double t) {
   const wheel = [AppColors.accentA, AppColors.accentB, AppColors.accentC];
   final x = (t % 1.0) * wheel.length;
   final i = x.floor();
-  return Color.lerp(wheel[i % wheel.length], wheel[(i + 1) % wheel.length],
-      x - i)!;
+  return Color.lerp(
+    wheel[i % wheel.length],
+    wheel[(i + 1) % wheel.length],
+    x - i,
+  )!;
 }
 
 /// Rebuilds [builder] every frame with a slowly drifting two-stop accent
@@ -1273,8 +1441,9 @@ class _GradientCycle extends StatefulWidget {
 class _GradientCycleState extends State<_GradientCycle>
     with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
-      vsync: this, duration: const Duration(seconds: 4))
-    ..repeat();
+    vsync: this,
+    duration: const Duration(seconds: 4),
+  )..repeat();
 
   @override
   void dispose() {
@@ -1291,10 +1460,7 @@ class _GradientCycleState extends State<_GradientCycle>
         LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            _accentCycle(_c.value),
-            _accentCycle(_c.value + 1 / 3),
-          ],
+          colors: [_accentCycle(_c.value), _accentCycle(_c.value + 1 / 3)],
         ),
       ),
     );
@@ -1329,8 +1495,9 @@ class _AccentToolButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: gradient.colors.first
-                  .withValues(alpha: selected ? 0.55 : 0.35),
+              color: gradient.colors.first.withValues(
+                alpha: selected ? 0.55 : 0.35,
+              ),
               blurRadius: selected ? 14 : 10,
             ),
           ],
@@ -1353,11 +1520,14 @@ class _AccentToolButton extends StatelessWidget {
                       child: Icon(icon, size: 18, color: Colors.white),
                     ),
               const SizedBox(height: 3),
-              Text(label,
-                  style: TextStyle(
-                      color: selected ? Colors.white : AppColors.textHi,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700)),
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected ? Colors.white : AppColors.textHi,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ],
           ),
         ),
@@ -1412,8 +1582,10 @@ class _ToolPanel extends StatelessWidget {
       transitionBuilder: (child, anim) => FadeTransition(
         opacity: anim,
         child: SlideTransition(
-          position: Tween<Offset>(begin: const Offset(0, 0.04), end: Offset.zero)
-              .animate(anim),
+          position: Tween<Offset>(
+            begin: const Offset(0, 0.04),
+            end: Offset.zero,
+          ).animate(anim),
           child: child,
         ),
       ),
@@ -1429,16 +1601,23 @@ class _ToolPanel extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             const Flexible(
-              child: Text('Drag the handles on the preview to crop',
-                  style: TextStyle(color: AppColors.textLo, fontSize: 12)),
+              child: Text(
+                'Drag the handles on the preview to crop',
+                style: TextStyle(color: AppColors.textLo, fontSize: 12),
+              ),
             ),
             if (!state.isCropFull)
               TextButton.icon(
                 onPressed: ctrl.resetCrop,
-                icon: const Icon(Icons.crop_free_rounded,
-                    size: 14, color: AppColors.accentB),
-                label: const Text('Reset',
-                    style: TextStyle(color: AppColors.accentB, fontSize: 12)),
+                icon: const Icon(
+                  Icons.crop_free_rounded,
+                  size: 14,
+                  color: AppColors.accentB,
+                ),
+                label: const Text(
+                  'Reset',
+                  style: TextStyle(color: AppColors.accentB, fontSize: 12),
+                ),
               ),
           ],
         );
@@ -1465,12 +1644,14 @@ class _ToolPanel extends StatelessWidget {
             const Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('0.25× slower',
-                    style:
-                        TextStyle(color: AppColors.textLo, fontSize: 11)),
-                Text('4× faster',
-                    style:
-                        TextStyle(color: AppColors.textLo, fontSize: 11)),
+                Text(
+                  '0.25× slower',
+                  style: TextStyle(color: AppColors.textLo, fontSize: 11),
+                ),
+                Text(
+                  '4× faster',
+                  style: TextStyle(color: AppColors.textLo, fontSize: 11),
+                ),
               ],
             ),
           ],
@@ -1568,7 +1749,10 @@ class _TrimPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final totalMs = state.sourceDurationMs;
     final endMs = state.effectiveTrimEndMs;
-    final clipMs = (endMs - state.trimStartMs).clamp(0, totalMs > 0 ? totalMs : 1);
+    final clipMs = (endMs - state.trimStartMs).clamp(
+      0,
+      totalMs > 0 ? totalMs : 1,
+    );
 
     return Column(
       children: [
@@ -1598,18 +1782,19 @@ class _TrimPanel extends StatelessWidget {
               ms: clipMs,
               highlight: true,
             ),
-            _TrimChip(
-              icon: Icons.logout_rounded,
-              label: 'Out',
-              ms: endMs,
-            ),
+            _TrimChip(icon: Icons.logout_rounded, label: 'Out', ms: endMs),
             if (state.hasTrim)
               TextButton.icon(
                 onPressed: ctrl.resetTrim,
-                icon: const Icon(Icons.restore_rounded,
-                    size: 13, color: AppColors.accentB),
-                label: const Text('Reset',
-                    style: TextStyle(color: AppColors.accentB, fontSize: 12)),
+                icon: const Icon(
+                  Icons.restore_rounded,
+                  size: 13,
+                  color: AppColors.accentB,
+                ),
+                label: const Text(
+                  'Reset',
+                  style: TextStyle(color: AppColors.accentB, fontSize: 12),
+                ),
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 6),
                   minimumSize: Size.zero,
@@ -1713,11 +1898,10 @@ class _CutPanelState extends State<_CutPanel> {
             pendingStartMs: _pendingStartMs,
             pendingEndMs: _pendingEndMs,
             positionMs: widget.positionMs.clamp(0, totalMs),
-            onPendingChanged: (start, end) =>
-                setState(() {
-                  _pendingStartMs = start;
-                  _pendingEndMs = end;
-                }),
+            onPendingChanged: (start, end) => setState(() {
+              _pendingStartMs = start;
+              _pendingEndMs = end;
+            }),
             onSeek: widget.onSeekPreview,
           ),
           const SizedBox(height: 8),
@@ -1736,39 +1920,51 @@ class _CutPanelState extends State<_CutPanel> {
               ms: _pendingEndMs,
             ),
             const Spacer(),
-            Builder(builder: (_) {
-              final zeroLen = _pendingEndMs - _pendingStartMs < 20;
-              final covered = zeroLen ||
-                  s.isFullyCovered(_pendingStartMs, _pendingEndMs);
-              final color = covered ? AppColors.textLo : Colors.redAccent;
-              return GestureDetector(
-                onTap: covered
-                    ? null
-                    : () {
-                        final ok = widget.ctrl
-                            .addCutSegment(_pendingStartMs, _pendingEndMs);
-                        if (!ok) widget.toast("Can't add that segment");
-                      },
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: color.withValues(alpha: 0.35)),
-                  ),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.cut_rounded, color: color, size: 14),
-                    const SizedBox(width: 6),
-                    Text('Mark for removal',
-                        style: TextStyle(
+            Builder(
+              builder: (_) {
+                final zeroLen = _pendingEndMs - _pendingStartMs < 20;
+                final covered =
+                    zeroLen || s.isFullyCovered(_pendingStartMs, _pendingEndMs);
+                final color = covered ? AppColors.textLo : Colors.redAccent;
+                return GestureDetector(
+                  onTap: covered
+                      ? null
+                      : () {
+                          final ok = widget.ctrl.addCutSegment(
+                            _pendingStartMs,
+                            _pendingEndMs,
+                          );
+                          if (!ok) widget.toast("Can't add that segment");
+                        },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: color.withValues(alpha: 0.35)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.cut_rounded, color: color, size: 14),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Mark for removal',
+                          style: TextStyle(
                             color: color,
                             fontSize: 13,
-                            fontWeight: FontWeight.w600)),
-                  ]),
-                ),
-              );
-            }),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
           ],
         ),
         const SizedBox(height: 8),
@@ -1778,44 +1974,59 @@ class _CutPanelState extends State<_CutPanel> {
             style: TextStyle(color: AppColors.textLo, fontSize: 12),
           )
         else ...[
-          ...s.cutSegments.map((seg) => Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withValues(alpha: 0.10),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                            color: Colors.red.withValues(alpha: 0.30)),
+          ...s.cutSegments.map(
+            (seg) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: Colors.red.withValues(alpha: 0.30),
                       ),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        const Icon(Icons.cut_rounded,
-                            color: Colors.redAccent, size: 12),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.cut_rounded,
+                          color: Colors.redAccent,
+                          size: 12,
+                        ),
                         const SizedBox(width: 4),
                         Text(
                           '${_fmtMs(seg.startMs)} – ${_fmtMs(seg.endMs)}',
                           style: const TextStyle(
-                              color: Colors.redAccent,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600),
+                            color: Colors.redAccent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ]),
+                      ],
                     ),
-                    const Spacer(),
-                    GestureDetector(
-                      onTap: () => widget.ctrl.removeCutSegment(seg),
-                      child: const Padding(
-                        padding: EdgeInsets.all(6),
-                        child: Icon(Icons.close_rounded,
-                            size: 16, color: AppColors.textLo),
+                  ),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => widget.ctrl.removeCutSegment(seg),
+                    child: const Padding(
+                      padding: EdgeInsets.all(6),
+                      child: Icon(
+                        Icons.close_rounded,
+                        size: 16,
+                        color: AppColors.textLo,
                       ),
                     ),
-                  ],
-                ),
-              )),
+                  ),
+                ],
+              ),
+            ),
+          ),
           const SizedBox(height: 4),
           Row(
             children: [
@@ -1826,10 +2037,15 @@ class _CutPanelState extends State<_CutPanel> {
               const Spacer(),
               TextButton.icon(
                 onPressed: widget.ctrl.resetCut,
-                icon: const Icon(Icons.restore_rounded,
-                    size: 13, color: AppColors.accentB),
-                label: const Text('Clear all',
-                    style: TextStyle(color: AppColors.accentB, fontSize: 12)),
+                icon: const Icon(
+                  Icons.restore_rounded,
+                  size: 13,
+                  color: AppColors.accentB,
+                ),
+                label: const Text(
+                  'Clear all',
+                  style: TextStyle(color: AppColors.accentB, fontSize: 12),
+                ),
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 6),
                   minimumSize: Size.zero,
@@ -1868,17 +2084,22 @@ class _StudioTextPanel extends StatelessWidget {
                 borderRadius: 16,
                 tint: Colors.orange,
                 opacity: 0.08,
-                child: const Row(children: [
-                  Icon(Icons.warning_amber_rounded,
-                      color: Colors.orange, size: 20),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'No system font found. Text may fail to render.',
-                      style: TextStyle(color: Colors.orange, fontSize: 13),
+                child: const Row(
+                  children: [
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      color: Colors.orange,
+                      size: 20,
                     ),
-                  ),
-                ]),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'No system font found. Text may fail to render.',
+                        style: TextStyle(color: Colors.orange, fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 12),
             ],
@@ -1951,7 +2172,8 @@ class _StudioTextLayer extends StatelessWidget {
             scale: scale,
             renderW: renderW,
             renderH: renderH,
-            fontFamily: FontRegistry.familyFor(item.font, item.style) ??
+            fontFamily:
+                FontRegistry.familyFor(item.font, item.style) ??
                 state.fontFamilies[item.style],
             ctrl: ctrl,
           ),
@@ -2016,12 +2238,14 @@ class _StudioDraggableTextState extends State<_StudioDraggableText> {
     // When the real font file is loaded its weight/style are baked in — don't
     // also synthesize bold/italic or it doubles up.
     final hasFam = fontFamily != null;
-    final fw = !hasFam &&
+    final fw =
+        !hasFam &&
             (item.style == TextStyleKind.bold ||
                 item.style == TextStyleKind.boldItalic)
         ? FontWeight.w700
         : FontWeight.w400;
-    final fst = !hasFam &&
+    final fst =
+        !hasFam &&
             (item.style == TextStyleKind.italic ||
                 item.style == TextStyleKind.boldItalic)
         ? FontStyle.italic
@@ -2128,8 +2352,10 @@ class _TrimChip extends StatelessWidget {
         children: [
           Icon(icon, color: accent, size: 12),
           const SizedBox(width: 4),
-          Text(label,
-              style: const TextStyle(color: AppColors.textLo, fontSize: 10)),
+          Text(
+            label,
+            style: const TextStyle(color: AppColors.textLo, fontSize: 10),
+          ),
           const SizedBox(width: 4),
           Text(
             _fmtMs(ms),
@@ -2146,8 +2372,11 @@ class _TrimChip extends StatelessWidget {
 }
 
 class _SmallChip extends StatelessWidget {
-  const _SmallChip(
-      {required this.label, required this.selected, required this.onTap});
+  const _SmallChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
   final String label;
   final bool selected;
   final VoidCallback onTap;
@@ -2226,15 +2455,16 @@ class _ResizeChips extends StatelessWidget {
                 color: disabled
                     ? AppColors.textLo.withValues(alpha: 0.4)
                     : selected
-                        ? AppColors.accentB
-                        : AppColors.textHi,
+                    ? AppColors.accentB
+                    : AppColors.textHi,
                 fontSize: 13,
               ),
               side: BorderSide(
                 color: selected ? AppColors.accentA : AppColors.glassStroke,
               ),
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
+                borderRadius: BorderRadius.circular(10),
+              ),
             );
           }).toList(),
         ),
@@ -2259,10 +2489,14 @@ class _ResizeChips extends StatelessWidget {
           const Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('10% smaller',
-                  style: TextStyle(color: AppColors.textLo, fontSize: 11)),
-              Text('200% larger',
-                  style: TextStyle(color: AppColors.textLo, fontSize: 11)),
+              Text(
+                '10% smaller',
+                style: TextStyle(color: AppColors.textLo, fontSize: 11),
+              ),
+              Text(
+                '200% larger',
+                style: TextStyle(color: AppColors.textLo, fontSize: 11),
+              ),
             ],
           ),
         ],
@@ -2310,8 +2544,11 @@ class _GifPanel extends StatelessWidget {
           const SizedBox(height: 14),
           Row(
             children: [
-              const Icon(Icons.warning_amber_rounded,
-                  color: Colors.amber, size: 16),
+              const Icon(
+                Icons.warning_amber_rounded,
+                color: Colors.amber,
+                size: 16,
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -2327,8 +2564,10 @@ class _GifPanel extends StatelessWidget {
           Row(
             children: [
               const Expanded(
-                child: Text('Ignore GIF size limit',
-                    style: TextStyle(color: AppColors.textHi, fontSize: 14)),
+                child: Text(
+                  'Ignore GIF size limit',
+                  style: TextStyle(color: AppColors.textHi, fontSize: 14),
+                ),
               ),
               Switch(
                 value: state.forceOriginalGifWidth,
@@ -2340,8 +2579,10 @@ class _GifPanel extends StatelessWidget {
             ],
           ),
           if (state.forceOriginalGifWidthActive)
-            const Text('Full size may run slow',
-                style: TextStyle(color: AppColors.textLo, fontSize: 11)),
+            const Text(
+              'Full size may run slow',
+              style: TextStyle(color: AppColors.textLo, fontSize: 11),
+            ),
         ],
         const SizedBox(height: 14),
         SizedBox(
@@ -2356,7 +2597,8 @@ class _GifPanel extends StatelessWidget {
                   builder: (_) => AlertDialog(
                     title: const Text('Video too long'),
                     content: const Text(
-                        'GIF is limited to 40 seconds. Trim the video first for best results, or only the first 40 seconds will be used.'),
+                      'GIF is limited to 40 seconds. Trim the video first for best results, or only the first 40 seconds will be used.',
+                    ),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(context, false),
@@ -2422,12 +2664,15 @@ class _MakeActionButton extends StatelessWidget {
             children: [
               Icon(icon, color: Colors.white, size: 18),
               const SizedBox(width: 8),
-              Text(label,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.3)),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.3,
+                ),
+              ),
             ],
           ),
         ),
@@ -2477,11 +2722,7 @@ class _WebmPanel extends StatelessWidget {
 }
 
 class _OptimizePanel extends StatelessWidget {
-  const _OptimizePanel({
-    super.key,
-    required this.state,
-    required this.ctrl,
-  });
+  const _OptimizePanel({super.key, required this.state, required this.ctrl});
   final VideoStudioState state;
   final VideoStudioController ctrl;
 
@@ -2498,8 +2739,10 @@ class _OptimizePanel extends StatelessWidget {
               activeThumbColor: AppColors.accentB,
             ),
             const SizedBox(width: 8),
-            const Text('Optimise output GIF',
-                style: TextStyle(color: AppColors.textHi, fontSize: 14)),
+            const Text(
+              'Optimise output GIF',
+              style: TextStyle(color: AppColors.textHi, fontSize: 14),
+            ),
           ],
         ),
         if (state.doOptimize) ...[
@@ -2520,44 +2763,52 @@ class _OptimizePanel extends StatelessWidget {
             min: 0,
             max: 80,
             divisions: 16,
-            displayValue:
-                state.optimizeLossy == 0 ? 'Off' : '${state.optimizeLossy}',
+            displayValue: state.optimizeLossy == 0
+                ? 'Off'
+                : '${state.optimizeLossy}',
             onChanged: (v) => ctrl.setOptimizeLossy(v.round()),
           ),
           const SizedBox(height: 14),
-          const Text('Remove frames',
-              style: TextStyle(
-                  color: AppColors.textHi,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600)),
+          const Text(
+            'Remove frames',
+            style: TextStyle(
+              color: AppColors.textHi,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: const [
-              ('Keep all', 0),
-              ('1 / 4', 4),
-              ('1 / 3', 3),
-              ('1 / 2', 2),
-            ].map((p) {
-              final selected = p.$2 == state.optimizeFrameDrop;
-              return ChoiceChip(
-                label: Text(p.$1),
-                selected: selected,
-                onSelected: (_) => ctrl.setOptimizeFrameDrop(p.$2),
-                selectedColor: AppColors.accentA.withValues(alpha: 0.3),
-                backgroundColor: AppColors.glassTint,
-                labelStyle: TextStyle(
-                  color: selected ? AppColors.accentB : AppColors.textHi,
-                  fontSize: 13,
-                ),
-                side: BorderSide(
-                  color: selected ? AppColors.accentA : AppColors.glassStroke,
-                ),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              );
-            }).toList(),
+            children:
+                const [
+                  ('Keep all', 0),
+                  ('1 / 4', 4),
+                  ('1 / 3', 3),
+                  ('1 / 2', 2),
+                ].map((p) {
+                  final selected = p.$2 == state.optimizeFrameDrop;
+                  return ChoiceChip(
+                    label: Text(p.$1),
+                    selected: selected,
+                    onSelected: (_) => ctrl.setOptimizeFrameDrop(p.$2),
+                    selectedColor: AppColors.accentA.withValues(alpha: 0.3),
+                    backgroundColor: AppColors.glassTint,
+                    labelStyle: TextStyle(
+                      color: selected ? AppColors.accentB : AppColors.textHi,
+                      fontSize: 13,
+                    ),
+                    side: BorderSide(
+                      color: selected
+                          ? AppColors.accentA
+                          : AppColors.glassStroke,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  );
+                }).toList(),
           ),
           const SizedBox(height: 14),
           LocalPalettesToggle(
@@ -2573,11 +2824,7 @@ class _OptimizePanel extends StatelessWidget {
 // ── Properties panel (video: volume · smooth loop; gif: fps · loop count · boomerang · smooth loop) ──────
 
 class _PropertiesPanel extends StatelessWidget {
-  const _PropertiesPanel({
-    super.key,
-    required this.state,
-    required this.ctrl,
-  });
+  const _PropertiesPanel({super.key, required this.state, required this.ctrl});
   final VideoStudioState state;
   final VideoStudioController ctrl;
 
@@ -2593,43 +2840,44 @@ class _PropertiesPanel extends StatelessWidget {
   // Shared by both stages: switch + status text + conditional crossfade
   // slider. [noun] fills the "___ longer than 3s only." gate message.
   List<Widget> _smoothLoopControls(String noun) => [
-        Row(
-          children: [
-            Switch(
-              value: state.smoothLoop,
-              onChanged: state.canSmoothLoop ? ctrl.setSmoothLoop : null,
-              activeThumbColor: AppColors.accentB,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                  'Smooth Loop — crossfade last ${state.smoothLoopCrossfadeMs}ms into first ${state.smoothLoopCrossfadeMs}ms',
-                  style: const TextStyle(color: AppColors.textHi, fontSize: 14)),
-            ),
-          ],
+    Row(
+      children: [
+        Switch(
+          value: state.smoothLoop,
+          onChanged: state.canSmoothLoop ? ctrl.setSmoothLoop : null,
+          activeThumbColor: AppColors.accentB,
         ),
-        const SizedBox(height: 6),
-        Text(
-          !state.canSmoothLoop
-              ? '$noun longer than 3s only.'
-              : (state.smoothLoop && !state.smoothLoopValid
-                  ? 'Speed/trim leave too little to crossfade — turn Smooth Loop off.'
-                  : 'Loops seamlessly by dissolving the tail into the head.'),
-          style: const TextStyle(color: AppColors.textLo, fontSize: 11),
-        ),
-        if (state.smoothLoop) ...[
-          const SizedBox(height: 8),
-          OptionSlider(
-            label: 'Crossfade duration',
-            value: state.smoothLoopCrossfadeMs.toDouble(),
-            min: 500,
-            max: 1000,
-            divisions: 5,
-            displayValue: '${state.smoothLoopCrossfadeMs}ms',
-            onChanged: (v) => ctrl.setSmoothLoopCrossfadeMs(v.round()),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            'Smooth Loop — crossfade last ${state.smoothLoopCrossfadeMs}ms into first ${state.smoothLoopCrossfadeMs}ms',
+            style: const TextStyle(color: AppColors.textHi, fontSize: 14),
           ),
-        ],
-      ];
+        ),
+      ],
+    ),
+    const SizedBox(height: 6),
+    Text(
+      !state.canSmoothLoop
+          ? '$noun longer than 3s only.'
+          : (state.smoothLoop && !state.smoothLoopValid
+                ? 'Speed/trim leave too little to crossfade — turn Smooth Loop off.'
+                : 'Loops seamlessly by dissolving the tail into the head.'),
+      style: const TextStyle(color: AppColors.textLo, fontSize: 11),
+    ),
+    if (state.smoothLoop) ...[
+      const SizedBox(height: 8),
+      OptionSlider(
+        label: 'Crossfade duration',
+        value: state.smoothLoopCrossfadeMs.toDouble(),
+        min: 500,
+        max: 1000,
+        divisions: 5,
+        displayValue: '${state.smoothLoopCrossfadeMs}ms',
+        onChanged: (v) => ctrl.setSmoothLoopCrossfadeMs(v.round()),
+      ),
+    ],
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -2646,9 +2894,7 @@ class _PropertiesPanel extends StatelessWidget {
             max: 200,
             divisions: 40,
             displayValue: state.hasAudio ? '$pct%' : 'No audio',
-            onChanged: state.hasAudio
-                ? (v) => ctrl.setVolume(v / 100)
-                : (_) {},
+            onChanged: state.hasAudio ? (v) => ctrl.setVolume(v / 100) : (_) {},
           ),
           const SizedBox(height: 4),
           Text(
@@ -2682,11 +2928,14 @@ class _PropertiesPanel extends StatelessWidget {
           style: const TextStyle(color: AppColors.textLo, fontSize: 11),
         ),
         const SizedBox(height: 14),
-        const Text('Loops',
-            style: TextStyle(
-                color: AppColors.textHi,
-                fontSize: 13,
-                fontWeight: FontWeight.w600)),
+        const Text(
+          'Loops',
+          style: TextStyle(
+            color: AppColors.textHi,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 8),
         Wrap(
           spacing: 6,
@@ -2717,8 +2966,10 @@ class _PropertiesPanel extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             const Expanded(
-              child: Text('Boomerang — reverse for a seamless loop',
-                  style: TextStyle(color: AppColors.textHi, fontSize: 14)),
+              child: Text(
+                'Boomerang — reverse for a seamless loop',
+                style: TextStyle(color: AppColors.textHi, fontSize: 14),
+              ),
             ),
           ],
         ),
@@ -2758,7 +3009,8 @@ class _ActionBar extends StatelessWidget {
                   builder: (_) => AlertDialog(
                     title: const Text('Discard GIF edits?'),
                     content: const Text(
-                        'Going back will discard all changes made to the GIF.'),
+                      'Going back will discard all changes made to the GIF.',
+                    ),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(context, false),
@@ -2766,8 +3018,10 @@ class _ActionBar extends StatelessWidget {
                       ),
                       TextButton(
                         onPressed: () => Navigator.pop(context, true),
-                        child: const Text('Discard',
-                            style: TextStyle(color: Colors.redAccent)),
+                        child: const Text(
+                          'Discard',
+                          style: TextStyle(color: Colors.redAccent),
+                        ),
                       ),
                     ],
                   ),
@@ -2839,14 +3093,18 @@ class _ActionBar extends StatelessWidget {
           tooltip: 'Export Video',
           onTap: () async {
             final format = await Navigator.of(context).push<ExportVideoFormat>(
-              _formatPageRoute(ExportFormatScreen(initial: ctrl.lastExportFormat)),
+              _formatPageRoute(
+                ExportFormatScreen(initial: ctrl.lastExportFormat),
+              ),
             );
             if (format == null) return;
             await ctrl.setLastExportFormat(format);
             final ok = await ctrl.exportVideo(format: format);
-            toast(ok
-                ? '${format == ExportVideoFormat.webm ? 'WebM' : 'Video'} saved'
-                : 'Export cancelled');
+            toast(
+              ok
+                  ? '${format == ExportVideoFormat.webm ? 'WebM' : 'Video'} saved'
+                  : 'Export cancelled',
+            );
           },
         ),
       ],
@@ -2857,8 +3115,12 @@ class _ActionBar extends StatelessWidget {
 // Primary action (gradient fill). Pass [label] to show text next to the
 // icon; omit for an icon-only button. [tooltip] names the action either way.
 class _PrimaryButton extends StatelessWidget {
-  const _PrimaryButton(
-      {required this.icon, this.label, this.tooltip, required this.onTap});
+  const _PrimaryButton({
+    required this.icon,
+    this.label,
+    this.tooltip,
+    required this.onTap,
+  });
   final IconData icon;
   final String? label;
   final String? tooltip;
@@ -2875,7 +3137,9 @@ class _PrimaryButton extends StatelessWidget {
         ),
         child: Padding(
           padding: EdgeInsets.symmetric(
-              vertical: 15, horizontal: label == null ? 18 : 16),
+            vertical: 15,
+            horizontal: label == null ? 18 : 16,
+          ),
           child: label == null
               ? Icon(icon, color: Colors.white, size: 22)
               : Row(
@@ -2883,11 +3147,14 @@ class _PrimaryButton extends StatelessWidget {
                   children: [
                     Icon(icon, color: Colors.white, size: 18),
                     const SizedBox(width: 8),
-                    Text(label!,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600)),
+                    Text(
+                      label!,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ],
                 ),
         ),
@@ -2929,11 +3196,14 @@ class _SecondaryButton extends StatelessWidget {
             children: [
               Icon(icon, color: AppColors.textHi, size: 18),
               const SizedBox(width: 8),
-              Text(label,
-                  style: const TextStyle(
-                      color: AppColors.textHi,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600)),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: AppColors.textHi,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ],
           ),
         ),
@@ -2956,8 +3226,9 @@ class _IconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color =
-        enabled ? AppColors.textHi : AppColors.textLo.withValues(alpha: 0.35);
+    final color = enabled
+        ? AppColors.textHi
+        : AppColors.textLo.withValues(alpha: 0.35);
     Widget btn = GestureDetector(
       onTap: enabled ? onTap : null,
       child: Container(
@@ -2987,13 +3258,17 @@ class _ErrorCard extends StatelessWidget {
       opacity: 0.08,
       child: Row(
         children: [
-          const Icon(Icons.error_outline_rounded,
-              color: Colors.redAccent, size: 18),
+          const Icon(
+            Icons.error_outline_rounded,
+            color: Colors.redAccent,
+            size: 18,
+          ),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(message,
-                style: const TextStyle(
-                    color: Colors.redAccent, fontSize: 12)),
+            child: Text(
+              message,
+              style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+            ),
           ),
         ],
       ),
@@ -3054,8 +3329,10 @@ class _ToastCardState extends State<_ToastCard>
     vsync: this,
     duration: const Duration(milliseconds: 240),
   );
-  late final Animation<double> _fade =
-      CurvedAnimation(parent: _c, curve: Curves.easeOut);
+  late final Animation<double> _fade = CurvedAnimation(
+    parent: _c,
+    curve: Curves.easeOut,
+  );
   late final Animation<Offset> _slide = Tween<Offset>(
     begin: const Offset(0, -0.45),
     end: Offset.zero,
@@ -3097,20 +3374,28 @@ class _ToastCardState extends State<_ToastCard>
               onTap: _dismiss,
               child: GlassContainer(
                 borderRadius: 14,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.info_outline_rounded,
-                        color: AppColors.accentB, size: 18),
+                    const Icon(
+                      Icons.info_outline_rounded,
+                      color: AppColors.accentB,
+                      size: 18,
+                    ),
                     const SizedBox(width: 10),
                     Flexible(
-                      child: Text(widget.message,
-                          style: const TextStyle(
-                              color: AppColors.textHi,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600)),
+                      child: Text(
+                        widget.message,
+                        style: const TextStyle(
+                          color: AppColors.textHi,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -3162,13 +3447,17 @@ class _ProcessingOverlay extends StatelessWidget {
                         ? '${(progress! * 100).round()}%  $label'
                         : label,
                     style: const TextStyle(
-                        color: AppColors.textHi, fontSize: 14),
+                      color: AppColors.textHi,
+                      fontSize: 14,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   TextButton(
                     onPressed: onCancel,
-                    child: const Text('Cancel',
-                        style: TextStyle(color: AppColors.accentC)),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(color: AppColors.accentC),
+                    ),
                   ),
                 ],
               ),

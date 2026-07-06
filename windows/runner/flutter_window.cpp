@@ -96,6 +96,7 @@ bool FlutterWindow::OnCreate() {
 
   audio_loopback_ = std::make_unique<AudioLoopback>();
   recording_indicator_ = std::make_unique<RecordingIndicator>();
+  monitor_number_overlay_ = std::make_unique<MonitorNumberOverlay>();
   native_window_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
           flutter_controller_->engine()->messenger(), "gifolomora/native_window",
@@ -208,6 +209,34 @@ void FlutterWindow::HandleNativeWindowCall(
       result->Error("hide_indicator_failed", e.what());
     } catch (...) {
       result->Error("hide_indicator_failed", "unknown exception");
+    }
+    return;
+  }
+
+  if (method == "showMonitorNumbers") {
+    try {
+      std::vector<MonitorNumberOverlay::Spot> spots;
+      if (args) {
+        auto it = args->find(flutter::EncodableValue("spots"));
+        if (it != args->end()) {
+          for (const auto& item :
+               std::get<flutter::EncodableList>(it->second)) {
+            const auto& spot_map = std::get<flutter::EncodableMap>(item);
+            auto get = [&](const char* key) -> int {
+              auto found = spot_map.find(flutter::EncodableValue(key));
+              return found != spot_map.end() ? std::get<int>(found->second)
+                                              : 0;
+            };
+            spots.push_back({get("x"), get("y"), get("number")});
+          }
+        }
+      }
+      monitor_number_overlay_->Show(spots);
+      result->Success();
+    } catch (const std::exception& e) {
+      result->Error("show_monitor_numbers_failed", e.what());
+    } catch (...) {
+      result->Error("show_monitor_numbers_failed", "unknown exception");
     }
     return;
   }

@@ -393,6 +393,42 @@ void main() {
     });
   });
 
+  group('VideoStudioState — hasComparableEdit', () {
+    test('video stage: false at defaults', () {
+      const s = VideoStudioState(stage: EditStage.video);
+      expect(s.hasComparableEdit, isFalse);
+    });
+
+    test('video stage: true when speed changed', () {
+      const s = VideoStudioState(stage: EditStage.video, speedFactor: 2.0);
+      expect(s.hasComparableEdit, isTrue);
+    });
+
+    test('gif stage: false at defaults', () {
+      const s = VideoStudioState(stage: EditStage.gif);
+      expect(s.hasComparableEdit, isFalse);
+    });
+
+    test('gif stage: true when doOptimize set', () {
+      const s = VideoStudioState(stage: EditStage.gif, doOptimize: true);
+      expect(s.hasComparableEdit, isTrue);
+    });
+
+    // The whole reason this getter exists separately from hasPendingApply:
+    // a bake resets the live edit fields (so hasPendingApply goes false) but
+    // sourceFile is still the baked/changed result — still comparable.
+    test('true when editsApplied even with all edit fields back at default', () {
+      const s = VideoStudioState(stage: EditStage.video, editsApplied: true);
+      expect(s.hasPendingApply, isFalse);
+      expect(s.hasComparableEdit, isTrue);
+    });
+
+    test('gif stage: true when editsApplied even at default fields', () {
+      const s = VideoStudioState(stage: EditStage.gif, editsApplied: true);
+      expect(s.hasComparableEdit, isTrue);
+    });
+  });
+
   group('VideoStudioState — isToolEdited', () {
     test('crop: true when not full', () {
       final s = VideoStudioState(
