@@ -287,7 +287,8 @@ Video Studio handles both video **and** GIF source files in one screen:
 - `VideoStudioState.volume` — audio gain 0–2.0; baked into encode's audio filter; ignored for GIF.
 
 Routes: `/video-studio`, `/images-to-gif`, `/resize`, `/crop`, `/text-overlay`, `/optimize`,
-`/effects`, plus `/settings` and `/about`. All non-home routes use a fade + 4%-slide transition.
+`/effects`, `/screen-record`, plus `/settings` and `/about`. All non-home routes use a fade +
+4%-slide transition. The recording indicator is **not** a route — see Screen Record below.
 
 Every tool screen shares the 4-step skeleton:
 
@@ -301,6 +302,66 @@ Every tool screen shares the 4-step skeleton:
   (video preview uses `media_kit` `Player`/`Video`)
 - **Export:** `ExportBottomSheet` → full-quality job → `ProgressOverlay` (glass, % + cancel) →
   `file_picker.saveFile()` → user picks location → success `AppToast` + recents entry
+
+---
+
+## Screen Record (Windows only)
+
+`lib/features/screen_record/` + `lib/core/services/record/`. Records the full virtual desktop
+(one selected monitor) into a temp video, then hands off to Video Studio. See `PLAN.md` for the
+full design; summary of the moving parts:
+
+- **Capture:** `FfmpegCommand.screenCapture` — bundled `ffmpeg.exe`'s `gdigrab` device,
+  `libx264 -preset ultrafast`, physical-px offset/size (even-clamped). Mic (optional) joins the
+  same process via `dshow`. `ScreenRecorderService` owns the `Process` directly (not
+  `FfmpegBackend.run()` — recording is open-ended/stdin-controlled, not job-shaped): segment-per-
+  pause/resume (ffmpeg has no pause), graceful stop via `q`+stdin with a kill fallback, MKV
+  segments (crash-safe, no moov atom to lose), concat-demuxer stream-copy to remux/join, 10-minute
+  cap enforced both via `-t` per segment and a 500ms Dart tick.
+- **System audio:** no WASAPI input exists for ffmpeg on Windows, so `windows/runner/
+  audio_loopback.cpp` captures the default render device's loopback stream to WAV per segment
+  (aligned with each video segment), muxed in at finalize (`FfmpegCommand.muxAudio`, `amix` when
+  mic is also on). Exposed over the `gifolomora/native_window` MethodChannel
+  (`NativeWindowChannel`), which also carries the recording-indicator show/update/hide calls and
+  `getDefaultDeviceName` (audio-toggle subtitle labels).
+- **Monitor enumeration:** `screen_retriever` (pinned to `^0.1.9` — `window_manager 0.3.9` caps it
+  there). Its bundled Windows plugin hardcodes every `Display.id` to `0`, so `RecordTarget`
+  identifies monitors by the raw Win32 device name (`\\.\DISPLAY1`, from `Display.name`) instead.
+  `RecordTarget.fromDisplay` converts screen_retriever's logical px to gdigrab's physical px
+  (`× scaleFactor`) using `visiblePosition`/`size` as the monitor-position/size proxy (the plugin
+  only exposes the work-area position, not the raw monitor rect — a taskbar on that monitor's
+  top/left edge introduces a small offset error).
+- **Settings:** `RecordSettingsService` (`shared_preferences`) — audio toggles, the three
+  `hotkey_manager` `HotKey`s (persisted via its own `toJson`/`fromJson`), last-used monitor name.
+- **Hotkeys:** `HotkeyService` wraps `hotkey_manager`'s global instance. `RecordController` tracks
+  a set of active "scopes" (`home`, `record`) plus "currently recording"; hotkeys are registered
+  system-wide only while at least one of those is true — never app-wide from other tools.
+- **Recording indicator:** native-drawn, not Flutter. `windows/runner/recording_indicator.cpp`
+  creates a `WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW` popup window
+  sized to the **entire recorded monitor** (not a small pill) — no background fill (per-pixel
+  alpha via `UpdateLayeredWindow` + a manually built premultiplied-ARGB DIB section that a
+  `Gdiplus::Bitmap` draws directly into; `pptDst`/`psize` passed explicitly on every call —
+  relying on `nullptr`/"keep current" left the layered surface never actually established, a
+  window that reported successful creation yet stayed fully blank), and `WS_EX_TRANSPARENT`
+  makes every mouse event pass straight through it to whatever's underneath. It draws a pulsing
+  red/amber border traced a few px inside the monitor's edges (stays inbound — flush with the
+  outer edge risks 1px clipping by the monitor/DWM boundary) plus a status dot + elapsed/audio
+  text in the top-left corner (own `SetTimer`-driven ~30fps loop; frozen + amber while paused;
+  text outline-drawn — four 1px-offset dark copies under white fill — for legibility with no
+  background). Positioned/sized in **physical** px (`RecordTarget.physicalX/Y/W/H` directly — no
+  DPI conversion needed since Win32 window coordinates are already physical for a DPI-aware
+  process). It is also excluded from capture (`SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`)
+  so it never appears in the recording. Because it's click-through and buttonless, the recording
+  is controlled by the global hotkeys **and** the Screen Record screen's Pause/Stop buttons — the
+  main app window is never resized/morphed and stays exactly as the user left it throughout.
+  `RecordController.stopRecording()` hides the indicator in a `finally`, even if finalize
+  (concat/mux) throws.
+- **Handoff:** `stopRecording()` calls `appRouter.go('/video-studio', extra: file)` directly
+  (no `BuildContext` needed — `appRouter` is the app's single `GoRouter` instance); Video Studio
+  already accepted an optional `initialFile` before this feature existed, so no studio-side change
+  was needed.
+- **Gating:** `ToolEntry.windowsOnly` hides the home-screen card and the router redirects both
+  routes to `/` off-Windows.
 
 ---
 
@@ -334,6 +395,9 @@ Separate `package.json`; the `web/` directory is untracked (`??` in git status).
 - `window_manager` for the custom glass title bar (native bar hidden in `bootstrap.dart`;
   `GlassAppBar` adds `DragToMoveArea` + min/max/close controls)
 - `media_kit` for video preview (chosen over `video_player` — more Windows-stable)
+- `gifolomora/native_window` MethodChannel (`windows/runner/flutter_window.cpp` +
+  `audio_loopback.cpp/.h`): overlay capture-exclusion, WASAPI loopback capture, default
+  input/output device names — see Screen Record above
 
 ---
 
@@ -347,7 +411,9 @@ Separate `package.json`; the `web/` directory is untracked (`??` in git status).
 | `file_picker` | 8.1.2 | pick + saveFile dialog |
 | `permission_handler` | 11.3.1 | Android scoped storage |
 | `media_kit` (+ `_video`, `_libs_video`) | 1.1.10 / 1.2.4 / 1.0.4 | video preview |
-| `window_manager` | 0.3.9 | Windows custom title bar |
+| `window_manager` | 0.3.9 | Windows custom title bar + Screen Record overlay morph |
+| `screen_retriever` | 0.1.9 (pinned by `window_manager`) | Screen Record monitor enumeration |
+| `hotkey_manager` | 0.2.3 | Screen Record global hotkeys |
 | `shared_preferences` | 2.3.0 | settings + recents persist |
 | `path_provider` + `path` | 2.1.4 / — | temp dirs, path joins |
 | `image` | 4.0.0 | GifOptimizer — raw-frame `GifDecoder`/`decodeFrame` (not `decodeGif`) + OctreeQuantizer |

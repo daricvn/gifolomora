@@ -1,5 +1,8 @@
 import type { Component } from 'solid-js';
-import { For, onCleanup, onMount } from 'solid-js';
+import { createSignal, For, lazy, onCleanup, onMount, Show, Suspense } from 'solid-js';
+
+// code-split: slideshow chunk (and its image URLs) load only when the section nears the viewport
+const Showcase = lazy(() => import('./Showcase'));
 
 // ponytail: fill with real release URL when available
 const DOWNLOAD_WIN = 'https://1drv.ms/u/c/15f9d9574a5f179d/IQB0HJhNzHUoSJ1p-Q8flNABAd6C3IPd_ZGdiROUsg75DyM?e=67yIPh';
@@ -23,10 +26,29 @@ const HEADLINE_B = ['wrapped', 'in', 'liquid', 'glass.'];
 const App: Component = () => {
   let heroEl: HTMLElement | undefined;
   let bannerWrap: HTMLDivElement | undefined;
+  let showcaseEl: HTMLElement | undefined;
+
+  // gate for the lazy slideshow chunk
+  const [showcaseNear, setShowcaseNear] = createSignal(false);
 
   onMount(() => {
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const coarse = window.matchMedia('(pointer: coarse)').matches;
+
+    // fetch the slideshow chunk when its section is within ~600px of the viewport
+    if (showcaseEl) {
+      const near = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((e) => e.isIntersecting)) {
+            setShowcaseNear(true);
+            near.disconnect();
+          }
+        },
+        { rootMargin: '600px' },
+      );
+      near.observe(showcaseEl);
+      onCleanup(() => near.disconnect());
+    }
 
     // reveal-on-scroll: add .in when element enters viewport
     const io = new IntersectionObserver(
@@ -107,6 +129,7 @@ const App: Component = () => {
         </div>
         <div class="nav-right">
           <a class="navlink" href="#features">Features</a>
+          <a class="navlink" href="#showcase">Showcase</a>
           <a class="btn btn-primary btn-sm shine" href="#download">⬇ Download</a>
         </div>
       </nav>
@@ -185,6 +208,21 @@ const App: Component = () => {
         </div>
       </section>
 
+      <section id="showcase" class="wrap section" ref={showcaseEl}>
+        <h2 class="reveal">See it in action</h2>
+        <p class="lead reveal">
+          Real tools, real previews — captured straight from the app.
+        </p>
+        {/* slot reserves space so the lazy chunk doesn't shift layout */}
+        <div class="showcase-slot">
+          <Show when={showcaseNear()}>
+            <Suspense>
+              <Showcase />
+            </Suspense>
+          </Show>
+        </div>
+      </section>
+
       <section id="download" class="wrap section">
         <div class="download-ring reveal">
           <div class="download glass">
@@ -195,7 +233,7 @@ const App: Component = () => {
               <a class="btn btn-primary shine" href={DOWNLOAD_WIN}>🪟 Download for Windows</a>
               <span class="btn btn-ghost disabled">🤖 Android — coming soon</span>
             </div>
-            <p class="meta">Windows (MSIX) · Free · Android in the works</p>
+            <p class="meta">Windows (7z) · Free · Android in the works</p>
           </div>
         </div>
       </section>

@@ -6,6 +6,8 @@ import 'files/export_service.dart';
 import 'files/temp_file_service.dart';
 import 'permissions/permission_service.dart';
 import 'recents/recents_service.dart';
+import 'record/native_window_channel.dart';
+import 'record/record_settings_service.dart';
 
 // ── FFmpeg ─────────────────────────────────────────────────────────────────────
 
@@ -39,6 +41,18 @@ final exportServiceProvider = Provider<ExportService>(
 final permissionServiceProvider = Provider<PermissionService>(
   (_) => PermissionService(),
   name: 'permissionServiceProvider',
+);
+
+// ── Screen Record ──────────────────────────────────────────────────────────────
+
+final recordSettingsServiceProvider = Provider<RecordSettingsService>(
+  (_) => RecordSettingsService(),
+  name: 'recordSettingsServiceProvider',
+);
+
+final nativeWindowChannelProvider = Provider<NativeWindowChannel>(
+  (_) => NativeWindowChannel(),
+  name: 'nativeWindowChannelProvider',
 );
 
 // ── Recents ────────────────────────────────────────────────────────────────────

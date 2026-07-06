@@ -1,10 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gifolomora/features/home/data/tool_catalog.dart';
 
 void main() {
   group('toolCatalog', () {
-    test('total of 7 tools', () {
-      expect(toolCatalog.length, equals(7));
+    test('total of 8 tools', () {
+      expect(toolCatalog.length, equals(8));
     });
 
     test('all tool routes are unique', () {
@@ -41,6 +43,14 @@ void main() {
       final routes = refineTools.map((t) => t.route).toSet();
       expect(routes,
           containsAll(['/resize', '/crop', '/text-overlay', '/optimize', '/effects']));
+    });
+
+    test('screen_record is windowsOnly and hidden off-Windows', () {
+      final entry = toolCatalog.firstWhere((t) => t.id == 'screen_record');
+      expect(entry.windowsOnly, isTrue);
+      expect(entry.category, ToolCategory.create);
+      final inCreate = createTools.any((t) => t.id == 'screen_record');
+      expect(inCreate, Platform.isWindows);
     });
   });
 }

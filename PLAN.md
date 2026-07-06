@@ -1,200 +1,377 @@
-# Smooth-Loop GIF Feature — Plan
+# PLAN — Screen Record (Windows)
 
-## Ask
-Video Studio, GIF stage, properties dock. New toggle: "Smooth Loop". Crossfade last 1s
-into first 1s, then trim first 1s → seamless loop point. Gate: only offered when GIF
-> 5s.
+> Record the entire screen (up to 10 minutes) into a temp video, with optional system/mic
+> audio, global hotkeys, monitor selection, and an on-screen pulsing "Recording" indicator.
+> **Windows only.** On stop, the recording opens in Video Studio, pre-selected.
 
-## Where it lives (confirmed from code)
+---
 
-- Dock tool = `StudioTool.properties`. Panel = `_PropertiesPanel` in
-  [video_studio_screen.dart:2099](lib/features/video_studio/view/video_studio_screen.dart#L2099),
-  right next to existing "Boomerang" switch
-  ([video_studio_screen.dart:2192-2205](lib/features/video_studio/view/video_studio_screen.dart#L2192-L2205)).
-- State field pattern to mirror: `boomerang` — threaded through
-  `VideoStudioState` ([video_studio_controller.dart:65-119](lib/features/video_studio/controller/video_studio_controller.dart#L65-L119)),
-  `copyWith`, `needsGifEdit`, `isToolEdited`, `setBoomerang()`.
-- FFmpeg build: `FfmpegCommand.gifEdit()` ([ffmpeg_command.dart:411-472](lib/core/services/ffmpeg/ffmpeg_command.dart#L411-L472))
-  — single filter_complex, palette pass shares frames via `split`. Boomerang already
-  branches the graph here (`split→reverse→concat`) — smooth-loop follows same shape.
-- Service: `FfmpegService.editGif()` ([ffmpeg_service.dart:473-530](lib/core/services/ffmpeg/ffmpeg_service.dart#L473-L530))
-  passes params through, estimates `effectiveTotalMs` for progress.
+## 1. Summary
 
-## Effect, precisely
+Add a **Screen Record** tool. The user picks a monitor (picker when more than one monitor;
+read-only card when there is only one), toggles system-audio / mic capture (persisted across
+sessions), and presses Record (or a global hotkey). ffmpeg's `gdigrab` device — already
+bundled on Windows — captures the full monitor; mic audio joins the same ffmpeg process via
+`dshow`; system audio is captured by a small WASAPI-loopback module in the native runner and
+muxed in at finalize. While recording, the app window morphs into a tiny always-on-top
+overlay showing a pulsing red dot + "Recording" text and elapsed time. Stop (button or
+hotkey) finalizes the file and **switches to Video Studio with the recorded video selected**,
+where the existing trim/crop/text/GIF-bake/export flow takes over.
 
-Crossfade(tail 1s, head 1s) → replaces the tail, then drop original head 1s.
-Net: output = `[1s, D)` with its own last 1s overwritten by the dissolve. Output
-duration = `D - 1s`. Last frame of output ≈ head's continuation point → wraps into
-frame 0 of next loop with no jump cut. Standard "xfade seamless loop" recipe, not
-novel — just picking crossfade duration = 1s.
+**Key reuse:** bundled `ffmpeg.exe` + `FfmpegProcessBackend.resolveBin`, `TempFileService`
+job dirs, `FfmpegCommand` for arg building, `window_manager` (already a dependency) for the
+overlay morph, Video Studio as the post-record editor (no new preview/export UI needed).
 
-## Filter graph (drop-in replacement for `gifEdit`'s linear `pre`→`split[a][b]` step)
+---
 
-```
-[0:v]<pre-chain: crop,fps,scale,setpts-speed,drawtext>,split=3[p0][p1][p2];
-[p0]trim=0:1,setpts=PTS-STARTPTS[head];
-[p1]trim=<D-1>:<D>,setpts=PTS-STARTPTS[tail];
-[p2]trim=1:<D>,setpts=PTS-STARTPTS[mid];
-[tail][head]xfade=transition=fade:duration=1:offset=0[blend];
-[mid][blend]concat=n=2:v=1[a0];
-[a0]split[a][b];
-[a]palettegen=stats_mode=diff[p];
-[b][p]paletteuse=dither=bayer:bayer_scale=5
-```
+## 2. Scope & locked decisions
 
-`D` = post-speed, post-trim duration in seconds — the duration the pre-chain actually
-emits. Boomerang's branch and this branch are mutually exclusive (can't both replace
-the tail of the graph) → **UI + service must forbid combining smoothLoop + boomerang**.
+| Decision | Choice | Rationale |
+|---|---|---|
+| Capture engine | ffmpeg `gdigrab` (bundled binary) | Zero new native code for video; works on every Windows version; cursor captured via `draw_mouse=1`. |
+| Recording format | H.264 `.mkv` segments → remux to `.mp4` on stop | MKV is crash-safe (no moov atom to lose); remux is a stream-copy, near-instant. |
+| Pause | Segment-per-resume, concat on stop | ffmpeg has no pause; stop segment + start new one is the standard approach. Concat demuxer with `-c copy` joins losslessly. |
+| Max duration | 600 s of *recorded* time (pauses excluded), enforced in service + `-t` per segment as belt-and-braces | Requirement. |
+| Frame rate | 30 fps fixed (v1) | Good default for GIF-destined capture; option chip can come later. |
+| Mic audio | Optional toggle; captured via `dshow` input in the **same** ffmpeg process | In-process mux → no sync work. Default **off**. |
+| System audio | Optional toggle; native WASAPI-loopback module (C++ in runner) writes WAV per segment, muxed at finalize | ffmpeg has no native WASAPI/loopback input on Windows; the dshow route needs a third-party filter install (non-starter for MSIX). Default **off**. |
+| Audio toggles persistence | `shared_preferences` via `RecordSettingsService`, saved across sessions | Requirement. |
+| Storage | `TempFileService.createJobDir()` — same temp root as every other job | Requirement ("temporary folder") + existing sweep semantics. |
+| After stop | **Switch to Video Studio with the recorded video selected** | Requirement. Route gains `extra: File`; studio controller runs its normal "file picked" path on arrival. |
+| Monitor picker | **> 1 monitor** → selectable list; exactly 1 → same card rendered read-only | Confirmed. |
+| Hotkey scope | Global hotkeys registered **only while on the home screen or the Screen Record screen** (and during recording) | Confirmed ("main screen or recording screen only"). Never held app-wide from other tools. |
+| Encoder | `libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p` (+ `-c:a aac` when mic on) | Real-time-safe on any CPU at 1080p/1440p 30 fps. HW encoders are a later optimization — capture must never drop frames because an HW encoder is missing. |
+| Platform gating | Tool card hidden off-Windows; route guarded | Requirement. |
 
-**CFR requirement (validated concern):** `xfade` requires constant-frame-rate input;
-GIFs are VFR (per-frame delays). Today the pre-chain only gets `fps=` when the user
-changed fps (`fps: fpsChanged ? s.fps : null` at the call site). With VFR input the
-`trim=` boundaries and `xfade` offset drift. **Rule: when `smoothLoop` is true, `fps`
-must always be present in the pre-chain.** Controller passes
-`fpsChanged ? s.fps : (srcFps?.round() ?? s.fps)`; `gifEdit` asserts `fps != null`
-when `smoothLoop`.
+---
 
-**Number formatting:** emit `D`, `D-1` via `toStringAsFixed(3)` (same precision as
-existing `-ss`/`-t` emission). Guard in `gifEdit`: require `D > 2 * _crossfadeSec + 0.1`
-(mid ≥ 100ms) — throw `ArgumentError` otherwise; mirrors the state-level
-`smoothLoopValid` floor so a bad graph can never be emitted even if UI gating slips.
+## 3. UX flows
 
-## The one hard part: computing `D` correctly
+### 3.1 Recording screen (`/screen-record`)
 
-`gifEdit()` receives `startMs`/`durationMs` as the **trim window on the source**
-(applied as `-ss`/`-t` input options, before decode) and `speedFactor` (applied inside
-the pre-chain via `setpts`). So:
+Follows the house 4-step skeleton, adapted (no file pick — the "input" is a monitor):
 
 ```
-D = (durationMs ?? <caller must supply full source duration>) / 1000 / speedFactor
+[1 Monitor] → [2 Options] → [3 Record] → (overlay) → [4 Video Studio, file selected]
 ```
 
-Problem: when the user hasn't trimmed, `durationMs` is today left `null` (ffmpeg just
-reads to EOF) — `gifEdit` has no idea how long the source actually is. **Fix:** when
-`smoothLoop` is true, the controller must always pass an explicit `durationMs` (default
-to `sourceDurationMs` when no trim is set), so `gifEdit` can compute `D` from a value
-it already receives — no new parameter needed.
+- **Monitor card** — one glass card per display: monitor name/index, resolution, primary
+  badge, and a proportional mini-rectangle sketch of the virtual desktop layout with the
+  selected monitor highlighted. Single monitor: same card, selection disabled (read-only).
+- **Audio card** — two glass switches: **System audio** and **Microphone**. Values load
+  from and save to `RecordSettingsService` immediately on toggle (persist across sessions).
+  Mic row shows the default input device name; system-audio row shows the default output
+  device name. If no mic device exists, the mic switch is disabled with a hint.
+- **Hotkey strip** — read-only chips showing the current start/pause/stop hotkeys with an
+  "edit" affordance opening the hotkey recorder fields.
+- **Record button** — big primary `GlassButton`. Disabled states: already recording,
+  monitor enumeration failed.
+- **Duration note** — "Max 10:00" caption.
 
-Validated: `_trimParams` (video_studio_controller.dart:793-799) already returns non-null
-`durationMs` whenever `hasTrim` (even start-only trims, since `trimDurationMs` derives
-from `effectiveTrimEndMs`). So the *only* gap is the no-trim case → at the `editGif`
-call, replace `durationMs: t.durationMs` with
-`durationMs: s.smoothLoop ? (t.durationMs ?? s.sourceDurationMs) : t.durationMs`.
-At GIF stage `sourceDurationMs` **is** the baked GIF's own duration (`sourceInfo` is
-re-probed from the baked file at stage switch) — exactly the input `gifEdit` reads.
+### 3.2 While recording — the overlay
 
-Second-order risk: speed changes shrink `D` *after* the >5s gate is checked. A 5.5s
-GIF at 2× speed → 2.75s post-speed duration, leaving <2s for `mid` after removing 2×1s
-— cramped or invalid (`tailStart <= headEnd`). **Gate must be re-evaluated live** against
-the *post-speed, post-trim* effective duration (`state.effectiveOutputMs / speedFactor`
-equivalent), not just the raw source length, and the switch should disable/turn off
-if the user later drags speed/trim into the unsafe zone.
+On start, the **main window itself** morphs into the indicator (no second window — Flutter
+desktop is single-window; `desktop_multi_window` is avoidable complexity):
 
-Minimum safe margin: require post-speed duration > `2 × crossfadeSec + 100ms` (i.e.
->2.1s) so `mid` always has ≥100ms of frames — exact `>2s` leaves mid ~0 frames and
-`concat` fails on an empty stream. Hard validation floor = 2100ms; `>5s` on raw
-source stays the softer "don't even offer it for short clips" UX gate.
+1. Save current window bounds.
+2. Resize to a small pill (~200×56), frameless (title bar already hidden app-wide),
+   `setAlwaysOnTop(true)`, positioned top-right of the **selected** monitor with a margin.
+3. Set `WDA_EXCLUDEFROMCAPTURE` on the window (MethodChannel into the existing Win32
+   runner) so the indicator does **not** appear in the recording (Win10 2004+; older
+   builds: it simply appears — acceptable degradation).
+4. Overlay contents: red dot + "Recording" label, both driven by one
+   `AnimationController(repeat: reverse)` fading opacity 0.35 → 1.0 over ~1.2 s
+   (the required slow fade-in/fade-out pulse), plus elapsed `mm:ss / 10:00`, small
+   mic/speaker icons when the respective audio capture is on, and pause/resume + stop
+   icon buttons.
+5. Paused state: pulse stops, dot turns amber, label "Paused".
 
-## Plan of changes (no code written yet)
+On stop: restore saved bounds, clear always-on-top + capture-exclusion, then
+`context.go('/video-studio', extra: recordedFile)` — Video Studio opens with the recording
+already selected as its input, same as if the user had dropped the file in.
 
-1. **`FfmpegCommand.gifEdit()`** — add `bool smoothLoop = false`. When true, replace
-   the current `final chain = ...; final body = boomerang ? ... : '$chain,split[a][b]'`
-   branch with the trim/xfade/concat graph above, using `durationMs` (required
-   non-null/>0 in this mode — throw/assert otherwise, caller's job to guarantee it)
-   and `speedFactor` to derive `D = durationMs / 1000 / speedFactor`. Add a top-level
-   `const _crossfadeSec = 1.0`. Emit all graph timestamps via `toStringAsFixed(3)`.
-   Guards (all `ArgumentError`, enforced at lowest layer per "fix at the shared
-   function" convention, even though UI prevents each):
-   - `smoothLoop && boomerang` → throw (mutually exclusive graph tails).
-   - `smoothLoop && (durationMs == null || durationMs <= 0)` → throw.
-   - `smoothLoop && fps == null` → throw (CFR requirement, see above).
-   - `smoothLoop && D <= 2 * _crossfadeSec + 0.1` → throw (mid would be empty).
+The overlay keeps its buttons clickable (drag-to-move via `DragToMoveArea`), so the mouse
+is a first-class way to pause/stop — hotkeys are the hands-off path, not the only path.
 
-2. **`FfmpegService.editGif()`** — add `bool smoothLoop = false` passthrough
-   (ffmpeg_service.dart:473-530). Adjust `effectiveTotalMs` calc: today
-   `baseMs = durationMs ?? totalMs`, divided by `speedFactor` only when speed ≠ 1.
-   When `smoothLoop`, subtract `1000` from the post-speed value in **both** branches
-   (speed changed or not) and clamp ≥ 1: output duration is `D - 1s`, otherwise the
-   progress bar overshoots by ~1s of estimated frames. `durationMs` is guaranteed
-   non-null here in smoothLoop mode (caller contract from step 4), so `baseMs` never
-   falls back to `totalMs` in this mode.
+### 3.3 Hotkeys
 
-3. **`VideoStudioState`** (video_studio_controller.dart) — add `final bool smoothLoop`
-   field (default `false`), thread through `copyWith`. Add:
-   - `bool get canSmoothLoop => sourceDurationMs > 5000` (UX gate; at GIF stage
-     `sourceDurationMs` is the baked GIF's duration — matches the "GIF > 5s" ask).
-   - `bool get smoothLoopValid => effectiveOutputMs / speedFactor > 2100` (hard
-     safety floor at the actual post-speed/post-trim duration; `effectiveOutputMs`
-     is pre-speed — verified video_studio_controller.dart:185-189 — so divide here).
-   - `needsGifEdit` (line 249) → OR in `smoothLoop`.
-   - `isToolEdited(StudioTool.properties)` (line 286, GIF branch) → OR in `smoothLoop`.
-   - `setSmoothLoop(bool v)`: mirror `setBoomerang` (lines 768-770) exactly — plain
-     state set, `error: null`, no history push. If `v`, also set `boomerang: false`
-     (mutual excl.). `copyWith` auto-clears `editsApplied` (defaults `false` unless
-     explicitly passed, line 318-321) — nothing extra needed.
-   - `setBoomerang(bool v)`: if `v`, also set `smoothLoop: false`.
+- Three configurable **global** hotkeys (work while the app is an overlay or unfocused):
+  **Start** (default `Alt+Shift+R`), **Pause/Resume** (`Alt+Shift+P`), **Stop** (`Alt+Shift+S`).
+  Defaults avoid `Ctrl+Shift+R`-style combos that browsers/IDEs rely on, since a global
+  hotkey steals the combo system-wide while registered.
+- **Scope (confirmed):** registered while the **home screen** or the **Screen Record
+  screen** is active, and for the whole duration of a live recording; unregistered
+  everywhere else. Start pressed on the home screen → navigate to `/screen-record` and
+  immediately begin recording with the saved monitor selection (fallback: primary) and
+  saved audio toggles.
+- Capture UI: "press keys to assign" recorder chip; conflict check between the three;
+  registration failure (combo taken by another app) surfaces an `AppToast` and reverts.
+- Persisted in `RecordSettingsService` (see §4.6).
 
-4. **Call + state-carry sites** (verified — earlier line list was wrong; most hits
-   are state copies, not calls):
-   - **The one real `editGif` call at GIF stage**: `_runGifPipeline`,
-     video_studio_controller.dart:969-984 (serves apply, export, and preview-bake —
-     all route through it). Add `smoothLoop: s.smoothLoop`; change
-     `durationMs: t.durationMs` →
-     `s.smoothLoop ? (t.durationMs ?? s.sourceDurationMs) : t.durationMs`; change
-     `fps: fpsChanged ? s.fps : null` →
-     `fps: fpsChanged ? s.fps : (s.smoothLoop ? (srcFps?.round() ?? s.fps) : null)`
-     (CFR requirement).
-   - **State-carry sites** — add `smoothLoop:` next to every existing `boomerang:`:
-     - line ~884 (video→GIF bake, fresh `VideoStudioState`): carry `s.smoothLoop`? No —
-       smoothLoop is a GIF-stage-only toggle set *after* the GIF exists; start `false`.
-       (Boomerang is carried because it's settable pre-bake; smoothLoop switch only
-       renders in the GIF branch of `_PropertiesPanel`, so there is nothing to carry.)
-     - line ~920 (`discardGif`, back to video stage): omit / `false` — same reason.
-     - line ~1237 (post-preview-bake state reset, `boomerang: false`): add
-       `smoothLoop: false` — **required**, effect is now baked into the frames;
-       leaving it `true` re-applies the crossfade-and-trim on the next bake and eats
-       another second off the GIF each time.
-   - Sanity: grep `boomerang` across `lib/` after wiring to catch any site missed here.
+---
 
-5. **UI** — `_PropertiesPanel`, GIF branch, next to the Boomerang `Switch`:
-   ```
-   Switch(value: state.smoothLoop, onChanged: state.canSmoothLoop ? ctrl.setSmoothLoop : null)
-   'Smooth Loop — crossfade last 1s into first 1s'
-   ```
-   - Hide or disable (grayed, with helper text "GIFs longer than 5s only") when
-     `!state.canSmoothLoop`.
-   - If `state.smoothLoop && !state.smoothLoopValid` (user cranked speed after
-     enabling) → show inline warning + auto-disable rather than silently emitting
-     a broken filter graph.
-   - Boomerang switch: disable while `state.smoothLoop` is on (or auto-uncheck via
-     the controller's mutual-exclusion setter from point 3).
+## 4. Technical design
 
-6. **Tests** (`test/unit/core/services/ffmpeg/ffmpeg_command_test.dart` — exists,
-   confirmed) — new cases, mirroring existing boomerang assertions for shape:
-   - `smoothLoop: true` (with valid `durationMs`, `fps`) → args contain `trim=`,
-     `xfade=transition=fade:duration=1`, `concat=n=2:v=1`, `split=3`.
-   - default → none of the above present.
-   - trim boundary math: `durationMs: 8000, speedFactor: 2.0` → D=4.0 → expect
-     `trim=3.000:4.000` (tail) and `trim=1.000:4.000` (mid).
-   - guard throws: `smoothLoop+boomerang`; `smoothLoop` with null/0 `durationMs`;
-     null `fps`; `durationMs`/`speedFactor` yielding D ≤ 2.1.
-   (state/controller tests — find the existing video_studio test file via glob, don't
-   assume the name) — cover `canSmoothLoop`/`smoothLoopValid` gating, mutual-exclusion
-   setters both directions, and `needsGifEdit` picking up `smoothLoop`.
+### 4.1 Capture command (`FfmpegCommand.screenCapture`)
 
-## Open risk to verify before implementing (not blocking the plan, but flag)
+Video only:
 
-- Confirm bundled Windows `ffmpeg.exe` (assets/bin/windows/, git-ignored) actually
-  has `xfade` compiled in (ffmpeg ≥ 4.3, all standard builds since 2020 include it —
-  Android side is `ffmpeg-kit-full-gpl` per
-  [ffmpeg_kit_flutter_new pubspec/build.gradle](packages/ffmpeg_kit_flutter_new/android/build.gradle#L54),
-  which does). One quick check: `ffmpeg -filters | findstr xfade` against the
-  Windows binary in `scripts/setup_windows_dev.ps1`'s target dir.
+```
+ffmpeg -f gdigrab -framerate 30 -offset_x <X> -offset_y <Y> -video_size <W>x<H>
+       -draw_mouse 1 -i desktop
+       -c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p
+       -t <remaining_seconds> <jobDir>/seg_000.mkv
+```
 
-## Explicitly not doing
+With mic enabled, a second input joins the same process (in-process mux, no sync step):
 
-- No user-adjustable crossfade duration — spec says fixed 1s, keep it a constant.
-- No support combining with `cutSegments`/multi-segment cut (GIF-stage `gifEdit` has
-  no cut-segment param today; smooth-loop only interacts with existing trim/speed).
-- Not touching `EffectMode` (`reverse`/`speed`) in the separate standalone **Effects**
-  tool — that screen is unrelated to Video Studio's GIF stage and out of scope here.
+```
+       -f dshow -i audio="<mic device name>" -c:a aac -b:a 160k
+```
+
+- `offset_x/offset_y/video_size` select one monitor out of the virtual desktop
+  (negative offsets valid for monitors left/above primary).
+- `W`/`H` clamped **down to even** — `yuv420p` requires even dimensions.
+- `-t` = `600 − alreadyRecordedSeconds` so even a hung Dart timer can't exceed the cap.
+- Mic device name discovered via `ffmpeg -list_devices true -f dshow -i dummy`
+  (stderr parse, cached per session).
+- Concat on stop: `ffmpeg -f concat -safe 0 -i list.txt -c copy output.mp4`
+  (single segment still gets remuxed mkv→mp4 — same code path, stream-copy, instant).
+
+### 4.2 System audio — WASAPI loopback (native module)
+
+ffmpeg on Windows cannot capture system output audio by itself: there is no WASAPI input
+device, and the usual dshow answer (`virtual-audio-capturer`) is a third-party DirectShow
+filter requiring system-wide registration — unacceptable inside an MSIX app. "Stereo Mix"
+is disabled or absent on most machines. So:
+
+- **`windows/runner/audio_loopback.cpp/.h`** (~200 lines): WASAPI loopback capture of the
+  default render device (`IAudioClient` with `AUDCLNT_STREAMFLAGS_LOOPBACK`), writing
+  48 kHz float WAV to a given path. Exposed over the same `gifolomora/native_window`
+  MethodChannel: `startLoopback(path)`, `stopLoopback()` → returns actual captured
+  duration in ms.
+- **Segment-aligned:** the service starts/stops the loopback WAV in lockstep with each
+  video segment (`seg_000.wav` beside `seg_000.mkv`), so pause/resume needs no audio
+  surgery — WAVs concat with the same list mechanism (`-f concat` on wav, or a single
+  `amix`-free `concat` filter at finalize).
+- **Finalize mux:** `ffmpeg -i video.mp4 -i sys.wav [-filter_complex amix] -c:v copy -c:a aac out.mp4`.
+  With mic **and** system audio enabled, mic (already inside the mkv) and the loopback WAV
+  are mixed with `amix=inputs=2` at finalize; video stream stays `-c copy` throughout.
+- **Sync:** loopback start and ffmpeg's first captured frame won't align perfectly
+  (process spawn vs. native call latency, tens of ms). The service timestamps both starts
+  and applies the delta via `-itsoffset` at mux time. Good enough for screen capture;
+  flagged as the item to verify hardest in phase 4.
+- **Silence handling:** WASAPI loopback delivers no packets while the system plays nothing;
+  the writer must insert silence for the gaps (standard loopback chore, handled in the
+  module) or the WAV drifts short.
+
+### 4.3 `ScreenRecorderService` — `lib/core/services/record/screen_recorder_service.dart`
+
+Owns the ffmpeg `Process` directly. It does **not** go through `FfmpegBackend.run()`:
+that API is job-shaped (run → progress → Result<File>), while recording is open-ended and
+stdin-controlled. It reuses `FfmpegProcessBackend.resolveBin('ffmpeg')` for the binary path.
+
+```dart
+enum RecordStatus { idle, recording, paused, finalizing }
+
+class ScreenRecorderService {
+  Future<void> start(RecordTarget monitor, RecordAudio audio); // job dir + segment 0 (+ loopback wav)
+  Future<void> pause();    // graceful-stop current segment (+ loopback stop)
+  Future<void> resume();   // spawns next segment (seg_001.*)
+  Future<File>  stop();    // graceful-stop, concat + audio mux → output.mp4
+  Future<void> discard();  // kill + cleanJob
+
+  Duration get elapsed;    // sum of finished segment durations + live segment stopwatch
+  Stream<RecordStatus> get status$;
+}
+```
+
+- **Graceful stop:** write `q\n` to the process stdin, await exit (5 s timeout), then
+  `Process.kill()` fallback. `q` makes ffmpeg finalize the container properly; MKV means
+  even a hard kill leaves a playable file.
+- **10-minute cap:** 500 ms tick; when `elapsed >= 600s`, auto-`stop()`. The overlay
+  reflects this as a normal stop (navigates to Video Studio).
+- **Elapsed accounting:** stopwatch per live segment + accumulated total; pauses add nothing.
+- **Failure surface:** ffmpeg exiting non-zero mid-segment (disk full, gdigrab error)
+  flips status to `idle` with an error the controller shows via `AppToast`; finished
+  earlier segments are still concat-able, so a partial recording is offered, not lost.
+- Job dir is cleaned by the existing flow: Video Studio's temp-ownership +
+  `sweepStale()` on next launch. `discard()` cleans immediately.
+
+### 4.4 Monitor enumeration — `screen_retriever` (new dep)
+
+- `screenRetriever.getAllDisplays()` → id, name, position, size, scaleFactor.
+- **DPI trap:** `screen_retriever` reports *logical* coordinates; `gdigrab` wants *physical*
+  pixels. Convert: `physical = logical × scaleFactor` for offset and size. The Flutter
+  Windows runner is per-monitor-DPI-aware, so scale factors are per-display and must be
+  applied per-display. This is the most likely source of "recorded the wrong region" bugs —
+  unit-test the mapping (`RecordTarget.fromDisplay`) with mixed-DPI fixtures.
+- `RecordTarget` model: `{displayId, label, physicalX, physicalY, physicalW, physicalH, isPrimary}`.
+
+### 4.5 Overlay & capture exclusion
+
+- Window morph via existing `window_manager`: `getBounds`/`setBounds`, `setAlwaysOnTop`,
+  `setResizable(false)` during overlay; all restored on stop (wrapped in `try/finally` so a
+  recorder crash never strands the user in a 200×56 window).
+- MethodChannel `gifolomora/native_window` in `windows/runner/flutter_window.cpp`:
+  `setExcludeFromCapture(bool)` → `SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE | WDA_NONE)`
+  (~20 lines), plus the `startLoopback`/`stopLoopback` methods from §4.2. Exclusion failure
+  (pre-2004 Windows) is non-fatal: indicator just shows up in the recording.
+- Overlay route `/recording-overlay` (no transition, no `GradientScaffold` — it must be a
+  tiny legible pill, not a glass art piece; solid dark rounded container, 1 blur max).
+
+### 4.6 Settings & controller
+
+**`RecordSettingsService`** (`lib/core/services/record/record_settings_service.dart`) —
+`shared_preferences`-backed, mirroring `RecentsService`'s self-persistence pattern
+(`lib/core/services/settings/` is currently empty; ARCHITECTURE.md describes a
+`SettingsService` that hasn't been built — not blocking on it):
+
+```dart
+class RecordSettings {
+  final bool captureSystemAudio;   // persisted, default false
+  final bool captureMic;           // persisted, default false
+  final RecordHotkeys hotkeys;     // three modifier+key pairs, persisted
+  final String? lastDisplayId;     // persisted — used by home-screen hotkey start
+}
+```
+
+**`RecordController extends AsyncNotifier<RecordState>`**
+(`lib/features/screen_record/controller/record_controller.dart`) per house pattern:
+
+```dart
+class RecordState {
+  final List<RecordTarget> monitors;
+  final RecordTarget? selected;
+  final RecordStatus status;
+  final Duration elapsed;          // ticked for overlay + cap display
+  final RecordSettings settings;
+  final String? error;
+}
+```
+
+Orchestrates: enumeration on build, settings load/save, service start/pause/resume/stop,
+window morph calls, hotkey (un)registration, and the final Video Studio handoff.
+
+**`HotkeyService`** (`lib/core/services/record/hotkey_service.dart`) — wraps
+`hotkey_manager`; register/unregister the three `HotKey`s; Windows-guarded. Home screen and
+Screen Record screen both mount/unmount registration (via the controller), per the confirmed
+scope.
+
+### 4.7 Video Studio handoff (requirement)
+
+After `stop()` finalizes `output.mp4`, the app **switches to Video Studio with the recording
+selected**: `/video-studio` route gains an optional `extra: File`; on arrival the studio
+controller runs its existing "file picked" initialization with that file (probe, preview,
+`EditStage.video`). One small change in `app_router.dart` + the studio controller's init —
+also useful later for "open recent in studio". Temp ownership transfers to the normal studio
+flow; the recording job dir is cleaned like any picked-file job.
+
+### 4.8 Platform gating
+
+- `ToolEntry` gains `windowsOnly: bool` (default false); `createTools` getter filters on
+  `Platform.isWindows`. Screen Record joins the **create** category (it's a source entry
+  point → featured card).
+- All record services/providers constructed lazily by the screen — nothing recording-related
+  runs at bootstrap on any platform.
+
+---
+
+## 5. Files
+
+**New**
+```
+lib/core/services/record/screen_recorder_service.dart   # process/segment state machine
+lib/core/services/record/record_target.dart             # monitor model + DPI mapping
+lib/core/services/record/record_settings_service.dart   # audio toggles + hotkeys + last monitor (shared_preferences)
+lib/core/services/record/hotkey_service.dart            # global hotkey registration
+lib/features/screen_record/controller/record_controller.dart
+lib/features/screen_record/view/screen_record_screen.dart
+lib/features/screen_record/view/recording_overlay.dart  # pulsing pill
+lib/features/screen_record/widgets/monitor_card.dart
+lib/features/screen_record/widgets/audio_options_card.dart
+lib/features/screen_record/widgets/hotkey_recorder_field.dart
+windows/runner/audio_loopback.cpp / .h                  # WASAPI loopback → WAV
+test/screen_recorder_service_test.dart                  # segment/elapsed/cap math
+test/record_target_test.dart                            # DPI + even-dimension mapping
+test/ffmpeg_capture_command_test.dart                   # arg-list golden tests (video / +mic / mux / concat)
+test/record_settings_service_test.dart                  # persistence round-trip
+```
+
+**Modified**
+```
+pubspec.yaml                          # + screen_retriever, hotkey_manager
+lib/core/services/ffmpeg/ffmpeg_command.dart   # screenCapture(), concatSegments(), muxAudio()
+lib/core/services/providers.dart      # recorder/settings/hotkey providers
+lib/features/home/data/tool_catalog.dart       # entry + windowsOnly gating
+lib/features/home/view/…              # hotkey registration while home is active
+lib/router/app_router.dart            # /screen-record, /recording-overlay, studio `extra`
+lib/features/video_studio/controller/…         # accept initial file
+windows/runner/flutter_window.cpp (+.h, CMakeLists)  # native_window channel: capture-exclusion + loopback
+ARCHITECTURE.md                       # recorder section once built
+```
+
+**New dependencies** (both leanflutter, same org as `window_manager`):
+- `screen_retriever ^0.2.0` — display enumeration
+- `hotkey_manager ^0.2.3` — global hotkeys (Windows)
+
+---
+
+## 6. Implementation phases
+
+1. **Capture core** — `FfmpegCommand.screenCapture`/`concatSegments`, `RecordTarget` DPI
+   mapping, `ScreenRecorderService` with start/stop only (video, no audio). Tests for arg
+   lists, even-dim clamp, cap math. Manual check: record primary monitor 10 s, file plays.
+2. **Recording screen** — route, tool card (gated), monitor enumeration + picker/read-only
+   card, record/stop buttons, elapsed display. Recording works end-to-end from UI.
+3. **Overlay** — window morph + restore, pulsing indicator, `native_window` channel with
+   `WDA_EXCLUDEFROMCAPTURE`, stop/pause buttons on the pill. Pause/resume segmenting +
+   concat finalize.
+4. **Audio** — `RecordSettingsService` + audio toggles UI (persisted); mic via dshow
+   (device discovery + arg wiring); WASAPI loopback module + segment-aligned WAV +
+   finalize mux/`amix`; sync verification (`-itsoffset` delta). Riskiest phase — budgeted
+   accordingly.
+5. **Hotkeys** — `HotkeyService`, defaults, recorder UI, persistence, lifecycle
+   (home + record screens + live recording; home-screen start uses saved monitor/audio).
+6. **Handoff + polish** — Video Studio `extra` file selection, 10-min auto-stop UX, error
+   toasts, `flutter analyze` clean, ARCHITECTURE.md update.
+
+Each phase ships working. Phases 1–2 retire the gdigrab/DPI risk; phase 4 retires the
+audio risk and can degrade gracefully (mic-only) if loopback proves flaky.
+
+---
+
+## 7. Improvements added beyond the request
+
+- **Capture-exclusion of the indicator** (`WDA_EXCLUDEFROMCAPTURE`) — the required pulsing
+  overlay would otherwise be burned into every recording made on that monitor.
+- **Clickable overlay** (pause/stop buttons + drag) — hotkeys shouldn't be the only way out.
+- **Crash-safe segments** (MKV) — a crash at minute 9 loses seconds, not the recording.
+- **Scoped hotkey registration** — global combos held only where confirmed (home + record
+  screens + live recording), never app-wide from other tools.
+- **Partial-recording rescue** — encoder dying mid-run still offers the completed segments.
+- **Last-used monitor remembered** — makes the home-screen start hotkey deterministic.
+
+## 8. Open questions & concerns
+
+1. **System-audio risk (biggest item)** — WASAPI loopback module is the one genuinely new
+   native component. Sync (`-itsoffset` delta) and silence-gap insertion are the two known
+   chores; both are well-trodden but need real-hardware verification. Fallback if it
+   misbehaves: ship v1 with mic-only audio and a disabled system-audio switch ("coming
+   soon"), since the video pipeline doesn't depend on it.
+2. **Mic device selection** — v1 uses the system default input device (name shown on the
+   toggle row). A device dropdown is a cheap follow-up if users ask.
+3. **Audio in GIF exports** — audio is only meaningful for Video Studio's *video* export;
+   the GIF path discards it (already how the studio works — no change needed).
+4. **Crash recovery** — segments from a crashed session live in temp for ≤ 1 h
+   (`sweepStale`). A "recover last recording?" prompt on next launch is a cheap follow-up;
+   skipped in v1.
+5. **`ddagrab`/hardware encoders** — Desktop Duplication capture + HW encode would cut CPU
+   use markedly, but depends on the bundled ffmpeg build and GPU; gdigrab+x264-ultrafast is
+   the always-works baseline. Revisit only if capture at 1440p+ measurably stutters.
+6. **Disk** — 10 min of 1440p30 ultrafast H.264 ≈ 1–2 GB in temp. No guard in v1 beyond
+   surfacing the ffmpeg "disk full" failure; a free-space preflight check is a candidate
+   for phase 6.
+7. **ARCHITECTURE.md drift** — it documents `SettingsService`/settings screen that don't
+   exist in `lib/` (empty dirs). This plan doesn't depend on them (§4.6), but the doc
+   should be corrected regardless.

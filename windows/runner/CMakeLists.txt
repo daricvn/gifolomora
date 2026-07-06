@@ -7,8 +7,11 @@ project(runner LANGUAGES CXX)
 #
 # Any new source files that you add to the application should be added here.
 add_executable(${BINARY_NAME} WIN32
+  "audio_loopback.cpp"
   "flutter_window.cpp"
+  "global_hotkey_hook.cpp"
   "main.cpp"
+  "recording_indicator.cpp"
   "utils.cpp"
   "win32_window.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
@@ -34,6 +37,10 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
+# audio_loopback.cpp: CoCreateInstance/CoInitializeEx/CoUninitialize/CoTaskMemFree (WASAPI loopback)
+target_link_libraries(${BINARY_NAME} PRIVATE "ole32.lib")
+# recording_indicator.cpp: GDI+ (pulsing dot + text drawn onto the layered overlay window)
+target_link_libraries(${BINARY_NAME} PRIVATE "gdiplus.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

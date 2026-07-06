@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 /// Groups tools by intent so the home screen can give each group a tailored
@@ -19,6 +21,7 @@ class ToolEntry {
     required this.route,
     required this.accentColor,
     required this.category,
+    this.windowsOnly = false,
   });
 
   final String id;
@@ -28,6 +31,11 @@ class ToolEntry {
   final String route;
   final Color accentColor;
   final ToolCategory category;
+
+  /// Hidden from the home grid (and its route guarded) off-Windows —
+  /// Screen Record depends on gdigrab + WASAPI loopback + global hotkeys,
+  /// all Windows-only.
+  final bool windowsOnly;
 }
 
 const List<ToolEntry> toolCatalog = [
@@ -49,6 +57,16 @@ const List<ToolEntry> toolCatalog = [
     route: '/images-to-gif',
     accentColor: Color(0xFF00C2FF),
     category: ToolCategory.create,
+  ),
+  ToolEntry(
+    id: 'screen_record',
+    label: 'Screen Record',
+    description: 'Capture your screen, then edit in Video Studio',
+    icon: Icons.fiber_manual_record_rounded,
+    route: '/screen-record',
+    accentColor: Color(0xFFFF3B5C),
+    category: ToolCategory.create,
+    windowsOnly: true,
   ),
 
   // ── Refine ──────────────────────────────────────────────────────────────
@@ -99,10 +117,14 @@ const List<ToolEntry> toolCatalog = [
   ),
 ];
 
+bool _platformAllows(ToolEntry t) => !t.windowsOnly || Platform.isWindows;
+
 /// Tools shown as large featured cards.
-List<ToolEntry> get createTools =>
-    toolCatalog.where((t) => t.category == ToolCategory.create).toList();
+List<ToolEntry> get createTools => toolCatalog
+    .where((t) => t.category == ToolCategory.create && _platformAllows(t))
+    .toList();
 
 /// Tools shown in the compact refine grid.
-List<ToolEntry> get refineTools =>
-    toolCatalog.where((t) => t.category == ToolCategory.refine).toList();
+List<ToolEntry> get refineTools => toolCatalog
+    .where((t) => t.category == ToolCategory.refine && _platformAllows(t))
+    .toList();

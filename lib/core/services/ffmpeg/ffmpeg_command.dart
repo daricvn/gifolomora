@@ -524,6 +524,100 @@ abstract final class FfmpegCommand {
     _                 => ['-c:v', 'libx264', '-preset', 'fast', '-crf', '20'],
   };
 
+  /// Screen Record: gdigrab capture of one monitor (physical px offset/size),
+  /// optional mic input muxed in the same process (in-process, no sync step).
+  /// [width]/[height] are clamped down to even — yuv420p requires it.
+  /// [targetHeight], if given and smaller than the captured [height], adds a
+  /// `-vf scale=-2:targetHeight` downscale (encoded directly here, not a
+  /// later pass — concat/finalize stays `-c copy`). Never upscales.
+  static List<String> screenCapture({
+    required String outputPath,
+    required int offsetX,
+    required int offsetY,
+    required int width,
+    required int height,
+    int framerate = 30,
+    required int durationSeconds,
+    String? micDeviceName,
+    int? targetHeight,
+  }) {
+    final w = (width ~/ 2) * 2;
+    final h = (height ~/ 2) * 2;
+    final args = [
+      '-y',
+      '-nostats', '-loglevel', 'warning',
+      '-f', 'gdigrab',
+      '-framerate', '$framerate',
+      '-offset_x', '$offsetX',
+      '-offset_y', '$offsetY',
+      '-video_size', '${w}x$h',
+      '-draw_mouse', '1',
+      '-i', 'desktop',
+    ];
+    if (micDeviceName != null) {
+      args.addAll(['-f', 'dshow', '-i', 'audio=$micDeviceName']);
+    }
+    if (targetHeight != null && targetHeight < h) {
+      args.addAll(['-vf', 'scale=-2:$targetHeight']);
+    }
+    args.addAll(['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p']);
+    if (micDeviceName != null) {
+      args.addAll(['-c:a', 'aac', '-b:a', '160k']);
+    }
+    args.addAll(['-t', '$durationSeconds', outputPath]);
+    return args;
+  }
+
+  /// Lists DirectShow devices; caller parses device names from stderr.
+  static List<String> listDshowDevicesArgs() =>
+      ['-list_devices', 'true', '-f', 'dshow', '-i', 'dummy'];
+
+  /// Builds a concat demuxer list file (no per-entry duration — segments
+  /// already carry their own timing) for [segmentPaths].
+  static String buildSegmentConcatListContent(List<String> segmentPaths) {
+    final buf = StringBuffer();
+    for (final path in segmentPaths) {
+      final escaped = path.replaceAll('\\', '/').replaceAll("'", r"\'");
+      buf.writeln("file '$escaped'");
+    }
+    return buf.toString();
+  }
+
+  /// Stream-copy concat of recording segments (video, or audio wavs) via the
+  /// concat demuxer — lossless, near-instant.
+  static List<String> concatSegments({
+    required String listFilePath,
+    required String outputPath,
+  }) =>
+      ['-y', '-f', 'concat', '-safe', '0', '-i', listFilePath, '-c', 'copy', outputPath];
+
+  /// Finalize mux: bakes the system-audio loopback WAV (and, if the video
+  /// already carries a mic AAC track, mixes both) into the recorded video.
+  /// [itsOffsetSeconds] compensates the loopback-start vs. first-frame delta.
+  static List<String> muxAudio({
+    required String videoPath,
+    required String audioPath,
+    required String outputPath,
+    bool videoHasAudio = false,
+    double itsOffsetSeconds = 0,
+  }) {
+    final args = ['-y', '-i', videoPath];
+    if (itsOffsetSeconds.abs() > 0.001) {
+      args.addAll(['-itsoffset', itsOffsetSeconds.toStringAsFixed(3)]);
+    }
+    args.addAll(['-i', audioPath]);
+    if (videoHasAudio) {
+      args.addAll([
+        '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=first[a]',
+        '-map', '0:v', '-map', '[a]',
+      ]);
+    } else {
+      args.addAll(['-map', '0:v', '-map', '1:a']);
+    }
+    args.addAll(['-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', outputPath]);
+    return args;
+  }
+
   /// Builds a concat demuxer file listing [framePaths] at [fps].
   static String buildConcatFileContent(List<String> framePaths, int fps) {
     final duration = (1.0 / fps).toStringAsFixed(6);

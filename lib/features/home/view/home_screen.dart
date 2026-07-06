@@ -9,11 +9,14 @@ import '../../../core/widgets/glass/glass_app_bar.dart';
 import '../../../core/widgets/common/entrance.dart';
 import '../../../core/widgets/common/gradient_scaffold.dart';
 import '../../../core/widgets/common/section_header.dart';
+import '../../screen_record/controller/record_controller.dart';
 import '../data/tool_catalog.dart';
 import '../widgets/home_hero.dart';
 import '../widgets/featured_tool_card.dart';
 import '../widgets/tool_card.dart';
 import '../widgets/recents_strip.dart';
+
+const _kHotkeyScope = 'home';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -26,6 +29,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _isDragHovering = false;
   String? _version;
 
+  // Cached rather than looked up via `ref` in dispose() — Riverpod asserts
+  // `ref` unusable once the element is mid-unmount, so the notifier must be
+  // captured while the widget is still alive.
+  RecordController? _recordController;
+
   static const _kSupportedExts = ['mp4', 'mov', 'mkv', 'avi', 'webm', 'gif'];
 
   @override
@@ -34,6 +42,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     PackageInfo.fromPlatform().then((info) {
       if (mounted) setState(() => _version = info.version);
     });
+    if (Platform.isWindows) {
+      // Global hotkeys are live while the home screen is on screen (or the
+      // Screen Record screen, or a live recording) — never app-wide from
+      // other tools. Lets the Start hotkey work without first opening
+      // Screen Record.
+      _recordController = ref.read(recordControllerProvider.notifier);
+      Future.microtask(() => _recordController?.enterHotkeyScope(_kHotkeyScope));
+    }
+  }
+
+  @override
+  void dispose() {
+    _recordController?.exitHotkeyScope(_kHotkeyScope);
+    super.dispose();
   }
 
   void _handleDrop(DropDoneDetails details) {
