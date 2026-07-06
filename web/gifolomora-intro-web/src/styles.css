@@ -530,6 +530,7 @@ img.float-b { animation: float-b 7s ease-in-out infinite; }
 .bento {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
+  grid-auto-flow: dense;
   gap: 18px;
 }
 .card {

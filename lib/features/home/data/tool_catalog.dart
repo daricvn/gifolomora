@@ -115,6 +115,15 @@ const List<ToolEntry> toolCatalog = [
     accentColor: Color(0xFF9C27B0),
     category: ToolCategory.refine,
   ),
+  ToolEntry(
+    id: 'to_webm',
+    label: 'To WebM',
+    description: 'Convert video or GIF to WebM',
+    icon: Icons.video_settings_rounded,
+    route: '/to-webm',
+    accentColor: Color(0xFF7C9EFF),
+    category: ToolCategory.refine,
+  ),
 ];
 
 bool _platformAllows(ToolEntry t) => !t.windowsOnly || Platform.isWindows;

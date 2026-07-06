@@ -12,6 +12,12 @@ abstract interface class FfmpegBackend {
   });
 
   Future<MediaInfo?> probe(String inputPath);
+
+  /// One-shot check: does this ffmpeg build list [encoderName] under
+  /// `-encoders`? Used to gate the AV1 codec chip (libaom-av1 is absent from
+  /// upstream ffmpeg-kit Android builds).
+  Future<bool> supportsEncoder(String encoderName);
+
   Future<void> cancel();
   void dispose();
 }

@@ -8,6 +8,7 @@ import 'package:gifolomora/core/services/providers.dart';
 import 'package:gifolomora/core/utils/result.dart';
 import 'package:gifolomora/features/text_overlay/model/text_item.dart';
 import 'package:gifolomora/features/video_studio/controller/video_studio_controller.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../helpers/fakes.dart';
 
@@ -46,6 +47,8 @@ VideoStudioState _state(ProviderContainer c) =>
 // ── tests ──────────────────────────────────────────────────────────────────
 
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
   // ── setCrop / resetCrop ────────────────────────────────────────────────────
   group('VideoStudio — setCrop / resetCrop', () {
     late FakeFfmpegBackend backend;

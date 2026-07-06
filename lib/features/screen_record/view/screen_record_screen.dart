@@ -12,6 +12,7 @@ import '../widgets/audio_options_card.dart';
 import '../widgets/hotkey_recorder_field.dart';
 import '../widgets/monitor_card.dart';
 import '../widgets/output_resolution_card.dart';
+import '../widgets/storage_options_card.dart';
 
 const _kHotkeyScope = 'record';
 
@@ -95,6 +96,13 @@ class _ScreenRecordScreenState extends ConsumerState<ScreenRecordScreen> {
             OutputResolutionCard(
               value: state.settings.outputResolution,
               onChanged: ctrl.setOutputResolution,
+            ),
+            const SizedBox(height: 16),
+            StorageOptionsCard(
+              saveDirectory: state.settings.saveDirectory,
+              deleteTempOnExit: state.settings.deleteTempOnExit,
+              onSaveDirectoryChanged: ctrl.setSaveDirectory,
+              onDeleteTempOnExitChanged: ctrl.setDeleteTempOnExit,
             ),
             const SizedBox(height: 16),
             HotkeyRecorderField(

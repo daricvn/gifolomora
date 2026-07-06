@@ -11,6 +11,7 @@ import '../features/optimize/view/optimize_screen.dart';
 import '../features/text_overlay/view/text_overlay_screen.dart';
 import '../features/effects/view/effects_screen.dart';
 import '../features/screen_record/view/screen_record_screen.dart';
+import '../features/webm_converter/view/webm_converter_screen.dart';
 
 Page<void> _slide(GoRouterState state, Widget child) =>
     CustomTransitionPage<void>(
@@ -82,6 +83,11 @@ final appRouter = GoRouter(
       redirect: (context, state) => Platform.isWindows ? null : '/',
       pageBuilder: (context, state) =>
           _slide(state, const ScreenRecordScreen()),
+    ),
+    GoRoute(
+      path: '/to-webm',
+      pageBuilder: (context, state) =>
+          _slide(state, const WebmConverterScreen()),
     ),
   ],
 );

@@ -96,6 +96,18 @@ class FfmpegKitBackend implements FfmpegBackend {
   }
 
   @override
+  Future<bool> supportsEncoder(String encoderName) async {
+    try {
+      final session = await FFmpegKit.execute('-hide_banner -encoders');
+      final logs = await session.getAllLogsAsString();
+      return logs?.contains(encoderName) ?? false;
+    } catch (e) {
+      Log.e(_tag, 'supportsEncoder($encoderName) failed', e);
+      return false;
+    }
+  }
+
+  @override
   Future<void> cancel() async {
     _cancelled = true;
     await FFmpegKit.cancel();

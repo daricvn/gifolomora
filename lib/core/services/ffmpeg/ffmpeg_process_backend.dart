@@ -173,6 +173,18 @@ class FfmpegProcessBackend implements FfmpegBackend {
   dynamic _jsonDecode(String s) => jsonDecode(s);
 
   @override
+  Future<bool> supportsEncoder(String encoderName) async {
+    try {
+      final result =
+          await Process.run(ffmpegPath, ['-hide_banner', '-encoders']);
+      return (result.stdout as String).contains(encoderName);
+    } catch (e) {
+      Log.e(_tag, 'supportsEncoder($encoderName) failed', e);
+      return false;
+    }
+  }
+
+  @override
   Future<void> cancel() async {
     _cancelled = true;
     _current?.kill();

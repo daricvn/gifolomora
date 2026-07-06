@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 /// A span (absolute source ms) marked for removal from the output. start < end.
 typedef CutSegment = ({int startMs, int endMs});
 
@@ -237,7 +239,7 @@ abstract final class FfmpegCommand {
     int? scaleW,
     int? scaleH,
     double speedFactor = 1.0,
-    required String encoder,
+    String? encoder, // h264 candidate; required unless webm is true
     bool hasAudio = false,
     double volume = 1.0,
     int? startMs,
@@ -249,7 +251,26 @@ abstract final class FfmpegCommand {
     String drawTextColor = 'white',
     String drawTextPosition = 'center',
     List<CutSegment>? keepRanges,
+    // Loop crossfade (video stage): dissolves the tail into the head so
+    // export loops seamlessly — same idea as gifEdit's smoothLoop, extended
+    // to also crossfade audio (acrossfade) when the source has a track.
+    // [loopDurationMs] is the pre-speed effective window (post trim/cut,
+    // matching what [startMs]/[durationMs]/[keepRanges] already select) —
+    // required so the graph knows where head/tail/mid land.
+    bool smoothLoop = false,
+    int crossfadeMs = 1000,
+    int? loopDurationMs,
+    // WebM export (§8 of PLAN.md) — same filter graph, VP9 encoder block
+    // (shared with toWebm) instead of h264, Opus instead of AAC.
+    bool webm = false,
+    int webmCrf = 32,
+    int webmCpuUsed = 4,
+    int webmThreads = 0,
   }) {
+    assert(webm || encoder != null, 'encoder required when webm is false');
+    if (smoothLoop && (loopDurationMs == null || loopDurationMs <= 0)) {
+      throw ArgumentError('smoothLoop requires a positive loopDurationMs');
+    }
     final hasCut = keepRanges != null && keepRanges.isNotEmpty;
     final vf = <String>[];
 
@@ -296,18 +317,8 @@ abstract final class FfmpegCommand {
       vf.add("drawtext=fontfile='$escapedFont':text='$escaped':x=$x:y=$y:fontsize=$drawTextSize:fontcolor=$drawTextColor:borderw=2:bordercolor=black@0.6");
     }
 
-    final args = ['-y'];
-    if (!hasCut && startMs != null && startMs > 0) {
-      args.addAll(['-ss', (startMs / 1000).toStringAsFixed(3)]);
-    }
-    args.addAll(['-i', inputPath]);
-    if (!hasCut && durationMs != null && durationMs > 0) {
-      args.addAll(['-t', (durationMs / 1000).toStringAsFixed(3)]);
-    }
-    args.addAll(['-vf', vf.join(',')]);
-
+    final af = <String>[];
     if (hasAudio) {
-      final af = <String>[];
       // When cuts present: aselect/asetpts must come first in the audio chain.
       if (hasCut) {
         final expr = _selectKeepExpr(keepRanges);
@@ -317,13 +328,74 @@ abstract final class FfmpegCommand {
       if ((volume - 1.0).abs() > 0.001) {
         af.add('volume=${volume.toStringAsFixed(3)}');
       }
-      if (af.isNotEmpty) args.addAll(['-af', af.join(',')]);
-      args.addAll(['-c:a', 'aac', '-b:a', '160k']);
-    } else {
-      args.add('-an');
     }
 
-    args.addAll(_encoderArgs(encoder));
+    final args = ['-y'];
+    if (!hasCut && startMs != null && startMs > 0) {
+      args.addAll(['-ss', (startMs / 1000).toStringAsFixed(3)]);
+    }
+    args.addAll(['-i', inputPath]);
+    if (!hasCut && durationMs != null && durationMs > 0) {
+      args.addAll(['-t', (durationMs / 1000).toStringAsFixed(3)]);
+    }
+
+    if (smoothLoop) {
+      final cf = crossfadeMs / 1000;
+      final d = (loopDurationMs! / 1000) / speedFactor;
+      if (d <= 2 * cf + 0.1) {
+        throw ArgumentError(
+            'smoothLoop: post-speed duration ${d}s too short for a ${cf}s crossfade');
+      }
+      String f(double v) => v.toStringAsFixed(3);
+      final vchain = vf.join(',');
+      var filterComplex = '[0:v]$vchain,split=3[vp0][vp1][vp2];'
+          '[vp0]trim=0:${f(cf)},setpts=PTS-STARTPTS[vhead];'
+          '[vp1]trim=${f(d - cf)}:${f(d)},setpts=PTS-STARTPTS[vtail];'
+          '[vp2]trim=${f(cf)}:${f(d - cf)},setpts=PTS-STARTPTS[vmid];'
+          '[vtail][vhead]xfade=transition=fade:duration=${f(cf)}:offset=0[vblend];'
+          '[vmid][vblend]concat=n=2:v=1:a=0[vout]';
+      if (hasAudio) {
+        final achain = af.isEmpty ? 'anull' : af.join(',');
+        filterComplex += ';[0:a]$achain,asplit=3[ap0][ap1][ap2];'
+            '[ap0]atrim=0:${f(cf)},asetpts=PTS-STARTPTS[ahead];'
+            '[ap1]atrim=${f(d - cf)}:${f(d)},asetpts=PTS-STARTPTS[atail];'
+            '[ap2]atrim=${f(cf)}:${f(d - cf)},asetpts=PTS-STARTPTS[amid];'
+            '[atail][ahead]acrossfade=d=${f(cf)}:c1=tri:c2=tri[ablend];'
+            '[amid][ablend]concat=n=2:v=0:a=1[aout]';
+      }
+      args.addAll(['-filter_complex', filterComplex, '-map', '[vout]']);
+      // split/trim/xfade/concat leaves the negotiated pix_fmt to the filter
+      // graph, which can land on yuv444p (High 4:4:4 Predictive) instead of
+      // the source's yuv420p — many hardware decoders/players can't handle
+      // that profile and render black. Force it explicitly (the non-
+      // smoothLoop -vf path never triggers this: simple filters keep the
+      // source format, only this split/concat graph renegotiates it).
+      args.addAll(['-pix_fmt', 'yuv420p']);
+      if (hasAudio) {
+        args.addAll(['-map', '[aout]']);
+        args.addAll(webm
+            ? ['-c:a', 'libopus', '-b:a', '128k']
+            : ['-c:a', 'aac', '-b:a', '160k']);
+      } else {
+        args.add('-an');
+      }
+    } else {
+      args.addAll(['-vf', vf.join(',')]);
+      if (webm) args.addAll(['-pix_fmt', 'yuv420p']);
+      if (hasAudio) {
+        if (af.isNotEmpty) args.addAll(['-af', af.join(',')]);
+        args.addAll(webm
+            ? ['-c:a', 'libopus', '-b:a', '128k']
+            : ['-c:a', 'aac', '-b:a', '160k']);
+      } else {
+        args.add('-an');
+      }
+    }
+
+    args.addAll(webm
+        ? _webmEncoderArgs(
+            crf: webmCrf, cpuUsed: webmCpuUsed, av1: false, threads: webmThreads)
+        : _encoderArgs(encoder!));
     args.addAll(['-progress', 'pipe:1', outputPath]);
     return args;
   }
@@ -514,6 +586,69 @@ abstract final class FfmpegCommand {
     }
     filters.add('atempo=${f.toStringAsFixed(4)}');
     return filters.join(',');
+  }
+
+  /// Shared VP9/AV1 encoder arg block — used by [toWebm] and the WebM branch
+  /// of [videoEdit] so the speed/quality flags live in exactly one place.
+  static List<String> _webmEncoderArgs({
+    required int crf,
+    required int cpuUsed,
+    required bool av1,
+    required int threads,
+  }) {
+    final t = threads > 0 ? threads : Platform.numberOfProcessors;
+    return av1
+        ? [
+            '-c:v', 'libaom-av1',
+            '-crf', '$crf', '-b:v', '0',
+            '-cpu-used', '$cpuUsed',
+            '-row-mt', '1', '-tile-columns', '2', '-threads', '$t',
+          ]
+        : [
+            '-c:v', 'libvpx-vp9',
+            '-crf', '$crf', '-b:v', '0',
+            '-cpu-used', '$cpuUsed',
+            '-deadline', 'good',
+            '-row-mt', '1', '-tile-columns', '2', '-threads', '$t',
+          ];
+  }
+
+  /// yuv420p (and gifs generally) require even dimensions. No cap: clamp
+  /// source dims down to even. With a cap: clamp the smaller of (cap, source
+  /// width) down to even; `-2` keeps height even and proportional. Never
+  /// upscales.
+  static String _webmScaleFilter(int? maxWidth) => maxWidth == null
+      ? 'scale=trunc(iw/2)*2:trunc(ih/2)*2'
+      : "scale='trunc(min($maxWidth,iw)/2)*2':-2";
+
+  /// Convert video or GIF to WebM (VP9 by default, AV1 opt-in). [alpha]
+  /// (yuva420p, VP9 only — caller forces `av1=false` when alpha is wanted)
+  /// preserves GIF transparency. [keepAudio] should be caller-supplied
+  /// `MediaInfo.hasAudio` (false for GIF input).
+  static List<String> toWebm({
+    required String inputPath,
+    required String outputPath,
+    required int crf,
+    required int cpuUsed,
+    bool av1 = false,
+    int? maxWidth,
+    bool keepAudio = false,
+    bool alpha = false,
+    int threads = 0,
+  }) {
+    final args = ['-y', '-i', inputPath, '-vf', _webmScaleFilter(maxWidth)];
+    final wantAlpha = alpha && !av1;
+    args.addAll(['-pix_fmt', wantAlpha ? 'yuva420p' : 'yuv420p']);
+    if (wantAlpha) args.addAll(['-auto-alt-ref', '0']);
+    args.addAll(_webmEncoderArgs(
+        crf: crf, cpuUsed: cpuUsed, av1: av1, threads: threads));
+    if (keepAudio) {
+      args.addAll(['-c:a', 'libopus', '-b:a', '128k']);
+    } else {
+      args.add('-an');
+    }
+    args.addAll(['-progress', 'pipe:1', outputPath]);
+    return args;
   }
 
   static List<String> _encoderArgs(String encoder) => switch (encoder) {

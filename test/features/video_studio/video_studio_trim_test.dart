@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gifolomora/core/services/ffmpeg/ffmpeg_progress.dart';
 import 'package:gifolomora/core/services/providers.dart';
 import 'package:gifolomora/features/video_studio/controller/video_studio_controller.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../helpers/fakes.dart';
 
@@ -29,6 +30,8 @@ Future<VideoStudioController> _loadVideo(ProviderContainer c) async {
 }
 
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
   group('VideoStudio Trim — setTrimStart', () {
     test('1. valid value → trimStartMs set, hasTrim true, tool marked edited', () async {
       final c = _makeContainer();

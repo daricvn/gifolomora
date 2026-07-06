@@ -1,377 +1,299 @@
-# PLAN — Screen Record (Windows)
+# PLAN — Convert to WebM (tool section, single + batch)
 
-> Record the entire screen (up to 10 minutes) into a temp video, with optional system/mic
-> audio, global hotkeys, monitor selection, and an on-screen pulsing "Recording" indicator.
-> **Windows only.** On stop, the recording opens in Video Studio, pre-selected.
-
----
-
-## 1. Summary
-
-Add a **Screen Record** tool. The user picks a monitor (picker when more than one monitor;
-read-only card when there is only one), toggles system-audio / mic capture (persisted across
-sessions), and presses Record (or a global hotkey). ffmpeg's `gdigrab` device — already
-bundled on Windows — captures the full monitor; mic audio joins the same ffmpeg process via
-`dshow`; system audio is captured by a small WASAPI-loopback module in the native runner and
-muxed in at finalize. While recording, the app window morphs into a tiny always-on-top
-overlay showing a pulsing red dot + "Recording" text and elapsed time. Stop (button or
-hotkey) finalizes the file and **switches to Video Studio with the recorded video selected**,
-where the existing trim/crop/text/GIF-bake/export flow takes over.
-
-**Key reuse:** bundled `ffmpeg.exe` + `FfmpegProcessBackend.resolveBin`, `TempFileService`
-job dirs, `FfmpegCommand` for arg building, `window_manager` (already a dependency) for the
-overlay morph, Video Studio as the post-record editor (no new preview/export UI needed).
+New refine tool: pick one or more videos/GIFs (max 20), convert each to WebM, export. Route
+`/to-webm`, feature dir `lib/features/webm_converter/`. Plus: Video Studio's Export Video gains
+a format choice page (MP4 | WebM) — §8.
 
 ---
 
-## 2. Scope & locked decisions
+## 1. Encoder decision (the performance call)
 
-| Decision | Choice | Rationale |
-|---|---|---|
-| Capture engine | ffmpeg `gdigrab` (bundled binary) | Zero new native code for video; works on every Windows version; cursor captured via `draw_mouse=1`. |
-| Recording format | H.264 `.mkv` segments → remux to `.mp4` on stop | MKV is crash-safe (no moov atom to lose); remux is a stream-copy, near-instant. |
-| Pause | Segment-per-resume, concat on stop | ffmpeg has no pause; stop segment + start new one is the standard approach. Concat demuxer with `-c copy` joins losslessly. |
-| Max duration | 600 s of *recorded* time (pauses excluded), enforced in service + `-t` per segment as belt-and-braces | Requirement. |
-| Frame rate | 30 fps fixed (v1) | Good default for GIF-destined capture; option chip can come later. |
-| Mic audio | Optional toggle; captured via `dshow` input in the **same** ffmpeg process | In-process mux → no sync work. Default **off**. |
-| System audio | Optional toggle; native WASAPI-loopback module (C++ in runner) writes WAV per segment, muxed at finalize | ffmpeg has no native WASAPI/loopback input on Windows; the dshow route needs a third-party filter install (non-starter for MSIX). Default **off**. |
-| Audio toggles persistence | `shared_preferences` via `RecordSettingsService`, saved across sessions | Requirement. |
-| Storage | `TempFileService.createJobDir()` — same temp root as every other job | Requirement ("temporary folder") + existing sweep semantics. |
-| After stop | **Switch to Video Studio with the recorded video selected** | Requirement. Route gains `extra: File`; studio controller runs its normal "file picked" path on arrival. |
-| Monitor picker | **> 1 monitor** → selectable list; exactly 1 → same card rendered read-only | Confirmed. |
-| Hotkey scope | Global hotkeys registered **only while on the home screen or the Screen Record screen** (and during recording) | Confirmed ("main screen or recording screen only"). Never held app-wide from other tools. |
-| Encoder | `libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p` (+ `-c:a aac` when mic on) | Real-time-safe on any CPU at 1080p/1440p 30 fps. HW encoders are a later optimization — capture must never drop frames because an HW encoder is missing. |
-| Platform gating | Tool card hidden off-Windows; route guarded | Requirement. |
+**Chosen: `libvpx-vp9`, single-pass constrained-quality (`-crf N -b:v 0`), with full
+multithreading flags. Audio: `libopus`.**
 
----
+Availability confirmed:
+- Windows bundled `assets/bin/windows/ffmpeg.exe` lists `libvpx`, `libvpx-vp9`, `libaom-av1`,
+  `vp9_qsv`, `libopus` (checked via `ffmpeg -encoders`).
+- Android uses `com.antonkarpenko:ffmpeg-kit-full-gpl:2.1.0`
+  (`packages/ffmpeg_kit_flutter_new/android/build.gradle:54`) — full-gpl includes libvpx + libopus.
 
-## 3. UX flows
+Rejected alternatives:
+| Option | Why not |
+|---|---|
+| `libaom-av1` as default | 5–20× slower than VP9 at comparable quality; wrong default for a batch tool. Offered as an opt-in codec mode instead (below). |
+| `vp9_qsv` | Intel-only, different rate-control knobs, historically flaky quality. Not worth a second code path + fallback loop. |
+| NVENC / AMF VP9 | Don't exist — NVIDIA/AMD have no VP9 *encode* hardware. (NVENC AV1 exists but AV1-in-WebM playback support is spottier and the bundled build would still need SW fallback.) |
+| VP8 (`libvpx`) | ~2× faster encode but clearly worse size/quality; VP9 with `cpu-used 4–5` closes most of the speed gap. One codec path only. |
+| Two-pass VP9 | ~2× wall time for ~10–15% smaller files. Wrong trade for an interactive tool; single-pass CRF. |
 
-### 3.1 Recording screen (`/screen-record`)
+Speed flags (this is where VP9 perf actually comes from):
+- `-row-mt 1 -tile-columns 2 -threads <Platform.numberOfProcessors>` — without `row-mt`,
+  libvpx-vp9 is effectively single-threaded on typical sizes. Threads passed explicitly; don't
+  rely on the wrapper default.
+- `-deadline good -cpu-used <preset>` — UI "Speed" chips map: Fast = 5, Balanced = 4 (default),
+  Best = 2.
+- Straight transcode; no filters beyond one `scale` (below).
 
-Follows the house 4-step skeleton, adapted (no file pick — the "input" is a monitor):
+Filter chain (always present, one `scale` only):
+- yuv420p requires even dimensions and GIFs are frequently odd-sized:
+  no max-width → `scale=trunc(iw/2)*2:trunc(ih/2)*2`; with max-width →
+  `scale='trunc(min(<maxW>,iw)/2)*2':-2` (`-2` keeps height even; the `trunc` guards an odd
+  source narrower than the cap — 641 wide under a 1080 cap must still land even; never upscales).
+- `-pix_fmt yuv420p` default. GIF input with "keep transparency" ON → `-pix_fmt yuva420p`
+  `-auto-alt-ref 0` (VP9 alpha side-band; supported by Chrome/Firefox). Verified on the bundled
+  Windows build: encode exits 0 and ffprobe shows `alpha_mode=1`, with or without the flag — the
+  flag stays anyway because older libvpx wrappers (Android kit) reject alpha when auto-alt-ref is
+  on. Default OFF — opaque is smaller and faster.
+- GIF input → `-an`. Video input → `-c:a libopus -b:a 128k` when `MediaInfo.hasAudio`, else
+  `-an`. No keep-audio toggle — audio always survives conversion; muting is a Video Studio job
+  (volume 0), not a converter knob. (Vorbis rejected — Opus is better at every bitrate and
+  present on both backends.)
 
-```
-[1 Monitor] → [2 Options] → [3 Record] → (overlay) → [4 Video Studio, file selected]
-```
+CRF range: slider 18–45, default 32 (VP9 CRF scale is unlike x264 — 32 is a sane web default).
 
-- **Monitor card** — one glass card per display: monitor name/index, resolution, primary
-  badge, and a proportional mini-rectangle sketch of the virtual desktop layout with the
-  selected monitor highlighted. Single monitor: same card, selection disabled (read-only).
-- **Audio card** — two glass switches: **System audio** and **Microphone**. Values load
-  from and save to `RecordSettingsService` immediately on toggle (persist across sessions).
-  Mic row shows the default input device name; system-audio row shows the default output
-  device name. If no mic device exists, the mic switch is disabled with a hint.
-- **Hotkey strip** — read-only chips showing the current start/pause/stop hotkeys with an
-  "edit" affordance opening the hotkey recorder fields.
-- **Record button** — big primary `GlassButton`. Disabled states: already recording,
-  monitor enumeration failed.
-- **Duration note** — "Max 10:00" caption.
+**AV1 opt-in mode.** Codec chips: **VP9 (recommended)** | **AV1 — smallest file, much slower**.
+AV1 stays WebM-contained, swaps only the video encoder block:
+`-c:v libaom-av1 -crf <same slider> -b:v 0 -cpu-used {Fast 8 | Balanced 6 | Best 4} -row-mt 1
+-tile-columns 2 -threads N`. Audio stays Opus. Constraints:
+- **No alpha.** Verified on the bundled build: libaom encode with `yuva420p` input exits 0 but
+  silently drops to `yuv420p`, no `alpha_mode` tag. Transparency ON disables the AV1 chip
+  (forces VP9).
+- **Availability**: Windows bundle confirmed (`-encoders` lists `libaom-av1`). Android
+  **unverified and likely absent** — upstream ffmpeg-kit builds have never bundled libaom (dav1d
+  is decode-only). Gate the chip behind a one-time `FfmpegService.supportsAv1()` probe: run
+  `-hide_banner -encoders` once, grep `libaom-av1`, cache the bool. Chip hidden when false —
+  no dead option, no crash on unsupported devices.
 
-### 3.2 While recording — the overlay
+Batch concurrency: **sequential, one ffmpeg job at a time.** `row-mt` + tiles already saturate
+cores on a single encode; parallel jobs would thrash CPU/RAM and break the existing
+one-`_currentJobDir`/one-`cancel()` backend model. This *is* the performant choice, not a
+compromise.
 
-On start, the **main window itself** morphs into the indicator (no second window — Flutter
-desktop is single-window; `desktop_multi_window` is avoidable complexity):
-
-1. Save current window bounds.
-2. Resize to a small pill (~200×56), frameless (title bar already hidden app-wide),
-   `setAlwaysOnTop(true)`, positioned top-right of the **selected** monitor with a margin.
-3. Set `WDA_EXCLUDEFROMCAPTURE` on the window (MethodChannel into the existing Win32
-   runner) so the indicator does **not** appear in the recording (Win10 2004+; older
-   builds: it simply appears — acceptable degradation).
-4. Overlay contents: red dot + "Recording" label, both driven by one
-   `AnimationController(repeat: reverse)` fading opacity 0.35 → 1.0 over ~1.2 s
-   (the required slow fade-in/fade-out pulse), plus elapsed `mm:ss / 10:00`, small
-   mic/speaker icons when the respective audio capture is on, and pause/resume + stop
-   icon buttons.
-5. Paused state: pulse stops, dot turns amber, label "Paused".
-
-On stop: restore saved bounds, clear always-on-top + capture-exclusion, then
-`context.go('/video-studio', extra: recordedFile)` — Video Studio opens with the recording
-already selected as its input, same as if the user had dropped the file in.
-
-The overlay keeps its buttons clickable (drag-to-move via `DragToMoveArea`), so the mouse
-is a first-class way to pause/stop — hotkeys are the hands-off path, not the only path.
-
-### 3.3 Hotkeys
-
-- Three configurable **global** hotkeys (work while the app is an overlay or unfocused):
-  **Start** (default `Alt+Shift+R`), **Pause/Resume** (`Alt+Shift+P`), **Stop** (`Alt+Shift+S`).
-  Defaults avoid `Ctrl+Shift+R`-style combos that browsers/IDEs rely on, since a global
-  hotkey steals the combo system-wide while registered.
-- **Scope (confirmed):** registered while the **home screen** or the **Screen Record
-  screen** is active, and for the whole duration of a live recording; unregistered
-  everywhere else. Start pressed on the home screen → navigate to `/screen-record` and
-  immediately begin recording with the saved monitor selection (fallback: primary) and
-  saved audio toggles.
-- Capture UI: "press keys to assign" recorder chip; conflict check between the three;
-  registration failure (combo taken by another app) surfaces an `AppToast` and reverts.
-- Persisted in `RecordSettingsService` (see §4.6).
+GIF looping: gif demuxer `ignore_loop` defaults to true (confirmed via `ffmpeg -h demuxer=gif`
+on the bundled build) — decodes one pass, no flag needed; output duration == one loop.
 
 ---
 
-## 4. Technical design
-
-### 4.1 Capture command (`FfmpegCommand.screenCapture`)
-
-Video only:
-
-```
-ffmpeg -f gdigrab -framerate 30 -offset_x <X> -offset_y <Y> -video_size <W>x<H>
-       -draw_mouse 1 -i desktop
-       -c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p
-       -t <remaining_seconds> <jobDir>/seg_000.mkv
-```
-
-With mic enabled, a second input joins the same process (in-process mux, no sync step):
-
-```
-       -f dshow -i audio="<mic device name>" -c:a aac -b:a 160k
-```
-
-- `offset_x/offset_y/video_size` select one monitor out of the virtual desktop
-  (negative offsets valid for monitors left/above primary).
-- `W`/`H` clamped **down to even** — `yuv420p` requires even dimensions.
-- `-t` = `600 − alreadyRecordedSeconds` so even a hung Dart timer can't exceed the cap.
-- Mic device name discovered via `ffmpeg -list_devices true -f dshow -i dummy`
-  (stderr parse, cached per session).
-- Concat on stop: `ffmpeg -f concat -safe 0 -i list.txt -c copy output.mp4`
-  (single segment still gets remuxed mkv→mp4 — same code path, stream-copy, instant).
-
-### 4.2 System audio — WASAPI loopback (native module)
-
-ffmpeg on Windows cannot capture system output audio by itself: there is no WASAPI input
-device, and the usual dshow answer (`virtual-audio-capturer`) is a third-party DirectShow
-filter requiring system-wide registration — unacceptable inside an MSIX app. "Stereo Mix"
-is disabled or absent on most machines. So:
-
-- **`windows/runner/audio_loopback.cpp/.h`** (~200 lines): WASAPI loopback capture of the
-  default render device (`IAudioClient` with `AUDCLNT_STREAMFLAGS_LOOPBACK`), writing
-  48 kHz float WAV to a given path. Exposed over the same `gifolomora/native_window`
-  MethodChannel: `startLoopback(path)`, `stopLoopback()` → returns actual captured
-  duration in ms.
-- **Segment-aligned:** the service starts/stops the loopback WAV in lockstep with each
-  video segment (`seg_000.wav` beside `seg_000.mkv`), so pause/resume needs no audio
-  surgery — WAVs concat with the same list mechanism (`-f concat` on wav, or a single
-  `amix`-free `concat` filter at finalize).
-- **Finalize mux:** `ffmpeg -i video.mp4 -i sys.wav [-filter_complex amix] -c:v copy -c:a aac out.mp4`.
-  With mic **and** system audio enabled, mic (already inside the mkv) and the loopback WAV
-  are mixed with `amix=inputs=2` at finalize; video stream stays `-c copy` throughout.
-- **Sync:** loopback start and ffmpeg's first captured frame won't align perfectly
-  (process spawn vs. native call latency, tens of ms). The service timestamps both starts
-  and applies the delta via `-itsoffset` at mux time. Good enough for screen capture;
-  flagged as the item to verify hardest in phase 4.
-- **Silence handling:** WASAPI loopback delivers no packets while the system plays nothing;
-  the writer must insert silence for the gaps (standard loopback chore, handled in the
-  module) or the WAV drifts short.
-
-### 4.3 `ScreenRecorderService` — `lib/core/services/record/screen_recorder_service.dart`
-
-Owns the ffmpeg `Process` directly. It does **not** go through `FfmpegBackend.run()`:
-that API is job-shaped (run → progress → Result<File>), while recording is open-ended and
-stdin-controlled. It reuses `FfmpegProcessBackend.resolveBin('ffmpeg')` for the binary path.
-
-```dart
-enum RecordStatus { idle, recording, paused, finalizing }
-
-class ScreenRecorderService {
-  Future<void> start(RecordTarget monitor, RecordAudio audio); // job dir + segment 0 (+ loopback wav)
-  Future<void> pause();    // graceful-stop current segment (+ loopback stop)
-  Future<void> resume();   // spawns next segment (seg_001.*)
-  Future<File>  stop();    // graceful-stop, concat + audio mux → output.mp4
-  Future<void> discard();  // kill + cleanJob
-
-  Duration get elapsed;    // sum of finished segment durations + live segment stopwatch
-  Stream<RecordStatus> get status$;
-}
-```
-
-- **Graceful stop:** write `q\n` to the process stdin, await exit (5 s timeout), then
-  `Process.kill()` fallback. `q` makes ffmpeg finalize the container properly; MKV means
-  even a hard kill leaves a playable file.
-- **10-minute cap:** 500 ms tick; when `elapsed >= 600s`, auto-`stop()`. The overlay
-  reflects this as a normal stop (navigates to Video Studio).
-- **Elapsed accounting:** stopwatch per live segment + accumulated total; pauses add nothing.
-- **Failure surface:** ffmpeg exiting non-zero mid-segment (disk full, gdigrab error)
-  flips status to `idle` with an error the controller shows via `AppToast`; finished
-  earlier segments are still concat-able, so a partial recording is offered, not lost.
-- Job dir is cleaned by the existing flow: Video Studio's temp-ownership +
-  `sweepStale()` on next launch. `discard()` cleans immediately.
-
-### 4.4 Monitor enumeration — `screen_retriever` (new dep)
-
-- `screenRetriever.getAllDisplays()` → id, name, position, size, scaleFactor.
-- **DPI trap:** `screen_retriever` reports *logical* coordinates; `gdigrab` wants *physical*
-  pixels. Convert: `physical = logical × scaleFactor` for offset and size. The Flutter
-  Windows runner is per-monitor-DPI-aware, so scale factors are per-display and must be
-  applied per-display. This is the most likely source of "recorded the wrong region" bugs —
-  unit-test the mapping (`RecordTarget.fromDisplay`) with mixed-DPI fixtures.
-- `RecordTarget` model: `{displayId, label, physicalX, physicalY, physicalW, physicalH, isPrimary}`.
-
-### 4.5 Overlay & capture exclusion
-
-- Window morph via existing `window_manager`: `getBounds`/`setBounds`, `setAlwaysOnTop`,
-  `setResizable(false)` during overlay; all restored on stop (wrapped in `try/finally` so a
-  recorder crash never strands the user in a 200×56 window).
-- MethodChannel `gifolomora/native_window` in `windows/runner/flutter_window.cpp`:
-  `setExcludeFromCapture(bool)` → `SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE | WDA_NONE)`
-  (~20 lines), plus the `startLoopback`/`stopLoopback` methods from §4.2. Exclusion failure
-  (pre-2004 Windows) is non-fatal: indicator just shows up in the recording.
-- Overlay route `/recording-overlay` (no transition, no `GradientScaffold` — it must be a
-  tiny legible pill, not a glass art piece; solid dark rounded container, 1 blur max).
-
-### 4.6 Settings & controller
-
-**`RecordSettingsService`** (`lib/core/services/record/record_settings_service.dart`) —
-`shared_preferences`-backed, mirroring `RecentsService`'s self-persistence pattern
-(`lib/core/services/settings/` is currently empty; ARCHITECTURE.md describes a
-`SettingsService` that hasn't been built — not blocking on it):
-
-```dart
-class RecordSettings {
-  final bool captureSystemAudio;   // persisted, default false
-  final bool captureMic;           // persisted, default false
-  final RecordHotkeys hotkeys;     // three modifier+key pairs, persisted
-  final String? lastDisplayId;     // persisted — used by home-screen hotkey start
-}
-```
-
-**`RecordController extends AsyncNotifier<RecordState>`**
-(`lib/features/screen_record/controller/record_controller.dart`) per house pattern:
-
-```dart
-class RecordState {
-  final List<RecordTarget> monitors;
-  final RecordTarget? selected;
-  final RecordStatus status;
-  final Duration elapsed;          // ticked for overlay + cap display
-  final RecordSettings settings;
-  final String? error;
-}
-```
-
-Orchestrates: enumeration on build, settings load/save, service start/pause/resume/stop,
-window morph calls, hotkey (un)registration, and the final Video Studio handoff.
-
-**`HotkeyService`** (`lib/core/services/record/hotkey_service.dart`) — wraps
-`hotkey_manager`; register/unregister the three `HotKey`s; Windows-guarded. Home screen and
-Screen Record screen both mount/unmount registration (via the controller), per the confirmed
-scope.
-
-### 4.7 Video Studio handoff (requirement)
-
-After `stop()` finalizes `output.mp4`, the app **switches to Video Studio with the recording
-selected**: `/video-studio` route gains an optional `extra: File`; on arrival the studio
-controller runs its existing "file picked" initialization with that file (probe, preview,
-`EditStage.video`). One small change in `app_router.dart` + the studio controller's init —
-also useful later for "open recent in studio". Temp ownership transfers to the normal studio
-flow; the recording job dir is cleaned like any picked-file job.
-
-### 4.8 Platform gating
-
-- `ToolEntry` gains `windowsOnly: bool` (default false); `createTools` getter filters on
-  `Platform.isWindows`. Screen Record joins the **create** category (it's a source entry
-  point → featured card).
-- All record services/providers constructed lazily by the screen — nothing recording-related
-  runs at bootstrap on any platform.
-
----
-
-## 5. Files
+## 2. Files
 
 **New**
-```
-lib/core/services/record/screen_recorder_service.dart   # process/segment state machine
-lib/core/services/record/record_target.dart             # monitor model + DPI mapping
-lib/core/services/record/record_settings_service.dart   # audio toggles + hotkeys + last monitor (shared_preferences)
-lib/core/services/record/hotkey_service.dart            # global hotkey registration
-lib/features/screen_record/controller/record_controller.dart
-lib/features/screen_record/view/screen_record_screen.dart
-lib/features/screen_record/view/recording_overlay.dart  # pulsing pill
-lib/features/screen_record/widgets/monitor_card.dart
-lib/features/screen_record/widgets/audio_options_card.dart
-lib/features/screen_record/widgets/hotkey_recorder_field.dart
-windows/runner/audio_loopback.cpp / .h                  # WASAPI loopback → WAV
-test/screen_recorder_service_test.dart                  # segment/elapsed/cap math
-test/record_target_test.dart                            # DPI + even-dimension mapping
-test/ffmpeg_capture_command_test.dart                   # arg-list golden tests (video / +mic / mux / concat)
-test/record_settings_service_test.dart                  # persistence round-trip
-```
+- `lib/features/webm_converter/controller/webm_converter_controller.dart` — state + queue loop
+- `lib/features/webm_converter/view/webm_converter_screen.dart` — screen; batch list rendered
+  inline (no separate widgets/ dir — the file rows are ~40 lines of ListView)
 
 **Modified**
-```
-pubspec.yaml                          # + screen_retriever, hotkey_manager
-lib/core/services/ffmpeg/ffmpeg_command.dart   # screenCapture(), concatSegments(), muxAudio()
-lib/core/services/providers.dart      # recorder/settings/hotkey providers
-lib/features/home/data/tool_catalog.dart       # entry + windowsOnly gating
-lib/features/home/view/…              # hotkey registration while home is active
-lib/router/app_router.dart            # /screen-record, /recording-overlay, studio `extra`
-lib/features/video_studio/controller/…         # accept initial file
-windows/runner/flutter_window.cpp (+.h, CMakeLists)  # native_window channel: capture-exclusion + loopback
-ARCHITECTURE.md                       # recorder section once built
-```
+- `lib/core/services/ffmpeg/ffmpeg_command.dart` — `static List<String> toWebm({...})`
+- `lib/core/services/ffmpeg/ffmpeg_service.dart` — `convertToWebm({...})`
+- `lib/core/services/files/export_service.dart` — `saveWebm()` + batch directory export
+- `lib/features/home/data/tool_catalog.dart` — refine entry: id `to_webm`, label "To WebM",
+  description "Convert video or GIF to WebM", route `/to-webm`, unused accent hue (e.g. `0xFF7C9EFF`)
+- `lib/router/app_router.dart` — route with the standard fade+slide transition
+- `test/` — arg-builder test for `FfmpegCommand.toWebm` (pure function, no ffmpeg needed)
+- §8 (Video Studio format choice) additionally touches:
+  `lib/features/video_studio/controller/video_studio_controller.dart` (`exportVideo(format)`),
+  `lib/features/video_studio/view/video_studio_screen.dart` (Export → format page),
+  `ffmpeg_command.dart` `videoEdit` (webm variant), `ffmpeg_service.dart` `editVideo`
 
-**New dependencies** (both leanflutter, same org as `window_manager`):
-- `screen_retriever ^0.2.0` — display enumeration
-- `hotkey_manager ^0.2.3` — global hotkeys (Windows)
-
----
-
-## 6. Implementation phases
-
-1. **Capture core** — `FfmpegCommand.screenCapture`/`concatSegments`, `RecordTarget` DPI
-   mapping, `ScreenRecorderService` with start/stop only (video, no audio). Tests for arg
-   lists, even-dim clamp, cap math. Manual check: record primary monitor 10 s, file plays.
-2. **Recording screen** — route, tool card (gated), monitor enumeration + picker/read-only
-   card, record/stop buttons, elapsed display. Recording works end-to-end from UI.
-3. **Overlay** — window morph + restore, pulsing indicator, `native_window` channel with
-   `WDA_EXCLUDEFROMCAPTURE`, stop/pause buttons on the pill. Pause/resume segmenting +
-   concat finalize.
-4. **Audio** — `RecordSettingsService` + audio toggles UI (persisted); mic via dshow
-   (device discovery + arg wiring); WASAPI loopback module + segment-aligned WAV +
-   finalize mux/`amix`; sync verification (`-itsoffset` delta). Riskiest phase — budgeted
-   accordingly.
-5. **Hotkeys** — `HotkeyService`, defaults, recorder UI, persistence, lifecycle
-   (home + record screens + live recording; home-screen start uses saved monitor/audio).
-6. **Handoff + polish** — Video Studio `extra` file selection, 10-min auto-stop UX, error
-   toasts, `flutter analyze` clean, ARCHITECTURE.md update.
-
-Each phase ships working. Phases 1–2 retire the gdigrab/DPI risk; phase 4 retires the
-audio risk and can degrade gracefully (mic-only) if loopback proves flaky.
+No new packages. No backend interface changes — `FfmpegBackend.run(args, outputPath,
+onProgress, totalMs)` already covers this job shape on both platforms (process backend parses
+`-progress pipe:1` `out_time_ms`; kit backend uses the statistics callback).
 
 ---
 
-## 7. Improvements added beyond the request
+## 3. Service layer
 
-- **Capture-exclusion of the indicator** (`WDA_EXCLUDEFROMCAPTURE`) — the required pulsing
-  overlay would otherwise be burned into every recording made on that monitor.
-- **Clickable overlay** (pause/stop buttons + drag) — hotkeys shouldn't be the only way out.
-- **Crash-safe segments** (MKV) — a crash at minute 9 loses seconds, not the recording.
-- **Scoped hotkey registration** — global combos held only where confirmed (home + record
-  screens + live recording), never app-wide from other tools.
-- **Partial-recording rescue** — encoder dying mid-run still offers the completed segments.
-- **Last-used monitor remembered** — makes the home-screen start hotkey deterministic.
+```dart
+// FfmpegCommand
+static List<String> toWebm({
+  required String inputPath,
+  required String outputPath,
+  required int crf,            // 18–45
+  required int cpuUsed,        // vp9: 2|4|5 · av1: 4|6|8
+  bool av1 = false,            // codec mode: false = libvpx-vp9, true = libaom-av1
+  int? maxWidth,               // null = keep size (even-clamped)
+  bool keepAudio = false,      // caller passes MediaInfo.hasAudio (no UI toggle)
+  bool alpha = false,          // gif transparency → yuva420p (vp9 only; caller forces !av1)
+  int threads = 0,             // caller passes Platform.numberOfProcessors
+});
+```
 
-## 8. Open questions & concerns
+```dart
+// FfmpegService — per-file job dir; does NOT touch _currentJobDir (batch owns
+// multiple outputs at once, the single-slot model doesn't fit)
+Future<Result<File, FfmpegError>> convertToWebm({
+  required File input,
+  required int crf,
+  required int cpuUsed,
+  bool av1 = false,
+  int? maxWidth,
+  bool keepAudio = false,
+  bool alpha = false,
+  void Function(FfmpegProgress)? onProgress,
+  int? totalMs,                // MediaInfo.durationMs — no speed change, maps 1:1
+});
+```
 
-1. **System-audio risk (biggest item)** — WASAPI loopback module is the one genuinely new
-   native component. Sync (`-itsoffset` delta) and silence-gap insertion are the two known
-   chores; both are well-trodden but need real-hardware verification. Fallback if it
-   misbehaves: ship v1 with mic-only audio and a disabled system-audio switch ("coming
-   soon"), since the video pipeline doesn't depend on it.
-2. **Mic device selection** — v1 uses the system default input device (name shown on the
-   toggle row). A device dropdown is a cheap follow-up if users ask.
-3. **Audio in GIF exports** — audio is only meaningful for Video Studio's *video* export;
-   the GIF path discards it (already how the studio works — no change needed).
-4. **Crash recovery** — segments from a crashed session live in temp for ≤ 1 h
-   (`sweepStale`). A "recover last recording?" prompt on next launch is a cheap follow-up;
-   skipped in v1.
-5. **`ddagrab`/hardware encoders** — Desktop Duplication capture + HW encode would cut CPU
-   use markedly, but depends on the bundled ffmpeg build and GPU; gdigrab+x264-ultrafast is
-   the always-works baseline. Revisit only if capture at 1440p+ measurably stutters.
-6. **Disk** — 10 min of 1440p30 ultrafast H.264 ≈ 1–2 GB in temp. No guard in v1 beyond
-   surfacing the ffmpeg "disk full" failure; a free-space preflight check is a candidate
-   for phase 6.
-7. **ARCHITECTURE.md drift** — it documents `SettingsService`/settings screen that don't
-   exist in `lib/` (empty dirs). This plan doesn't depend on them (§4.6), but the doc
-   should be corrected regardless.
+Output file lives in its own job dir until export; controller frees each with the existing
+`cleanJobAt(file.parent.path)` (`ffmpeg_service.dart`, already used by Video Studio history).
+
+---
+
+## 4. Controller
+
+Follows the `EffectsController` pattern (`AsyncNotifier`, immutable state, `_s` sentinel
+`copyWith`) — no shared base class exists, per ARCHITECTURE.md.
+
+```dart
+enum WebmItemStatus { queued, converting, done, error }
+
+class WebmItem {          // immutable
+  File source; MediaInfo? info; WebmItemStatus status;
+  File? output; int? outputBytes;   // + source length → "2.4 MB → 780 KB · −68%" row label
+  double progressFraction; String? error;
+}
+
+class WebmConverterState {
+  List<WebmItem> items;   // ≤ 20, enforced in addFiles() with AppToast on overflow
+  int crf; int speedPreset; bool av1; int? maxWidth; bool alpha;
+  bool isProcessing; int currentIndex;
+  bool get isBatch => items.length > 1;
+  double get overallProgress => (doneCount + currentFraction) / items.length;
+}
+```
+
+No global `error` field — errors are per-item; a service-level failure toasts. No `canceled`
+status — cancel puts the in-flight item back to `queued`, so Convert resumes exactly where it
+stopped instead of dead-ending the batch.
+
+- `addFiles(List<File>)` — append (drop zone stays visible above the list, so more files can be
+  added to an existing batch), cap 20, probe each sequentially (a null `info` renders as
+  "probing…"; no per-item probing flag).
+- `convertAll()` — for-loop over queued items; per item: mark `converting`, call
+  `convertToWebm`, fold into `done` (stat output size) / `error`; check `_cancelRequested`
+  between items. An `error` item does not stop the batch — remaining files still convert.
+- `cancel()` — set flag + backend `cancel()`; current item → back to `queued`, its job dir
+  cleaned; `done` items keep their outputs.
+- Changing any option while `done` items exist resets them to `queued` (outputs freed) — the
+  options card is live, the button reads "Convert again"; no stale outputs that silently ignore
+  the new settings.
+- `removeItem(i)` / `clear()` — clean owned job dirs.
+- Options (crf/speed/av1/maxWidth/alpha) load from and persist to `shared_preferences` as
+  last-used values — a user converting for the same target twice shouldn't re-dial the knobs.
+- Export (§5) then `recentsProvider.notifier.add(...)` per saved file (notifier already caps
+  at 10).
+
+---
+
+## 5. Export (locked flow preserved)
+
+Everything converts into temp job dirs first; writing to the user's disk is always explicit —
+per ARCHITECTURE.md "Export flow (locked decision)".
+
+- **Single file:** `ExportService.saveWebm(tempFile, defaultName: '<basename>.webm')` — same
+  shape as the existing `saveVideo()`, extension `webm`.
+- **Batch:** one `FilePicker.platform.getDirectoryPath()` dialog, then copy every `done` item
+  as `<basename>.webm`, suffixing ` (1)`, ` (2)`… on collision. Twenty sequential `saveFile`
+  dialogs is not a UX.
+- After each successful copy: `cleanJobAt` that item's dir.
+
+**Android risk (flagged, not solved on paper):** `getDirectoryPath()` may return a SAF tree URI
+that plain `File.copy` can't write into. Mitigation order: (1) test on device — many paths
+(Downloads, primary storage) work with the `permission_handler` storage grant the app already
+holds; (2) if writes fail, fall back to per-file `saveFile` dialogs on Android only (acceptable —
+mobile batch sizes are small in practice). Decide from the device test, not speculation.
+
+Disk note: up to 20 converted WebMs sit in temp until export. WebM output is typically smaller
+than source; `TempFileService.sweepStale()` already reclaims leftovers on next launch if the
+user bails.
+
+---
+
+## 6. Screen
+
+Standard 4-step skeleton:
+
+1. **Pick** — `FileDropZone(allowMultiple: true, allowedExtensions: [mp4, mov, mkv, avi, m4v,
+   webm, gif])` — drag-drop already works on Windows via the existing widget.
+2. **Options** — glass card: Codec chips (VP9 recommended / AV1 smallest·slower — hidden when
+   `supportsAv1()` is false, disabled when transparency ON), Quality `OptionSlider` (CRF 18–45
+   shown as value, hint "lower = sharper, bigger"), Speed chips (Fast/Balanced/Best), Max width
+   chips (Original/1080/720/480), Keep transparency toggle (shown only when any input is GIF).
+   Options are global — apply to every file in the batch — and persist as last-used (§4).
+3. **Convert** — file rows: name, resolution/duration from probe, status chip, per-file progress
+   bar; `done` rows show the size delta ("2.4 MB → 780 KB · −68%") — the number the user came
+   for. Overall `ProgressOverlay` with "Converting 3 of 12 · 41%" + cancel while `isProcessing`.
+4. **Export** — single: save dialog; batch: "Export all (N)" → directory picker. Success
+   `AppToast` includes total saved ("12 files · 34 MB → 11 MB") + recents.
+
+Preview: tap a `done` row → play via the existing `media_kit` `Video` player (libmpv plays WebM
+on both platforms). Skipped: pre-convert quality preview — a converter isn't an editor; the
+convert itself is the preview.
+
+---
+
+## 7. Implementation order
+
+1. `FfmpegCommand.toWebm` + arg-builder unit test.
+2. `FfmpegService.convertToWebm`.
+3. Controller + state.
+4. Screen; router + tool catalog entries.
+5. `ExportService` additions (single, then batch dir copy).
+6. Gate: `flutter analyze` → 0 issues; `flutter test`.
+7. Manual verify (Windows dev run): odd-dimension mp4 (e.g. 641×359) → even clamp; audio-less
+   video (must emit `-an`, not fail); audio video → Opus track present; GIF with transparency,
+   alpha ON vs OFF; batch of 3 mixed video+GIF — size deltas shown per row; cancel mid-batch →
+   in-flight item back to queued, Convert resumes, no orphan temp dirs; option change after done
+   → items reset to queued; 21-file pick → cap toast; AV1 smoke encode (plays in Chrome, smaller
+   than VP9 at same CRF); AV1 chip disables when transparency ON; options + studio format
+   restored after app restart. Android device: single convert + batch export directory write
+   (the §5 risk) + `supportsAv1()` probe result (expect false — chip hidden).
+
+---
+
+## 8. Video Studio — Export Video format choice (MP4 | WebM)
+
+Today `exportVideo()` (`video_studio_controller.dart:1206`) is a direct button → h264/mp4 via
+`editVideo`'s encoder-candidate fallback, hardcoded `studio.mp4`. Change: Export Video opens a
+**format page** first, then runs the chosen pipeline.
+
+**UI.** Export button pushes a compact glass page (standard fade+slide route, matching the rest
+of the app) with two selectable format cards:
+- **MP4** — "H.264 · best compatibility · hardware-accelerated" (default)
+- **WebM** — "VP9 · smaller files · web-friendly"
+plus the existing "you'll be asked where to save" note and an Export button. The chosen format
+persists as last-used (`shared_preferences`) and preselects next time — repeat exporters skip a
+tap. No quality knobs here — WebM uses the §1 defaults (CRF 32, cpu-used 4, Opus 128k); a quality
+slider can join the page later if asked. GIF-stage export is untouched.
+
+**Pipeline.**
+- `FfmpegCommand.videoEdit` gains a format switch: same filter graph (crop · scale · speed ·
+  text · cuts · volume), but WebM swaps the encoder block to the §1 VP9 arg set (shared private
+  helper with `toWebm` — one place owns the VP9 flags) + `-c:a libopus -b:a 128k`, output
+  extension `webm`.
+- `FfmpegService.editVideo` gains `format`; for WebM the encoder-candidate loop runs with the
+  single candidate `libvpx-vp9` (no hw VP9 encoders exist — §1). H.264 path unchanged.
+- **No stream-copy / fast path for WebM.** WebM only admits VP8/VP9/AV1, so an h264 source can
+  never be remuxed — every WebM export encodes:
+  - `editsApplied` fast path (baked mp4, nothing pending): MP4 → `saveVideo` as-is (unchanged);
+    WebM → `convertToWebm(baked)` (§3) then save. One encode, from the already-baked frames.
+  - No-edits + WebM likewise routes through `convertToWebm` — it's exactly the converter-tool op.
+- Save: WebM uses `ExportService.saveWebm` (§5), default name `studio.webm`; MP4 keeps
+  `saveVideo` / `studio.mp4`.
+
+**Order.** Implement after §7 steps 1–2 (reuses `toWebm` args + `convertToWebm`); before or
+parallel with the converter screen — no dependency between the two UIs.
+
+**Verify.** MP4 export unchanged (regression check); WebM export with edits pending (single
+encode, plays in Chrome); WebM export right after Apply (routes via `convertToWebm`, no
+double-encode of pending layers); volume ≠ 1.0 survives into Opus track.
+
+---
+
+## 9. Open questions (defaults chosen, revisit only if wrong)
+
+- CRF default 32 — not wired to `SettingsService` (its fps/width/colors/lossy defaults are
+  GIF-shaped). Add a settings slider later only if users ask.
+- `webm` accepted as *input* (re-encode to smaller/newer settings) — trivially free since ffmpeg
+  demuxes it; drop from the extension list if product-wise confusing.
+- Studio format page (§8) stays MP4 | WebM(VP9) — AV1 lives in the converter tool; add a third
+  card there only if asked.

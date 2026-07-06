@@ -206,6 +206,23 @@ class RecordController extends AsyncNotifier<RecordState> {
         s.copyWith(settings: s.settings.copyWith(outputResolution: value)));
   }
 
+  /// `null` resets to default (system temp).
+  Future<void> setSaveDirectory(String? value) async {
+    await ref.read(recordSettingsServiceProvider).setSaveDirectory(value);
+    final s = state.valueOrNull;
+    if (s == null) return;
+    state = AsyncData(
+        s.copyWith(settings: s.settings.copyWith(saveDirectory: value)));
+  }
+
+  Future<void> setDeleteTempOnExit(bool value) async {
+    await ref.read(recordSettingsServiceProvider).setDeleteTempOnExit(value);
+    final s = state.valueOrNull;
+    if (s == null) return;
+    state = AsyncData(
+        s.copyWith(settings: s.settings.copyWith(deleteTempOnExit: value)));
+  }
+
   /// Returns false (and leaves persisted state untouched) on conflict with
   /// one of the other two hotkeys, or if the OS rejects the combo (already
   /// taken by another app) — caller surfaces either as an [AppToast].
@@ -327,6 +344,7 @@ class RecordController extends AsyncNotifier<RecordState> {
           micDeviceName: micName,
         ),
         resolution: s.settings.outputResolution,
+        saveDirectory: s.settings.saveDirectory,
       );
       Log.d(_tag, 'ScreenRecorderService.start returned, status=${_recorder.status}');
       await _showIndicator(monitor);
@@ -357,10 +375,12 @@ class RecordController extends AsyncNotifier<RecordState> {
     }
   }
 
-  /// Called from the window-close handler — kills a live ffmpeg segment and
-  /// deletes its temp job dir so nothing orphans on disk. No-op if idle.
+  /// Called from the window-close handler — kills a live ffmpeg segment and,
+  /// unless the user disabled "Delete temporary video on exit", deletes its
+  /// temp job dir so nothing orphans on disk. No-op if idle.
   Future<void> cleanupForAppExit() async {
-    await _recorderInstance?.cleanupOnShutdown();
+    final deleteTemp = state.valueOrNull?.settings.deleteTempOnExit ?? true;
+    await _recorderInstance?.cleanupOnShutdown(deleteTemp: deleteTemp);
   }
 
   Future<void> stopRecording() async {

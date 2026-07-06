@@ -143,12 +143,13 @@ class ScreenRecorderService {
     RecordTarget monitor,
     RecordAudioOptions audio, {
     RecordOutputResolution resolution = RecordOutputResolution.original,
+    String? saveDirectory,
   }) async {
     if (_status != RecordStatus.idle) return;
     _monitor = monitor;
     _audio = audio;
     _resolution = resolution;
-    _jobDir = await _temp.createJobDir();
+    _jobDir = await _temp.createJobDir(baseDirOverride: saveDirectory);
     _segmentIndex = 0;
     _videoSegments.clear();
     _wavSegments.clear();
@@ -377,14 +378,15 @@ class ScreenRecorderService {
   /// Kills a live ffmpeg segment and deletes its job dir on app shutdown.
   /// No-op when idle — a finished job's `_jobDir` may still be the source
   /// file Video Studio is editing, so only an in-progress recording's temp
-  /// segments are fair game here.
-  Future<void> cleanupOnShutdown() async {
+  /// segments are fair game here. [deleteTemp] gates the dir deletion —
+  /// the "Delete temporary video on exit" setting.
+  Future<void> cleanupOnShutdown({bool deleteTemp = true}) async {
     if (_status == RecordStatus.idle) return;
     _capTimer?.cancel();
     _expectingExit = true;
     _process?.kill();
     _process = null;
-    if (_jobDir != null) await _temp.cleanJob(_jobDir!);
+    if (deleteTemp && _jobDir != null) await _temp.cleanJob(_jobDir!);
   }
 
   void dispose() {

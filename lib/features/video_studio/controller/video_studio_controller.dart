@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart' show FontLoader;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/services/files/export_service.dart';
 import '../../../core/services/ffmpeg/ffmpeg_command.dart' show CutSegment;
@@ -17,6 +18,11 @@ import '../../text_overlay/model/text_item.dart';
 
 /// Which artifact the studio is currently editing.
 enum EditStage { video, gif }
+
+/// Export Video's format choice (PLAN.md §8). WebM always uses the §1
+/// defaults (CRF 32, cpu-used 4, Opus 128k) — no quality knobs on the format
+/// page; a slider can join later if asked.
+enum ExportVideoFormat { mp4, webm }
 
 /// Auto FPS cap for a video→GIF conversion, tuned by output length so long
 /// clips don't bloat: <15s→21, 15–20s→16, 20–25s→15, 25–30s→12, 30–40s→8.
@@ -39,7 +45,7 @@ int maxGifWidthFor(int durationMs) {
 }
 
 /// The tool whose editor panel is open in the dock.
-enum StudioTool { crop, resize, speed, trim, cut, text, gif, optimize, properties }
+enum StudioTool { crop, resize, speed, trim, cut, text, gif, optimize, properties, webm }
 
 class VideoStudioState {
   const VideoStudioState({
@@ -129,8 +135,10 @@ class VideoStudioState {
 
   /// Crossfades the last [smoothLoopCrossfadeMs] into the first
   /// [smoothLoopCrossfadeMs], then drops that same span from the front, so
-  /// the loop point has no jump cut. GIF-stage only; mutually exclusive with
-  /// [boomerang] (both replace the tail of the filter graph).
+  /// the loop point has no jump cut. Works on both stages: GIF-stage
+  /// mutually exclusive with [boomerang] (both replace the tail of the
+  /// filter graph); video-stage also crossfades the audio track (acrossfade)
+  /// when the source has one.
   final bool smoothLoop;
 
   /// Crossfade span for [smoothLoop], 500–1000ms in 100ms steps.
@@ -302,7 +310,12 @@ class VideoStudioState {
       !editsApplied &&
       (isGif
           ? (needsGifEdit || doOptimize || hasText)
-          : (hasEdits || hasTrim || hasText || hasVolumeChange || hasCut));
+          : (hasEdits ||
+              hasTrim ||
+              hasText ||
+              hasVolumeChange ||
+              hasCut ||
+              smoothLoop));
 
   /// Whether [tool]'s panel currently carries a non-default edit — drives the
   /// dot indicator on the tool selector.
@@ -325,7 +338,11 @@ class VideoStudioState {
       case StudioTool.optimize:
         return doOptimize;
       case StudioTool.properties:
-        return isGif ? (loopCount != 0 || boomerang || smoothLoop) : hasVolumeChange;
+        return isGif
+            ? (loopCount != 0 || boomerang || smoothLoop)
+            : (hasVolumeChange || smoothLoop);
+      case StudioTool.webm:
+        return false;
     }
   }
 
@@ -435,6 +452,16 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
   Map<TextStyleKind, String> _fontFamilies = const {};
   var _nextTextId = 0;
 
+  static const _prefExportFormat = 'studio_export_format';
+  ExportVideoFormat _lastExportFormat = ExportVideoFormat.mp4;
+  ExportVideoFormat get lastExportFormat => _lastExportFormat;
+
+  Future<void> setLastExportFormat(ExportVideoFormat format) async {
+    _lastExportFormat = format;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_prefExportFormat, format.index);
+  }
+
   /// Temp dir owning the last applied-video bake (video stage has no undo
   /// history, so it is tracked separately from [_history]). Freed when
   /// superseded (re-apply, makeGif, discardGif, setInput, clear, dispose).
@@ -457,6 +484,10 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
       _clearHistory();
       _freeAppliedVideo();
     });
+    final prefs = await SharedPreferences.getInstance();
+    _lastExportFormat = ExportVideoFormat
+        .values[(prefs.getInt(_prefExportFormat) ?? 0)
+            .clamp(0, ExportVideoFormat.values.length - 1)];
     await FontRegistry.ensureLoaded();
     final fonts = <TextStyleKind, String>{};
     for (final style in TextStyleKind.values) {
@@ -1012,6 +1043,67 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
     ));
   }
 
+  /// Bakes any pending GIF edits, converts to WebM, and switches the studio
+  /// into the video-editing flow with that WebM as the new source. One-way —
+  /// there is no "back to GIF" from here, mirroring how video-stage has no
+  /// "back to WebM".
+  Future<bool> makeWebm() async {
+    final s = state.valueOrNull;
+    if (s == null || s.sourceFile == null || s.isProcessing || !s.isGif) {
+      return false;
+    }
+    state = AsyncData(s.copyWith(
+        isProcessing: true, progress: null, error: null, activeTool: null));
+
+    final (workingFile, editDir) = await _runGifPipeline(s, s.sourceFile!);
+    if (workingFile == null) return false;
+
+    final workingDir = workingFile.parent.path;
+    if (editDir != null && editDir != workingDir) {
+      await _ffmpeg.cleanJobAt(editDir);
+    }
+
+    final result = await _ffmpeg.convertToWebm(
+      input: workingFile,
+      crf: 32,
+      cpuUsed: 4,
+      totalMs: s.sourceDurationMs > 0 ? s.sourceDurationMs : null,
+      onProgress: _onProgress,
+    );
+
+    return await result.fold(
+      ok: (webm) async {
+        // workingFile is either the history-owned sourceFile (untouched — no
+        // pending edits) or a fresh pipeline temp never registered in
+        // history; clearHistory frees the former, the explicit cleanJobAt
+        // below frees the latter.
+        final ownedByHistory = workingFile.path == s.sourceFile!.path;
+        _clearHistory();
+        _freeAppliedVideo();
+        if (!ownedByHistory) await _ffmpeg.cleanJobAt(workingDir);
+        final info = await _ffmpeg.probe(webm);
+        _appliedVideoDir = webm.parent.path;
+        state = AsyncData(VideoStudioState(
+          inputFile: webm,
+          stage: EditStage.video,
+          sourceFile: webm,
+          sourceInfo: info,
+          activeTool: StudioTool.crop,
+          fontFiles: _fontFiles,
+          fontFamilies: _fontFamilies,
+          volume: s.volume,
+        ));
+        return true;
+      },
+      err: (e) async {
+        final cur = state.valueOrNull ?? const VideoStudioState();
+        state = AsyncData(cur.copyWith(
+            isProcessing: false, progress: null, error: e.message));
+        return false;
+      },
+    );
+  }
+
   // ── GIF render pipeline ───────────────────────────────────────────────────
 
   /// Runs editGif → optimizeGif for [s] starting from [workingFile].
@@ -1166,6 +1258,9 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
       mediaInfo: s.sourceInfo,
       keepRanges: kr,
       keepRangesOutputMs: s.hasCut ? s.cutOutputMs : null,
+      smoothLoop: s.smoothLoop,
+      crossfadeMs: s.smoothLoopCrossfadeMs,
+      loopDurationMs: s.smoothLoop ? s.effectiveOutputMs : null,
       onProgress: _onProgress,
     );
 
@@ -1203,18 +1298,36 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
     return true;
   }
 
-  Future<bool> exportVideo() async {
+  Future<bool> exportVideo(
+      {ExportVideoFormat format = ExportVideoFormat.mp4}) async {
     final s = state.valueOrNull;
     if (s == null || s.sourceFile == null || s.isProcessing || s.isGif) {
       return false;
     }
+    final webm = format == ExportVideoFormat.webm;
 
-    // Apply ran and nothing changed since → save the baked video as-is.
+    // Apply ran and nothing changed since → sourceFile is already the fully
+    // baked (h264) frames. MP4 saves it as-is; WebM still needs its own
+    // encode pass over those baked frames — exactly the converter tool's op
+    // (PLAN.md §8), so it reuses convertToWebm rather than editVideo.
     if (s.editsApplied) {
-      final saved =
-          await _export.saveVideo(s.sourceFile!, defaultName: 'studio.mp4');
-      if (saved != null) await _addRecent(saved);
-      return saved != null;
+      if (!webm) {
+        final saved =
+            await _export.saveVideo(s.sourceFile!, defaultName: 'studio.mp4');
+        if (saved != null) await _addRecent(saved);
+        return saved != null;
+      }
+      state = AsyncData(s.copyWith(
+          isProcessing: true, progress: null, error: null, activeTool: null));
+      final result = await _ffmpeg.convertToWebm(
+        input: s.sourceFile!,
+        crf: 32,
+        cpuUsed: 4,
+        keepAudio: s.hasAudio,
+        totalMs: s.sourceDurationMs > 0 ? s.sourceDurationMs : null,
+        onProgress: _onProgress,
+      );
+      return _saveWebmResult(result);
     }
 
     state = AsyncData(s.copyWith(
@@ -1224,7 +1337,9 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
     final t = _trimParams(s);
     final kr = s.hasCut ? s.keepRanges : null;
     // Text overlay layers bake into the encode (drawtext before crop/scale) so
-    // they scale/crop with the content, matching the live preview.
+    // they scale/crop with the content, matching the live preview. WebM only
+    // admits VP8/VP9/AV1 (never stream-copy from h264), so editVideo always
+    // runs a real encode when webm is true — see its isNoOp guard.
     final result = await _ffmpeg.editVideo(
       input: s.sourceFile!,
       cropX: c.x,
@@ -1242,10 +1357,35 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
       mediaInfo: s.sourceInfo,
       keepRanges: kr,
       keepRangesOutputMs: s.hasCut ? s.cutOutputMs : null,
+      smoothLoop: s.smoothLoop,
+      crossfadeMs: s.smoothLoopCrossfadeMs,
+      loopDurationMs: s.smoothLoop ? s.effectiveOutputMs : null,
       onProgress: _onProgress,
+      webm: webm,
     );
 
-    return _saveResult(result, isGif: false);
+    return webm ? _saveWebmResult(result) : _saveResult(result, isGif: false);
+  }
+
+  Future<bool> _saveWebmResult(Result<File, FfmpegError> result) async {
+    final cur = state.valueOrNull ?? const VideoStudioState();
+    return await result.fold(
+      ok: (file) async {
+        state = AsyncData(cur.copyWith(isProcessing: false, progress: null));
+        final saved =
+            await _export.saveWebm(file, defaultName: 'studio.webm');
+        if (saved != null) {
+          await _ffmpeg.cleanJobAt(file.parent.path);
+          await _addRecent(saved);
+        }
+        return saved != null;
+      },
+      err: (e) async {
+        state = AsyncData(cur.copyWith(
+            isProcessing: false, progress: null, error: e.message));
+        return false;
+      },
+    );
   }
 
   Future<bool> exportGif() async {

@@ -10,15 +10,17 @@ const DOWNLOAD_WIN = 'https://1drv.ms/u/c/15f9d9574a5f179d/IQB0HJhNzHUoSJ1p-Q8fl
 const features = [
   { ico: '🎬', hue: '265', title: 'Video Studio', desc: 'Composite editor — crop, resize, speed, trim, cut, boomerang, smooth loop, volume, text overlay, full undo/redo. Export to video or GIF.', big: true },
   { ico: '🖼️', hue: '200', title: 'Images → GIF', desc: 'Build GIFs from image sequences with frame rate and scale control.' },
+  { ico: '⏺️', hue: '350', wide: true, title: 'Screen Record', desc: 'Capture your screen, then jump straight into Video Studio to edit.' },
   { ico: '📐', hue: '330', title: 'Resize', desc: 'Scale GIFs to any custom dimensions while keeping quality.' },
   { ico: '✂️', hue: '35', title: 'Crop', desc: 'Trim GIF content by region with a live preview.' },
   { ico: '🔤', hue: '160', title: 'Text Overlay', desc: 'Add custom text with font and position control.' },
   { ico: '⚡', hue: '265', wide: true, title: 'Optimize', desc: 'Shrink file size via palette quantization and inter-frame transparency. Live progress, tuned for large video. Pure-Dart, no binary.' },
   { ico: '🌀', hue: '200', title: 'Effects', desc: 'Speed adjustment and frame reversal in one tap.' },
-  { ico: '🕓', hue: '330', title: 'Recent Exports', desc: 'Live previews, progress tracking with cancel, and an export history.' },
+  { ico: '🎞️', hue: '230', title: 'To WebM', desc: 'Convert any video or GIF to WebM.' },
+  { ico: '🕓', hue: '330', wide: true, title: 'Recent Exports', desc: 'Live previews, progress tracking with cancel, and an export history.' },
 ];
 
-const ticker = ['Video Studio', 'Images → GIF', 'Resize', 'Crop', 'Text Overlay', 'Optimize', 'Effects', 'Recent Exports'];
+const ticker = ['Video Studio', 'Images → GIF', 'Screen Record', 'Resize', 'Crop', 'Text Overlay', 'Optimize', 'Effects', 'To WebM', 'Recent Exports'];
 
 const HEADLINE_A = ['GIF', 'magic,'];
 const HEADLINE_B = ['wrapped', 'in', 'liquid', 'glass.'];
@@ -162,7 +164,7 @@ const App: Component = () => {
             </span>
           </h1>
           <p class="sub anim-3">
-            Gifolomora turns videos and image sequences into polished GIFs using 7 specialized
+            Gifolomora turns videos and image sequences into polished GIFs using 9 specialized
             tools — all wrapped in a beautiful glass-themed UI. Fast, private, cross-platform.
           </p>
           <div class="cta anim-4">
@@ -187,7 +189,7 @@ const App: Component = () => {
       </div>
 
       <section id="features" class="wrap section">
-        <h2 class="reveal">Seven tools, one glass workspace</h2>
+        <h2 class="reveal">Nine tools, one glass workspace</h2>
         <p class="lead reveal">
           Everything you need to make and refine GIFs — with live previews and user-driven exports.
         </p>

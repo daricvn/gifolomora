@@ -445,6 +445,225 @@ void main() {
     });
   });
 
+  group('FfmpegCommand.toWebm', () {
+    test('vp9 default: libvpx-vp9, crf/b:v 0, row-mt/tile-columns, -an', () {
+      final args = FfmpegCommand.toWebm(
+        inputPath: '/in.mp4',
+        outputPath: '/out.webm',
+        crf: 32,
+        cpuUsed: 4,
+      );
+      expect(args, containsAll([
+        '-c:v', 'libvpx-vp9', '-crf', '32', '-b:v', '0',
+        '-cpu-used', '4', '-deadline', 'good', '-row-mt', '1', '-tile-columns', '2',
+      ]));
+      expect(args, contains('-an'));
+      expect(args, isNot(contains('libopus')));
+    });
+
+    test('keepAudio true → libopus 128k, no -an', () {
+      final args = FfmpegCommand.toWebm(
+        inputPath: '/in.mp4',
+        outputPath: '/out.webm',
+        crf: 32,
+        cpuUsed: 4,
+        keepAudio: true,
+      );
+      expect(args, containsAll(['-c:a', 'libopus', '-b:a', '128k']));
+      expect(args, isNot(contains('-an')));
+    });
+
+    test('av1 true → libaom-av1, no -deadline flag', () {
+      final args = FfmpegCommand.toWebm(
+        inputPath: '/in.mp4',
+        outputPath: '/out.webm',
+        crf: 28,
+        cpuUsed: 6,
+        av1: true,
+      );
+      expect(args, contains('libaom-av1'));
+      expect(args, isNot(contains('-deadline')));
+    });
+
+    test('no maxWidth → even-clamp scale of source dims', () {
+      final args = FfmpegCommand.toWebm(
+        inputPath: '/in.mp4', outputPath: '/out.webm', crf: 32, cpuUsed: 4,
+      );
+      final vf = args[args.indexOf('-vf') + 1];
+      expect(vf, equals('scale=trunc(iw/2)*2:trunc(ih/2)*2'));
+    });
+
+    test('maxWidth caps to smaller of (cap, source), never upscales', () {
+      final args = FfmpegCommand.toWebm(
+        inputPath: '/in.mp4', outputPath: '/out.webm', crf: 32, cpuUsed: 4,
+        maxWidth: 1080,
+      );
+      final vf = args[args.indexOf('-vf') + 1];
+      expect(vf, equals("scale='trunc(min(1080,iw)/2)*2':-2"));
+    });
+
+    test('alpha on (vp9) → yuva420p + -auto-alt-ref 0', () {
+      final args = FfmpegCommand.toWebm(
+        inputPath: '/in.gif', outputPath: '/out.webm', crf: 32, cpuUsed: 4,
+        alpha: true,
+      );
+      expect(args, containsAll(['-pix_fmt', 'yuva420p', '-auto-alt-ref', '0']));
+    });
+
+    test('alpha ignored when av1 (forced opaque, no auto-alt-ref)', () {
+      final args = FfmpegCommand.toWebm(
+        inputPath: '/in.gif', outputPath: '/out.webm', crf: 32, cpuUsed: 6,
+        av1: true, alpha: true,
+      );
+      expect(args, containsAll(['-pix_fmt', 'yuv420p']));
+      expect(args, isNot(contains('-auto-alt-ref')));
+    });
+  });
+
+  group('FfmpegCommand.videoEdit webm', () {
+    test('webm true swaps encoder block to vp9 + opus, no encoder required', () {
+      final args = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.webm',
+        webm: true,
+        webmCrf: 30,
+        webmCpuUsed: 5,
+        hasAudio: true,
+      );
+      expect(args, containsAll(['-c:v', 'libvpx-vp9', '-crf', '30', '-cpu-used', '5']));
+      expect(args, containsAll(['-c:a', 'libopus', '-b:a', '128k']));
+      expect(args, isNot(contains('libx264')));
+      expect(args, containsAll(['-pix_fmt', 'yuv420p']));
+    });
+
+    test('webm false (default) keeps h264/aac path', () {
+      final args = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+        hasAudio: true,
+      );
+      expect(args, contains('libx264'));
+      expect(args, isNot(contains('libvpx-vp9')));
+    });
+  });
+
+  group('FfmpegCommand.videoEdit — smoothLoop', () {
+    test('smoothLoop true emits filter_complex with split=3/xfade/concat, maps [vout]', () {
+      final args = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+        smoothLoop: true,
+        loopDurationMs: 8000,
+      );
+      expect(args.contains('-vf'), isFalse);
+      final filter = args[args.indexOf('-filter_complex') + 1];
+      expect(filter, contains('split=3'));
+      expect(filter, contains('xfade=transition=fade:duration=1.000'));
+      expect(filter, contains('concat=n=2:v=1:a=0[vout]'));
+      expect(args, containsAll(['-map', '[vout]']));
+      // split/trim/xfade/concat renegotiates pix_fmt (can land on yuv444p,
+      // which many decoders render as black) — must be forced back to
+      // yuv420p even on the non-webm (h264/mp4) path.
+      expect(args, containsAll(['-pix_fmt', 'yuv420p']));
+    });
+
+    test('default (no smoothLoop) uses plain -vf, no filter_complex', () {
+      final args = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+      );
+      expect(args.contains('-filter_complex'), isFalse);
+      expect(args.contains('-vf'), isTrue);
+    });
+
+    test('trim boundary math: loopDurationMs=8000, speedFactor=2.0 → D=4.0', () {
+      final args = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+        speedFactor: 2.0,
+        smoothLoop: true,
+        loopDurationMs: 8000,
+      );
+      final filter = args[args.indexOf('-filter_complex') + 1];
+      expect(filter, contains('trim=3.000:4.000')); // tail
+      expect(filter, contains('trim=1.000:3.000')); // mid stops before tail
+    });
+
+    test('crossfadeMs=500 → 0.500s xfade/trim boundaries', () {
+      final args = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+        smoothLoop: true,
+        loopDurationMs: 8000,
+        crossfadeMs: 500,
+      );
+      final filter = args[args.indexOf('-filter_complex') + 1];
+      expect(filter, contains('xfade=transition=fade:duration=0.500'));
+      expect(filter, contains('trim=0:0.500')); // head
+      expect(filter, contains('trim=7.500:8.000')); // tail
+      expect(filter, contains('trim=0.500:7.500')); // mid
+    });
+
+    test('hasAudio true adds acrossfade graph and maps [aout] with audio codec', () {
+      final args = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+        hasAudio: true,
+        smoothLoop: true,
+        loopDurationMs: 8000,
+      );
+      final filter = args[args.indexOf('-filter_complex') + 1];
+      expect(filter, contains('acrossfade=d=1.000:c1=tri:c2=tri'));
+      expect(filter, contains('concat=n=2:v=0:a=1[aout]'));
+      expect(args, containsAll(['-map', '[aout]', '-c:a', 'aac', '-b:a', '160k']));
+      expect(args.contains('-an'), isFalse);
+    });
+
+    test('hasAudio false → -an, no audio graph', () {
+      final args = FfmpegCommand.videoEdit(
+        inputPath: '/in.mp4',
+        outputPath: '/out.mp4',
+        encoder: 'libx264',
+        smoothLoop: true,
+        loopDurationMs: 8000,
+      );
+      final filter = args[args.indexOf('-filter_complex') + 1];
+      expect(filter, isNot(contains('acrossfade')));
+      expect(args.contains('-an'), isTrue);
+    });
+
+    test('throws when smoothLoop and loopDurationMs is null', () {
+      expect(
+        () => FfmpegCommand.videoEdit(
+          inputPath: '/in.mp4',
+          outputPath: '/out.mp4',
+          encoder: 'libx264',
+          smoothLoop: true,
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('throws when post-speed duration too short for crossfade', () {
+      expect(
+        () => FfmpegCommand.videoEdit(
+          inputPath: '/in.mp4',
+          outputPath: '/out.mp4',
+          encoder: 'libx264',
+          smoothLoop: true,
+          loopDurationMs: 1000, // D=1.0s <= 2*1.0+0.1
+        ),
+        throwsArgumentError,
+      );
+    });
+  });
+
   group('FfmpegCommand.buildConcatFileContent', () {
     test('15fps → duration 0.066667 per frame', () {
       final content =

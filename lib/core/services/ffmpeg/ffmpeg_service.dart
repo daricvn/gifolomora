@@ -98,6 +98,14 @@ class FfmpegService {
 
   Future<MediaInfo?> probe(File file) => _backend.probe(file.path);
 
+  bool? _supportsAv1;
+
+  /// One-time cached probe: does this platform's ffmpeg build carry
+  /// libaom-av1? Upstream ffmpeg-kit Android builds never bundled it (dav1d
+  /// is decode-only), so the AV1 chip stays hidden there.
+  Future<bool> supportsAv1() async =>
+      _supportsAv1 ??= await _backend.supportsEncoder('libaom-av1');
+
   Future<Result<File, FfmpegError>> resizeGif({
     required File input,
     int? width,
@@ -330,6 +338,15 @@ class FfmpegService {
     MediaInfo? mediaInfo,
     List<CutSegment>? keepRanges,
     int? keepRangesOutputMs,
+    bool smoothLoop = false,
+    int crossfadeMs = 1000,
+    int? loopDurationMs,
+    // WebM export (§8 of PLAN.md). WebM only admits VP8/VP9/AV1, so an h264
+    // source can never stream-copy — the no-op fast path is skipped entirely
+    // and every WebM export runs a real (single-candidate, VP9) encode.
+    bool webm = false,
+    int webmCrf = 32,
+    int webmCpuUsed = 4,
   }) async {
     final jobDir = await _temp.createJobDir();
     _currentJobDir = jobDir;
@@ -342,16 +359,18 @@ class FfmpegService {
     final hasTrim = (startMs != null && startMs > 0) || (durationMs != null && durationMs > 0);
     final volumeChanged = hasAudio && (volume - 1.0).abs() >= 0.01;
     final hasCutRanges = keepRanges != null && keepRanges.length >= 2;
-    final isNoOp = cropX == null &&
+    final isNoOp = !webm &&
+        cropX == null &&
         scaleW == null &&
         (speedFactor - 1.0).abs() < 0.001 &&
         !hasText &&
         !hasTrim &&
         !volumeChanged &&
-        !hasCutRanges;
+        !hasCutRanges &&
+        !smoothLoop;
 
     try {
-      final outputPath = await _temp.tempOutputPath(jobDir, 'mp4');
+      final outputPath = await _temp.tempOutputPath(jobDir, webm ? 'webm' : 'mp4');
 
       if (isNoOp) {
         final args = FfmpegCommand.videoStreamCopy(
@@ -362,15 +381,48 @@ class FfmpegService {
             onProgress: onProgress, totalMs: totalMs);
       }
 
-      final candidates =
-          encoderCandidates ?? VideoEncoder.platformCandidates();
-
-      final effectiveTotalMs = keepRangesOutputMs ??
+      var effectiveTotalMs = keepRangesOutputMs ??
           (durationMs != null && durationMs > 0
               ? durationMs
               : (totalMs != null && (speedFactor - 1.0).abs() > 0.001
                   ? (totalMs / speedFactor).round()
                   : totalMs));
+      if (smoothLoop && effectiveTotalMs != null) {
+        effectiveTotalMs =
+            (effectiveTotalMs - crossfadeMs).clamp(1, effectiveTotalMs);
+      }
+
+      if (webm) {
+        final args = FfmpegCommand.videoEdit(
+          inputPath: input.path,
+          outputPath: outputPath,
+          cropX: cropX,
+          cropY: cropY,
+          cropW: cropW,
+          cropH: cropH,
+          scaleW: scaleW,
+          scaleH: scaleH,
+          speedFactor: speedFactor,
+          hasAudio: hasAudio,
+          volume: volume,
+          startMs: startMs,
+          durationMs: durationMs,
+          textSpecs: textSpecs,
+          keepRanges: keepRanges,
+          smoothLoop: smoothLoop,
+          crossfadeMs: crossfadeMs,
+          loopDurationMs: loopDurationMs,
+          webm: true,
+          webmCrf: webmCrf,
+          webmCpuUsed: webmCpuUsed,
+          webmThreads: Platform.numberOfProcessors,
+        );
+        return await _backend.run(args, outputPath,
+            onProgress: onProgress, totalMs: effectiveTotalMs);
+      }
+
+      final candidates =
+          encoderCandidates ?? VideoEncoder.platformCandidates();
 
       for (int i = 0; i < candidates.length; i++) {
         final encoder = candidates[i];
@@ -391,6 +443,9 @@ class FfmpegService {
           durationMs: durationMs,
           textSpecs: textSpecs,
           keepRanges: keepRanges,
+          smoothLoop: smoothLoop,
+          crossfadeMs: crossfadeMs,
+          loopDurationMs: loopDurationMs,
         );
         final result = await _backend.run(
           args,
@@ -537,8 +592,50 @@ class FfmpegService {
     }
   }
 
-  /// Deletes an arbitrary job dir (used to free a baked-GIF source).
-  Future<void> cleanJobAt(String jobDir) => _temp.cleanJob(jobDir);
+  /// Converts video or GIF to WebM. Each call gets its own job dir — does
+  /// NOT touch [_currentJobDir]: a batch run owns several outputs live at
+  /// once (the single-slot cleanCurrentJob model doesn't fit), so the caller
+  /// tracks and frees each output's dir itself via [cleanJobAt].
+  Future<Result<File, FfmpegError>> convertToWebm({
+    required File input,
+    required int crf,
+    required int cpuUsed,
+    bool av1 = false,
+    int? maxWidth,
+    bool keepAudio = false,
+    bool alpha = false,
+    void Function(FfmpegProgress)? onProgress,
+    int? totalMs,
+  }) async {
+    final jobDir = await _temp.createJobDir();
+    try {
+      final outputPath = await _temp.tempOutputPath(jobDir, 'webm');
+      final args = FfmpegCommand.toWebm(
+        inputPath: input.path,
+        outputPath: outputPath,
+        crf: crf,
+        cpuUsed: cpuUsed,
+        av1: av1,
+        maxWidth: maxWidth,
+        keepAudio: keepAudio,
+        alpha: alpha,
+        threads: Platform.numberOfProcessors,
+      );
+      return await _backend.run(args, outputPath,
+          onProgress: onProgress, totalMs: totalMs);
+    } catch (e) {
+      await _temp.cleanJob(jobDir);
+      return Err(FfmpegError(message: e.toString()));
+    }
+  }
+
+  /// Deletes an arbitrary job dir (used to free a baked-GIF source). Clears
+  /// [_currentJobDir] too when it points at the same dir, else a later
+  /// cleanCurrentJob() re-deletes an already-gone directory.
+  Future<void> cleanJobAt(String jobDir) {
+    if (jobDir == _currentJobDir) _currentJobDir = null;
+    return _temp.cleanJob(jobDir);
+  }
 
   Future<void> cancel() => _backend.cancel();
 

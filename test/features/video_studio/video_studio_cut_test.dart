@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gifolomora/core/services/ffmpeg/ffmpeg_progress.dart';
 import 'package:gifolomora/core/services/providers.dart';
 import 'package:gifolomora/features/video_studio/controller/video_studio_controller.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../helpers/fakes.dart';
 
@@ -29,6 +30,8 @@ Future<VideoStudioController> _loadVideo(ProviderContainer c) async {
 }
 
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
   group('VideoStudio Cut — addCutSegment', () {
     test('1. add segment within window → length 1, sorted', () async {
       final c = _makeContainer();

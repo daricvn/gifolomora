@@ -23,6 +23,27 @@ import '../../text_overlay/model/text_item.dart';
 import '../widgets/cut_segment_slider.dart';
 import '../widgets/video_trim_slider.dart';
 import '../controller/video_studio_controller.dart';
+import 'export_format_screen.dart';
+
+// Matches app_router's fade + 4%-slide transition for non-home routes — this
+// page is a Navigator push (a sub-flow of Export, not a top-level GoRoute) so
+// it can't reuse that private helper directly.
+PageRouteBuilder<T> _formatPageRoute<T>(Widget child) => PageRouteBuilder<T>(
+      transitionDuration: const Duration(milliseconds: 240),
+      reverseTransitionDuration: const Duration(milliseconds: 200),
+      pageBuilder: (context, animation, secondaryAnimation) => child,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        final fade = CurveTween(curve: Curves.easeOut).animate(animation);
+        final slide = Tween<Offset>(
+          begin: const Offset(0.04, 0),
+          end: Offset.zero,
+        ).animate(CurveTween(curve: Curves.easeOut).animate(animation));
+        return FadeTransition(
+          opacity: fade,
+          child: SlideTransition(position: slide, child: child),
+        );
+      },
+    );
 
 // ffmpeg drawtext anchors the glyph top at y; Flutter's line box keeps ~0.1em
 // of ascent above caps. Lift the preview text so the on-screen top matches the
@@ -73,6 +94,9 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
   // ValueNotifier (not setState) so a playback tick repaints only the
   // small widgets below that read it, not the whole screen tree.
   final ValueNotifier<int> _positionMs = ValueNotifier(0);
+  // Set by _VideoControlsOverlay so the persistent bottom-left duration chip
+  // can hide while the hover chrome (which has its own time readout) is up.
+  final ValueNotifier<bool> _controlsVisible = ValueNotifier(false);
   bool _picking = false;
   // Preview zoom: null = Fit to window; otherwise a video-px scale.
   double? _zoom = 1.0;
@@ -147,6 +171,7 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
     _transform.dispose();
     _previewCtrl.dispose();
     _positionMs.dispose();
+    _controlsVisible.dispose();
     super.dispose();
   }
 
@@ -478,20 +503,26 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                               );
                             },
                           ),
-                          // Persistent position chip — drawn under the
-                          // hover-chrome's own time row so it's occluded (not
-                          // duplicated) while that chrome is visible; on GIF
-                          // stage (no hover chrome) it's the only indicator.
-                          ValueListenableBuilder<int>(
-                            valueListenable: _positionMs,
-                            builder: (_, pos, _) => Positioned(
-                              left: 10,
-                              bottom: 8,
-                              child: _chip(
-                                  '${_fmtMs(pos)} / ${_fmtMs(state.sourceDurationMs)}',
-                                  alpha: 0.55,
-                                  weight: FontWeight.w600),
-                            ),
+                          // Persistent position chip — hidden while the
+                          // hover-chrome (which has its own time row) is up,
+                          // so the two don't visually overlap; on GIF stage
+                          // (no hover chrome) it's the only indicator.
+                          ValueListenableBuilder<bool>(
+                            valueListenable: _controlsVisible,
+                            builder: (_, controlsVisible, _) {
+                              if (controlsVisible) return const SizedBox.shrink();
+                              return ValueListenableBuilder<int>(
+                                valueListenable: _positionMs,
+                                builder: (_, pos, _) => Positioned(
+                                  left: 10,
+                                  bottom: 8,
+                                  child: _chip(
+                                      '${_fmtMs(pos)} / ${_fmtMs(state.sourceDurationMs)}',
+                                      alpha: 0.55,
+                                      weight: FontWeight.w600),
+                                ),
+                              );
+                            },
                           ),
                           // YouTube-style controls — videos only, and only when
                           // no canvas tool (crop/text) owns the preview gestures.
@@ -507,6 +538,8 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                                     _previewCtrl.seekTo(ms);
                                     _positionMs.value = ms;
                                   },
+                                  onVisibleChanged: (v) =>
+                                      _controlsVisible.value = v,
                                 ),
                               ),
                             ),
@@ -803,11 +836,13 @@ class _VideoControlsOverlay extends StatefulWidget {
     required this.positionMs,
     required this.durationMs,
     required this.onSeek,
+    required this.onVisibleChanged,
   });
   final VideoPreviewController controller;
   final int positionMs;
   final int durationMs;
   final void Function(int ms) onSeek;
+  final void Function(bool visible) onVisibleChanged;
 
   @override
   State<_VideoControlsOverlay> createState() => _VideoControlsOverlayState();
@@ -828,6 +863,7 @@ class _VideoControlsOverlayState extends State<_VideoControlsOverlay> {
   void dispose() {
     widget.controller.playing.removeListener(_onPlayingChanged);
     _hideTimer?.cancel();
+    if (_visible) widget.onVisibleChanged(false);
     super.dispose();
   }
 
@@ -842,9 +878,14 @@ class _VideoControlsOverlayState extends State<_VideoControlsOverlay> {
     }
   }
 
+  void _setVisible(bool v) {
+    setState(() => _visible = v);
+    widget.onVisibleChanged(v);
+  }
+
   void _show() {
     _hideTimer?.cancel();
-    if (!_visible) setState(() => _visible = true);
+    if (!_visible) _setVisible(true);
     _scheduleHide();
   }
 
@@ -853,14 +894,14 @@ class _VideoControlsOverlayState extends State<_VideoControlsOverlay> {
     _hideTimer = Timer(const Duration(seconds: 3), () {
       // Stay visible while paused or scrubbing.
       if (!mounted || _dragging || !widget.controller.playing.value) return;
-      setState(() => _visible = false);
+      _setVisible(false);
     });
   }
 
   void _toggleVisible() {
     if (_visible) {
       _hideTimer?.cancel();
-      setState(() => _visible = false);
+      _setVisible(false);
     } else {
       _show();
     }
@@ -877,7 +918,7 @@ class _VideoControlsOverlayState extends State<_VideoControlsOverlay> {
       onExit: (_) {
         if (widget.controller.playing.value && mounted) {
           _hideTimer?.cancel();
-          setState(() => _visible = false);
+          _setVisible(false);
         }
       },
       child: Stack(
@@ -1107,6 +1148,7 @@ class _ToolSelector extends StatelessWidget {
       if (isGif) (StudioTool.optimize, Icons.tune_rounded, 'Optimise'),
       (StudioTool.properties, Icons.settings_suggest_rounded, 'Props'),
       if (!isGif) (StudioTool.gif, Icons.gif_box_rounded, 'GIF'),
+      if (isGif) (StudioTool.webm, Icons.movie_creation_rounded, 'WebM'),
     ];
     return Wrap(
       spacing: 6,
@@ -1115,8 +1157,10 @@ class _ToolSelector extends StatelessWidget {
         for (final t in tools)
           SizedBox(
             width: (MediaQuery.of(context).size.width - 44) / (tools.length + 1),
-            child: t.$1 == StudioTool.gif
-                ? _GifToolButton(
+            child: (t.$1 == StudioTool.gif || t.$1 == StudioTool.webm)
+                ? _AccentToolButton(
+                    icon: t.$2,
+                    label: t.$3,
                     selected: active == t.$1,
                     edited: state.isToolEdited(t.$1),
                     onTap: () => onSelect(active == t.$1 ? null : t.$1),
@@ -1260,12 +1304,18 @@ class _GradientCycleState extends State<_GradientCycle>
 // Standout variant of [_ToolButton] for the GIF tool: animated gradient
 // border (unselected) or fill (selected) plus a soft glow, so the export
 // entry point reads as the destination of the video stage.
-class _GifToolButton extends StatelessWidget {
-  const _GifToolButton({
+// Accent tool button (GIF, WebM): animated gradient border/icon shared by
+// both stage-switching tools so they read as one visual family.
+class _AccentToolButton extends StatelessWidget {
+  const _AccentToolButton({
+    required this.icon,
+    required this.label,
     required this.selected,
     required this.edited,
     required this.onTap,
   });
+  final IconData icon;
+  final String label;
   final bool selected;
   final bool edited;
   final VoidCallback onTap;
@@ -1297,15 +1347,13 @@ class _GifToolButton extends StatelessWidget {
           child: Column(
             children: [
               selected
-                  ? const Icon(Icons.gif_box_rounded,
-                      size: 18, color: Colors.white)
+                  ? Icon(icon, size: 18, color: Colors.white)
                   : ShaderMask(
                       shaderCallback: (r) => gradient.createShader(r),
-                      child: const Icon(Icons.gif_box_rounded,
-                          size: 18, color: Colors.white),
+                      child: Icon(icon, size: 18, color: Colors.white),
                     ),
               const SizedBox(height: 3),
-              Text('GIF',
+              Text(label,
                   style: TextStyle(
                       color: selected ? Colors.white : AppColors.textHi,
                       fontSize: 11,
@@ -1471,6 +1519,13 @@ class _ToolPanel extends StatelessWidget {
       case StudioTool.gif:
         return _GifPanel(
           key: const ValueKey('gif'),
+          state: state,
+          ctrl: ctrl,
+          toast: toast,
+        );
+      case StudioTool.webm:
+        return _WebmPanel(
+          key: const ValueKey('webm'),
           state: state,
           ctrl: ctrl,
           toast: toast,
@@ -2291,7 +2346,9 @@ class _GifPanel extends StatelessWidget {
         const SizedBox(height: 14),
         SizedBox(
           width: double.infinity,
-          child: _MakeGifButton(
+          child: _MakeActionButton(
+            icon: Icons.auto_awesome_rounded,
+            label: 'Make GIF',
             onTap: () async {
               if (state.effectiveOutputMs > 40000) {
                 final proceed = await showDialog<bool>(
@@ -2324,10 +2381,16 @@ class _GifPanel extends StatelessWidget {
   }
 }
 
-// The GIF panel's call to action: animated gradient fill + breathing glow so
-// the bake step is unmissable once the user opens the GIF tool.
-class _MakeGifButton extends StatelessWidget {
-  const _MakeGifButton({required this.onTap});
+// The panel's call to action: animated gradient fill + breathing glow so the
+// bake step is unmissable once the user opens the GIF/WebM tool.
+class _MakeActionButton extends StatelessWidget {
+  const _MakeActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String label;
   final VoidCallback onTap;
 
   @override
@@ -2353,14 +2416,14 @@ class _MakeGifButton extends StatelessWidget {
               ),
             ],
           ),
-          child: const Row(
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 18),
-              SizedBox(width: 8),
-              Text('Make GIF',
-                  style: TextStyle(
+              Icon(icon, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Text(label,
+                  style: const TextStyle(
                       color: Colors.white,
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
@@ -2369,6 +2432,46 @@ class _MakeGifButton extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ── WebM panel (GIF stage only): convert to WebM + switch to video editing ──
+
+class _WebmPanel extends StatelessWidget {
+  const _WebmPanel({
+    super.key,
+    required this.state,
+    required this.ctrl,
+    required this.toast,
+  });
+  final VideoStudioState state;
+  final VideoStudioController ctrl;
+  final void Function(String) toast;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Converts this GIF to a WebM video, then switches to video editing. '
+          'One-way — there is no going back to the GIF.',
+          style: TextStyle(color: AppColors.textLo, fontSize: 12),
+        ),
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          child: _MakeActionButton(
+            icon: Icons.movie_creation_rounded,
+            label: 'Convert to WebM',
+            onTap: () async {
+              final ok = await ctrl.makeWebm();
+              if (!ok) toast('Could not convert to WebM');
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2467,7 +2570,7 @@ class _OptimizePanel extends StatelessWidget {
   }
 }
 
-// ── Properties panel (video: volume · gif: fps · loop count · boomerang) ──────
+// ── Properties panel (video: volume · smooth loop; gif: fps · loop count · boomerang · smooth loop) ──────
 
 class _PropertiesPanel extends StatelessWidget {
   const _PropertiesPanel({
@@ -2487,9 +2590,50 @@ class _PropertiesPanel extends StatelessWidget {
     ('10', 10),
   ];
 
+  // Shared by both stages: switch + status text + conditional crossfade
+  // slider. [noun] fills the "___ longer than 3s only." gate message.
+  List<Widget> _smoothLoopControls(String noun) => [
+        Row(
+          children: [
+            Switch(
+              value: state.smoothLoop,
+              onChanged: state.canSmoothLoop ? ctrl.setSmoothLoop : null,
+              activeThumbColor: AppColors.accentB,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                  'Smooth Loop — crossfade last ${state.smoothLoopCrossfadeMs}ms into first ${state.smoothLoopCrossfadeMs}ms',
+                  style: const TextStyle(color: AppColors.textHi, fontSize: 14)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          !state.canSmoothLoop
+              ? '$noun longer than 3s only.'
+              : (state.smoothLoop && !state.smoothLoopValid
+                  ? 'Speed/trim leave too little to crossfade — turn Smooth Loop off.'
+                  : 'Loops seamlessly by dissolving the tail into the head.'),
+          style: const TextStyle(color: AppColors.textLo, fontSize: 11),
+        ),
+        if (state.smoothLoop) ...[
+          const SizedBox(height: 8),
+          OptionSlider(
+            label: 'Crossfade duration',
+            value: state.smoothLoopCrossfadeMs.toDouble(),
+            min: 500,
+            max: 1000,
+            divisions: 5,
+            displayValue: '${state.smoothLoopCrossfadeMs}ms',
+            onChanged: (v) => ctrl.setSmoothLoopCrossfadeMs(v.round()),
+          ),
+        ],
+      ];
+
   @override
   Widget build(BuildContext context) {
-    // Video: audio volume only (no fps/loop/reverse — those are GIF concepts).
+    // Video: volume + smooth loop (no fps/loopCount/boomerang — GIF concepts).
     if (!state.isGif) {
       final pct = (state.volume * 100).round();
       return Column(
@@ -2513,6 +2657,8 @@ class _PropertiesPanel extends StatelessWidget {
                 : 'This video has no audio track.',
             style: const TextStyle(color: AppColors.textLo, fontSize: 11),
           ),
+          const SizedBox(height: 14),
+          ..._smoothLoopControls('Clips'),
         ],
       );
     }
@@ -2577,42 +2723,7 @@ class _PropertiesPanel extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
-        Row(
-          children: [
-            Switch(
-              value: state.smoothLoop,
-              onChanged: state.canSmoothLoop ? ctrl.setSmoothLoop : null,
-              activeThumbColor: AppColors.accentB,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                  'Smooth Loop — crossfade last ${state.smoothLoopCrossfadeMs}ms into first ${state.smoothLoopCrossfadeMs}ms',
-                  style: const TextStyle(color: AppColors.textHi, fontSize: 14)),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Text(
-          !state.canSmoothLoop
-              ? 'GIFs longer than 3s only.'
-              : (state.smoothLoop && !state.smoothLoopValid
-                  ? 'Speed/trim leave too little to crossfade — turn Smooth Loop off.'
-                  : 'Loops seamlessly by dissolving the tail into the head.'),
-          style: const TextStyle(color: AppColors.textLo, fontSize: 11),
-        ),
-        if (state.smoothLoop) ...[
-          const SizedBox(height: 8),
-          OptionSlider(
-            label: 'Crossfade duration',
-            value: state.smoothLoopCrossfadeMs.toDouble(),
-            min: 500,
-            max: 1000,
-            divisions: 5,
-            displayValue: '${state.smoothLoopCrossfadeMs}ms',
-            onChanged: (v) => ctrl.setSmoothLoopCrossfadeMs(v.round()),
-          ),
-        ],
+        ..._smoothLoopControls('GIFs'),
       ],
     );
   }
@@ -2727,8 +2838,15 @@ class _ActionBar extends StatelessWidget {
           label: 'Export',
           tooltip: 'Export Video',
           onTap: () async {
-            final ok = await ctrl.exportVideo();
-            toast(ok ? 'Video saved' : 'Export cancelled');
+            final format = await Navigator.of(context).push<ExportVideoFormat>(
+              _formatPageRoute(ExportFormatScreen(initial: ctrl.lastExportFormat)),
+            );
+            if (format == null) return;
+            await ctrl.setLastExportFormat(format);
+            final ok = await ctrl.exportVideo(format: format);
+            toast(ok
+                ? '${format == ExportVideoFormat.webm ? 'WebM' : 'Video'} saved'
+                : 'Export cancelled');
           },
         ),
       ],

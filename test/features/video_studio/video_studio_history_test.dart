@@ -6,6 +6,7 @@ import 'package:gifolomora/core/services/ffmpeg/ffmpeg_progress.dart';
 import 'package:gifolomora/core/services/providers.dart';
 import 'package:gifolomora/core/utils/result.dart';
 import 'package:gifolomora/features/video_studio/controller/video_studio_controller.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../helpers/fakes.dart';
 
@@ -60,6 +61,8 @@ VideoStudioState _state(ProviderContainer c) =>
     c.read(videoStudioControllerProvider).value!;
 
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
   group('VideoStudio GIF history — canUndo / canRedo', () {
     test('both false on initial state', () async {
       final c = _makeContainer();

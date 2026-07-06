@@ -308,8 +308,7 @@ Every tool screen shares the 4-step skeleton:
 ## Screen Record (Windows only)
 
 `lib/features/screen_record/` + `lib/core/services/record/`. Records the full virtual desktop
-(one selected monitor) into a temp video, then hands off to Video Studio. See `PLAN.md` for the
-full design; summary of the moving parts:
+(one selected monitor) into a temp video, then hands off to Video Studio. Moving parts:
 
 - **Capture:** `FfmpegCommand.screenCapture` — bundled `ffmpeg.exe`'s `gdigrab` device,
   `libx264 -preset ultrafast`, physical-px offset/size (even-clamped). Mic (optional) joins the

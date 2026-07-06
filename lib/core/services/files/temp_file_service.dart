@@ -18,9 +18,11 @@ class TempFileService {
     return _base!;
   }
 
-  /// Creates a unique job directory. Returns its path.
-  Future<String> createJobDir() async {
-    final base = await _baseDir;
+  /// Creates a unique job directory. Returns its path. [baseDirOverride]
+  /// swaps the system-temp base for a user-chosen folder (Screen Record's
+  /// "save to" setting) — every other caller keeps the default.
+  Future<String> createJobDir({String? baseDirOverride}) async {
+    final base = baseDirOverride ?? await _baseDir;
     final id = DateTime.now().microsecondsSinceEpoch.toString();
     final dir = Directory(p.join(base, id));
     await dir.create(recursive: true);

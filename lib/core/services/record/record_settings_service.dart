@@ -78,6 +78,8 @@ class RecordSettings {
     required this.hotkeys,
     this.lastDisplayName,
     this.outputResolution = RecordOutputResolution.original,
+    this.saveDirectory,
+    this.deleteTempOnExit = true,
   });
 
   final bool captureSystemAudio;
@@ -90,12 +92,21 @@ class RecordSettings {
 
   final RecordOutputResolution outputResolution;
 
+  /// User-chosen folder for the temp job dir. `null` = default (system temp,
+  /// via [TempFileService]'s own `getTemporaryDirectory()`).
+  final String? saveDirectory;
+
+  /// Whether a live recording's temp job dir is deleted on app shutdown.
+  final bool deleteTempOnExit;
+
   RecordSettings copyWith({
     bool? captureSystemAudio,
     bool? captureMic,
     RecordHotkeys? hotkeys,
     String? lastDisplayName,
     RecordOutputResolution? outputResolution,
+    Object? saveDirectory = _s,
+    bool? deleteTempOnExit,
   }) =>
       RecordSettings(
         captureSystemAudio: captureSystemAudio ?? this.captureSystemAudio,
@@ -103,7 +114,12 @@ class RecordSettings {
         hotkeys: hotkeys ?? this.hotkeys,
         lastDisplayName: lastDisplayName ?? this.lastDisplayName,
         outputResolution: outputResolution ?? this.outputResolution,
+        saveDirectory:
+            identical(saveDirectory, _s) ? this.saveDirectory : saveDirectory as String?,
+        deleteTempOnExit: deleteTempOnExit ?? this.deleteTempOnExit,
       );
+
+  static const _s = Object();
 }
 
 /// `shared_preferences`-backed persistence for Screen Record's audio toggles,
@@ -117,6 +133,8 @@ class RecordSettingsService {
   static const _kHotkeyStop = 'record_hotkey_stop';
   static const _kLastDisplay = 'record_last_display_name';
   static const _kOutputResolution = 'record_output_resolution';
+  static const _kSaveDirectory = 'record_save_directory';
+  static const _kDeleteTempOnExit = 'record_delete_temp_on_exit';
 
   Future<RecordSettings> load() async {
     final p = await SharedPreferences.getInstance();
@@ -132,6 +150,8 @@ class RecordSettingsService {
       lastDisplayName: p.getString(_kLastDisplay),
       outputResolution:
           RecordOutputResolution.fromPrefValue(p.getString(_kOutputResolution)),
+      saveDirectory: p.getString(_kSaveDirectory),
+      deleteTempOnExit: p.getBool(_kDeleteTempOnExit) ?? true,
     );
   }
 
@@ -158,6 +178,21 @@ class RecordSettingsService {
   Future<void> setOutputResolution(RecordOutputResolution value) async {
     final p = await SharedPreferences.getInstance();
     await p.setString(_kOutputResolution, value.name);
+  }
+
+  /// `null` resets to default (system temp).
+  Future<void> setSaveDirectory(String? value) async {
+    final p = await SharedPreferences.getInstance();
+    if (value == null) {
+      await p.remove(_kSaveDirectory);
+    } else {
+      await p.setString(_kSaveDirectory, value);
+    }
+  }
+
+  Future<void> setDeleteTempOnExit(bool value) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_kDeleteTempOnExit, value);
   }
 
   Future<void> _writeHotkey(String prefKey, HotKey key) async {

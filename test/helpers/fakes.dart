@@ -14,6 +14,7 @@ class FakeFfmpegBackend implements FfmpegBackend {
   MediaInfo? nextProbeResult;
   bool cancelCalled = false;
   int runCount = 0;
+  List<String>? lastRunArgs;
 
   @override
   Future<Result<File, FfmpegError>> run(
@@ -24,12 +25,24 @@ class FakeFfmpegBackend implements FfmpegBackend {
     int? totalMs,
   }) async {
     runCount++;
+    lastRunArgs = args;
     onProgress?.call(const FfmpegProgress(fraction: 1.0));
     return nextResult;
   }
 
   @override
   Future<MediaInfo?> probe(String inputPath) async => nextProbeResult;
+
+  bool nextSupportsEncoder = false;
+  int supportsEncoderCallCount = 0;
+  String? lastSupportsEncoderArg;
+
+  @override
+  Future<bool> supportsEncoder(String encoderName) async {
+    supportsEncoderCallCount++;
+    lastSupportsEncoderArg = encoderName;
+    return nextSupportsEncoder;
+  }
 
   @override
   Future<void> cancel() async {
@@ -42,7 +55,7 @@ class FakeFfmpegBackend implements FfmpegBackend {
 
 class _NoOpTempFileService extends TempFileService {
   @override
-  Future<String> createJobDir() async => '/fake/job';
+  Future<String> createJobDir({String? baseDirOverride}) async => '/fake/job';
 
   @override
   Future<String> tempOutputPath(String jobDir, String ext) async =>
@@ -188,7 +201,7 @@ class FakeFfmpegService extends FfmpegService {
   Future<void> cleanCurrentJob() async {}
 
   @override
-  Future<void> cancel() async {}
+  Future<void> cancel() => fakeBackend.cancel();
 }
 
 /// ExportService that returns a fake File without opening the file picker.
@@ -210,6 +223,22 @@ class FakeExportService extends ExportService {
     savedVideoSource = tempFile;
     return returnFile;
   }
+
+  /// Records the temp file handed to the last saveWebm call.
+  File? savedWebmSource;
+
+  @override
+  Future<File?> saveWebm(File tempFile,
+      {String defaultName = 'converted.webm'}) async {
+    savedWebmSource = tempFile;
+    return returnFile;
+  }
+
+  Directory? returnDirectory;
+
+  @override
+  Future<Directory?> saveWebmBatch(List<MapEntry<File, String>> items) async =>
+      returnDirectory;
 }
 
 /// RecentsService backed by an in-memory list — no SharedPreferences.

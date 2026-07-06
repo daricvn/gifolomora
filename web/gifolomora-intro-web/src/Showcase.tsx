@@ -5,6 +5,7 @@ import cropImg from './assets/crop-feature.png';
 import cutImg from './assets/cut-video.png';
 import smoothVid from './assets/smooth-feature.webm';
 import textImg from './assets/text-feature.png';
+import webmVid from './assets/webm-convert-feature.webm';
 
 const showcase = [
   {
@@ -38,6 +39,14 @@ const showcase = [
     hue: '200',
     title: ['Loops', 'without', 'the', 'seam.'],
     desc: 'Boomerang and crossfade blending turn any clip into a GIF that loops forever — no visible restart.',
+  },
+  {
+    video: webmVid,
+    alt: 'Converting a video and a GIF to WebM',
+    kicker: 'To WebM',
+    hue: '230',
+    title: ['Any', 'clip.', 'One', 'tap.', 'WebM.'],
+    desc: 'Convert video or GIF to WebM straight from the app — smaller files, same quality.',
   },
 ];
 
