@@ -103,12 +103,33 @@ class HotkeyRecorderField extends StatelessWidget {
           ),
           title: Text('Press keys for "$label"',
               style: const TextStyle(color: AppColors.textHi, fontSize: 15)),
-          content: SizedBox(
-            width: 220,
-            child: HotKeyRecorder(
-              initalHotKey: hotkey,
-              onHotKeyRecorded: (k) => recorded = k,
-            ),
+          content: StatefulBuilder(
+            builder: (context, setDialogState) {
+              return SizedBox(
+                width: 220,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _WindowsHotKeyView(hotKey: recorded ?? hotkey),
+                    const SizedBox(height: 12),
+                    // `HotKeyRecorder`'s own visual (via `HotKeyVirtualView`)
+                    // renders raw OS key labels, not our Windows-style
+                    // Ctrl/Alt/Shift labels — mismatched vs the row above and
+                    // the list. Keep it offstage purely for keyboard capture;
+                    // show our own consistent labels instead.
+                    Offstage(
+                      child: HotKeyRecorder(
+                        initalHotKey: hotkey,
+                        onHotKeyRecorded: (k) {
+                          recorded = k;
+                          setDialogState(() {});
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
           actions: [
             TextButton(

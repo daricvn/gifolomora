@@ -7,7 +7,9 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/rendering.dart' show RenderProxyBox;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/gestures.dart' show PointerScrollEvent;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HardwareKeyboard;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -123,6 +125,18 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
   // the preview pushed off-screen and truncated).
   final TransformationController _transform = TransformationController();
   bool _isDragHovering = false;
+  // Ctrl+scroll (desktop) / pinch (touch) zoom over the preview. Pointer
+  // tracking is raw (Listener), not a GestureDetector, so it never enters the
+  // gesture arena and can't steal the drag from InteractiveViewer's own pan
+  // recognizer — single-finger moves fall straight through untouched.
+  final Map<int, Offset> _zoomPointers = {};
+  double? _pinchStartDistance;
+  double? _pinchStartZoom;
+
+  // Snaps to 5% steps (0.05) so scroll/pinch zoom lands on round percentages,
+  // same granularity as the preset dropdown values.
+  double _snapZoom(double value) =>
+      (value.clamp(0.25, 3.0) * 20).round() / 20;
   // Measured height of the glass control dock. The preview pane extends under
   // the dock (bottom edge shows through the blur), so Fit mode subtracts this
   // to keep the whole frame visible above it.
@@ -678,9 +692,63 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                           ),
                         );
 
+                        final zoomablePane = Listener(
+                          onPointerSignal: (event) {
+                            if (event is! PointerScrollEvent) return;
+                            if (!HardwareKeyboard.instance.isControlPressed) {
+                              return;
+                            }
+                            final current = _zoom ?? fitScale;
+                            final next = _snapZoom(
+                              current - event.scrollDelta.dy * 0.0015,
+                            );
+                            setState(() => _zoom = next);
+                          },
+                          onPointerDown: (event) {
+                            _zoomPointers[event.pointer] = event.position;
+                            if (_zoomPointers.length == 2) {
+                              final pts = _zoomPointers.values.toList();
+                              _pinchStartDistance = (pts[0] - pts[1]).distance;
+                              _pinchStartZoom = _zoom ?? fitScale;
+                            }
+                          },
+                          onPointerMove: (event) {
+                            if (!_zoomPointers.containsKey(event.pointer)) {
+                              return;
+                            }
+                            _zoomPointers[event.pointer] = event.position;
+                            final startDist = _pinchStartDistance;
+                            final startZoom = _pinchStartZoom;
+                            if (_zoomPointers.length == 2 &&
+                                startDist != null &&
+                                startDist > 0 &&
+                                startZoom != null) {
+                              final pts = _zoomPointers.values.toList();
+                              final dist = (pts[0] - pts[1]).distance;
+                              final next = _snapZoom(
+                                startZoom * dist / startDist,
+                              );
+                              setState(() => _zoom = next);
+                            }
+                          },
+                          onPointerUp: (event) {
+                            _zoomPointers.remove(event.pointer);
+                            if (_zoomPointers.length < 2) {
+                              _pinchStartDistance = null;
+                              _pinchStartZoom = null;
+                            }
+                          },
+                          onPointerCancel: (event) {
+                            _zoomPointers.remove(event.pointer);
+                            _pinchStartDistance = null;
+                            _pinchStartZoom = null;
+                          },
+                          child: pane,
+                        );
+
                         return Stack(
                           children: [
-                            Positioned.fill(child: pane),
+                            Positioned.fill(child: zoomablePane),
                             if (state.inputFile != null &&
                                 state.hasComparableEdit)
                               Positioned(
@@ -818,12 +886,15 @@ class _StageBanner extends StatelessWidget {
 
 // label, video-px scale. null scale = Fit to window.
 const _kZoomPresets = <(String, double?)>[
+  ('25%', 0.25),
   ('50%', 0.5),
   ('75%', 0.75),
   ('100%', 1.0),
   ('125%', 1.25),
   ('150%', 1.5),
   ('200%', 2.0),
+  ('250%', 2.5),
+  ('300%', 3.0),
   ('Fit', null),
 ];
 
@@ -833,10 +904,11 @@ class _ZoomControl extends StatelessWidget {
   final void Function(double?) onChanged;
 
   String get _label {
+    if (zoom == null) return 'Fit';
     for (final p in _kZoomPresets) {
       if (p.$2 == zoom) return p.$1;
     }
-    return 'Fit';
+    return '${(zoom! * 100).round()}%';
   }
 
   @override
