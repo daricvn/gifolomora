@@ -10,6 +10,7 @@ class GlassButton extends StatelessWidget {
     required this.onPressed,
     this.icon,
     this.isPrimary = false,
+    this.isDestructive = false,
     this.width,
     this.borderRadius = 12,
   });
@@ -18,6 +19,7 @@ class GlassButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final IconData? icon;
   final bool isPrimary;
+  final bool isDestructive;
   final double? width;
   final double borderRadius;
 
@@ -43,15 +45,23 @@ class GlassButton extends StatelessWidget {
     );
 
     if (isPrimary) {
+      final glowColor =
+          isDestructive ? Colors.redAccent : AppColors.accentA;
       return SizedBox(
         width: width,
         child: Container(
           decoration: BoxDecoration(
-            gradient: AppGradients.primaryButton,
+            gradient: isDestructive
+                ? const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Colors.redAccent, Color(0xFFB71C1C)],
+                  )
+                : AppGradients.primaryButton,
             borderRadius: BorderRadius.circular(borderRadius),
             boxShadow: [
               BoxShadow(
-                color: AppColors.accentA.withValues(alpha: 0.4),
+                color: glowColor.withValues(alpha: 0.4),
                 blurRadius: 20,
                 offset: const Offset(0, 6),
               ),

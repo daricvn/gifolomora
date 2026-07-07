@@ -1,299 +1,297 @@
-# PLAN — Convert to WebM (tool section, single + batch)
+# PLAN — Windows FFmpeg: bundled `ffmpeg.exe` → in-process `ffmpeg` DLL
 
-New refine tool: pick one or more videos/GIFs (max 20), convert each to WebM, export. Route
-`/to-webm`, feature dir `lib/features/webm_converter/`. Plus: Video Studio's Export Video gains
-a format choice page (MP4 | WebM) — §8.
+> Goal: replace the spawned `ffmpeg.exe` on Windows with an in-process FFmpeg DLL invoked over
+> `dart:ffi`, keeping **every existing feature working**, enabling **async + parallel** jobs, with
+> **safeguards so a native crash does not take down the app**.
+>
+> Non-goals: Android/iOS backend (`FfmpegKitBackend`) untouched — binaries included (GPL build
+> stays; compliant once app source is public, §5). Linux stays on the process backend (can adopt
+> the same shim later). No UI changes except the About-screen license section (§5).
 
 ---
 
-## 1. Encoder decision (the performance call)
+## 1. Current state (confirmed in code)
 
-**Chosen: `libvpx-vp9`, single-pass constrained-quality (`-crf N -b:v 0`), with full
-multithreading flags. Audio: `libopus`.**
-
-Availability confirmed:
-- Windows bundled `assets/bin/windows/ffmpeg.exe` lists `libvpx`, `libvpx-vp9`, `libaom-av1`,
-  `vp9_qsv`, `libopus` (checked via `ffmpeg -encoders`).
-- Android uses `com.antonkarpenko:ffmpeg-kit-full-gpl:2.1.0`
-  (`packages/ffmpeg_kit_flutter_new/android/build.gradle:54`) — full-gpl includes libvpx + libopus.
-
-Rejected alternatives:
-| Option | Why not |
+| What | Where |
 |---|---|
-| `libaom-av1` as default | 5–20× slower than VP9 at comparable quality; wrong default for a batch tool. Offered as an opt-in codec mode instead (below). |
-| `vp9_qsv` | Intel-only, different rate-control knobs, historically flaky quality. Not worth a second code path + fallback loop. |
-| NVENC / AMF VP9 | Don't exist — NVIDIA/AMD have no VP9 *encode* hardware. (NVENC AV1 exists but AV1-in-WebM playback support is spottier and the bundled build would still need SW fallback.) |
-| VP8 (`libvpx`) | ~2× faster encode but clearly worse size/quality; VP9 with `cpu-used 4–5` closes most of the speed gap. One codec path only. |
-| Two-pass VP9 | ~2× wall time for ~10–15% smaller files. Wrong trade for an interactive tool; single-pass CRF. |
-
-Speed flags (this is where VP9 perf actually comes from):
-- `-row-mt 1 -tile-columns 2 -threads <Platform.numberOfProcessors>` — without `row-mt`,
-  libvpx-vp9 is effectively single-threaded on typical sizes. Threads passed explicitly; don't
-  rely on the wrapper default.
-- `-deadline good -cpu-used <preset>` — UI "Speed" chips map: Fast = 5, Balanced = 4 (default),
-  Best = 2.
-- Straight transcode; no filters beyond one `scale` (below).
-
-Filter chain (always present, one `scale` only):
-- yuv420p requires even dimensions and GIFs are frequently odd-sized:
-  no max-width → `scale=trunc(iw/2)*2:trunc(ih/2)*2`; with max-width →
-  `scale='trunc(min(<maxW>,iw)/2)*2':-2` (`-2` keeps height even; the `trunc` guards an odd
-  source narrower than the cap — 641 wide under a 1080 cap must still land even; never upscales).
-- `-pix_fmt yuv420p` default. GIF input with "keep transparency" ON → `-pix_fmt yuva420p`
-  `-auto-alt-ref 0` (VP9 alpha side-band; supported by Chrome/Firefox). Verified on the bundled
-  Windows build: encode exits 0 and ffprobe shows `alpha_mode=1`, with or without the flag — the
-  flag stays anyway because older libvpx wrappers (Android kit) reject alpha when auto-alt-ref is
-  on. Default OFF — opaque is smaller and faster.
-- GIF input → `-an`. Video input → `-c:a libopus -b:a 128k` when `MediaInfo.hasAudio`, else
-  `-an`. No keep-audio toggle — audio always survives conversion; muting is a Video Studio job
-  (volume 0), not a converter knob. (Vorbis rejected — Opus is better at every bitrate and
-  present on both backends.)
-
-CRF range: slider 18–45, default 32 (VP9 CRF scale is unlike x264 — 32 is a sane web default).
-
-**AV1 opt-in mode.** Codec chips: **VP9 (recommended)** | **AV1 — smallest file, much slower**.
-AV1 stays WebM-contained, swaps only the video encoder block:
-`-c:v libaom-av1 -crf <same slider> -b:v 0 -cpu-used {Fast 8 | Balanced 6 | Best 4} -row-mt 1
--tile-columns 2 -threads N`. Audio stays Opus. Constraints:
-- **No alpha.** Verified on the bundled build: libaom encode with `yuva420p` input exits 0 but
-  silently drops to `yuv420p`, no `alpha_mode` tag. Transparency ON disables the AV1 chip
-  (forces VP9).
-- **Availability**: Windows bundle confirmed (`-encoders` lists `libaom-av1`). Android
-  **unverified and likely absent** — upstream ffmpeg-kit builds have never bundled libaom (dav1d
-  is decode-only). Gate the chip behind a one-time `FfmpegService.supportsAv1()` probe: run
-  `-hide_banner -encoders` once, grep `libaom-av1`, cache the bool. Chip hidden when false —
-  no dead option, no crash on unsupported devices.
-
-Batch concurrency: **sequential, one ffmpeg job at a time.** `row-mt` + tiles already saturate
-cores on a single encode; parallel jobs would thrash CPU/RAM and break the existing
-one-`_currentJobDir`/one-`cancel()` backend model. This *is* the performant choice, not a
-compromise.
-
-GIF looping: gif demuxer `ignore_loop` defaults to true (confirmed via `ffmpeg -h demuxer=gif`
-on the bundled build) — decodes one pass, no flag needed; output duration == one loop.
+| Process backend: `Process.start(ffmpeg.exe)` + `-progress pipe:1` stdout parsing, stderr capture into `FfmpegError.stderr` | `lib/core/services/ffmpeg/ffmpeg_process_backend.dart:45` |
+| Probe: `Process.run(ffprobe.exe, -print_format json)` | `ffmpeg_process_backend.dart:116` |
+| Encoder gate: `Process.run(ffmpeg, -encoders)` → `supportsEncoder()` (AV1 chip) | `ffmpeg_process_backend.dart:179` |
+| Cancel: single `_current` process, `kill()` | `ffmpeg_process_backend.dart:188` |
+| Factory: `Platform.isAndroid/isIOS ? FfmpegKitBackend : FfmpegProcessBackend` | `ffmpeg_factory.dart:8` |
+| Screen recorder owns its own `Process` (open-ended gdigrab capture, stdin `q` graceful stop, segment-per-pause, dshow device listing, concat/mux finalize) | `lib/core/services/record/screen_recorder_service.dart:188,132,356` |
+| Binaries resolved next to `Platform.resolvedExecutable`; copied by `scripts/setup_windows_dev.ps1`; packaged by `scripts/build_msix_release.ps1` | `ffmpeg_process_backend.dart:27` |
+| One shared backend instance app-wide; only one job runs at a time today (single `_current`, single `_currentJobDir`) | `providers.dart`, `ffmpeg_service.dart:23` |
+| GPL encoder in use: `libx264` (videoEdit software fallback + screen capture) | `ffmpeg_command.dart:659,698`, `video_encoder.dart:8` |
 
 ---
 
-## 2. Files
+## 2. Core design decision — what "use ffmpeg.dll" means
 
-**New**
-- `lib/features/webm_converter/controller/webm_converter_controller.dart` — state + queue loop
-- `lib/features/webm_converter/view/webm_converter_screen.dart` — screen; batch list rendered
-  inline (no separate widgets/ dir — the file rows are ~40 lines of ListView)
+Three ways to consume FFmpeg as a DLL; we pick **(C)**:
 
-**Modified**
-- `lib/core/services/ffmpeg/ffmpeg_command.dart` — `static List<String> toWebm({...})`
-- `lib/core/services/ffmpeg/ffmpeg_service.dart` — `convertToWebm({...})`
-- `lib/core/services/files/export_service.dart` — `saveWebm()` + batch directory export
-- `lib/features/home/data/tool_catalog.dart` — refine entry: id `to_webm`, label "To WebM",
-  description "Convert video or GIF to WebM", route `/to-webm`, unused accent hue (e.g. `0xFF7C9EFF`)
-- `lib/router/app_router.dart` — route with the standard fade+slide transition
-- `test/` — arg-builder test for `FfmpegCommand.toWebm` (pure function, no ffmpeg needed)
-- §8 (Video Studio format choice) additionally touches:
-  `lib/features/video_studio/controller/video_studio_controller.dart` (`exportVideo(format)`),
-  `lib/features/video_studio/view/video_studio_screen.dart` (Export → format page),
-  `ffmpeg_command.dart` `videoEdit` (webm variant), `ffmpeg_service.dart` `editVideo`
+- **(A) Raw libav\* FFI (avformat/avcodec/avfilter direct):** would mean reimplementing every
+  pipeline (palettegen/paletteuse two-pass, drawtext chains, concat demuxer, amix, boomerang
+  concat…) in Dart/C against the libav API. That is rewriting `ffmpeg.c`. Rejected — months of
+  work, every `FfmpegCommand` arg builder discarded, highest regression risk.
+- **(B) Prebuilt "ffmpeg CLI as a lib" from a maintained project:** none exists for Windows.
+  `ffmpeg-kit` (which did exactly this for mobile) was retired April 2025 and never shipped
+  Windows. Rejected as a dependency, **adopted as a source of patches** (LGPL, forkable).
+- **(C) Thin C shim DLL embedding patched `fftools`** (the ffmpeg-kit approach, ported):
+  compile FFmpeg's own CLI layer (`fftools/ffmpeg*.c`) into `ffmpeg_shim.dll`, exporting a
+  `run(argv)`-style entry. **All existing `FfmpegCommand` arg builders keep working unchanged** —
+  the shim executes the same argv the exe received. Links against the standard shared FFmpeg
+  DLLs (`avcodec-*.dll`, `avformat-*.dll`, …).
 
-No new packages. No backend interface changes — `FfmpegBackend.run(args, outputPath,
-onProgress, totalMs)` already covers this job shape on both platforms (process backend parses
-`-progress pipe:1` `out_time_ms`; kit backend uses the statistics callback).
+Why (C) is optimal: zero changes above the backend interface, full feature parity by
+construction (same CLI semantics), and the parallelism/cancellation problems are already solved
+in ffmpeg-kit's vendored patches (see §4).
 
----
+### Required fftools patches (vendor from ffmpeg-kit, port to Windows)
 
-## 3. Service layer
+1. **No `exit()`:** fftools calls `exit_program()` on any error — in-process that kills the app.
+   Patch replaces it with `longjmp` back to the entry point returning an error code
+   (ffmpeg-kit's `fftools_ffmpeg.c` pattern).
+2. **Global-state reset + thread-local globals:** fftools globals (`nb_input_files`,
+   `received_sigterm`, option contexts…) get `__thread` storage so **concurrent sessions on
+   separate threads don't corrupt each other** — this is precisely how ffmpeg-kit supports
+   concurrent sessions. Plus a `var_cleanup()` reset at entry.
+3. **Per-session cancel:** exported `cancel(session_id)` sets the session's
+   `received_sigterm`-equivalent → ffmpeg's own **graceful** shutdown path runs (trailer written,
+   file closed). Strictly better than today's `Process.kill()` which can leave truncated output.
+4. **Log capture:** `av_log_set_callback` routes logs into a per-session ring buffer so
+   `FfmpegError.stderr` parity is kept (error surfaces + encoder-fallback diagnostics).
 
-```dart
-// FfmpegCommand
-static List<String> toWebm({
-  required String inputPath,
-  required String outputPath,
-  required int crf,            // 18–45
-  required int cpuUsed,        // vp9: 2|4|5 · av1: 4|6|8
-  bool av1 = false,            // codec mode: false = libvpx-vp9, true = libaom-av1
-  int? maxWidth,               // null = keep size (even-clamped)
-  bool keepAudio = false,      // caller passes MediaInfo.hasAudio (no UI toggle)
-  bool alpha = false,          // gif transparency → yuva420p (vp9 only; caller forces !av1)
-  int threads = 0,             // caller passes Platform.numberOfProcessors
-});
+### Shim exports (C ABI)
+
+```c
+int  gm_execute(int64_t session_id, int argc, char** argv);  // blocking; SEH-wrapped
+void gm_cancel(int64_t session_id);                          // graceful stop
+int  gm_probe(const char* path, GmMediaInfo* out);           // pure libav, no fftools
+int  gm_supports_encoder(const char* name);                  // avcodec_find_encoder_by_name
+int  gm_get_logs(int64_t session_id, char* buf, int cap);    // ring buffer drain
 ```
 
-```dart
-// FfmpegService — per-file job dir; does NOT touch _currentJobDir (batch owns
-// multiple outputs at once, the single-slot model doesn't fit)
-Future<Result<File, FfmpegError>> convertToWebm({
-  required File input,
-  required int crf,
-  required int cpuUsed,
-  bool av1 = false,
-  int? maxWidth,
-  bool keepAudio = false,
-  bool alpha = false,
-  void Function(FfmpegProgress)? onProgress,
-  int? totalMs,                // MediaInfo.durationMs — no speed change, maps 1:1
-});
-```
-
-Output file lives in its own job dir until export; controller frees each with the existing
-`cleanJobAt(file.parent.path)` (`ffmpeg_service.dart`, already used by Video Studio history).
+`gm_probe` / `gm_supports_encoder` use the libav API directly (`avformat_open_input` +
+`find_stream_info` → duration/width/height/fps/hasAudio; ~100 lines of C). No globals → fully
+thread-safe, fully parallel, and **`ffprobe.exe` is no longer needed by the backend**. Replaces
+the JSON round-trip in `_parseProbeJson`.
 
 ---
 
-## 4. Controller
+## 3. Crash-safety reality check (the honest part)
 
-Follows the `EffectsController` pattern (`AsyncNotifier`, immutable state, `_s` sentinel
-`copyWith`) — no shared base class exists, per ARCHITECTURE.md.
+**Dart isolates do not isolate native crashes.** An access violation inside the DLL kills the
+whole process regardless of which isolate called it. The only *perfect* isolation is a separate
+process — which is what we're moving away from. So the safeguard budget is spent on three layers:
+
+1. **SEH guard in the shim.** `gm_execute` body wrapped in `__try/__except(EXCEPTION_EXECUTE_HANDLER)`
+   → access violations, illegal instructions, div-by-zero inside FFmpeg return an error code
+   instead of terminating the process. Catches the dominant crash class. *Does not catch:*
+   `__fastfail` (heap-corruption fast-fail), some stack-overflow states. Documented limit.
+2. **Poison + automatic exe fallback.** After any SEH-caught crash the process heap may be
+   suspect. The Dart backend marks itself **poisoned**: the failed job returns `FfmpegError`
+   ("engine fault, retried via fallback"), and *all* subsequent jobs in this app session route to
+   the retained `FfmpegProcessBackend` (exe). One crash = degraded to today's behavior, never a
+   dead app.
+3. **Hung-job watchdog.** In-process, a truly hung native call can't be killed
+   (`TerminateThread` = corruption). After `cancel()` a session gets N seconds (default 10) to
+   return; if it doesn't: leak that thread, mark poisoned, fall back to exe. Bounded damage —
+   one leaked thread + its memory, app keeps running. (Today's exe equivalent: `kill()` always
+   works — this is the one capability we genuinely trade away; the fallback caps the cost.)
+
+**Screen recorder stays on `ffmpeg.exe` (decision, not deferral):**
+- Highest crash-risk workload in the app (gdigrab + dshow drivers, up to 10 min continuous). A
+  DLL crash mid-recording would lose the app *and* the recording session state; today a dead
+  process still leaves playable MKV segments and the app alive to recover them
+  (`screen_recorder_service.dart:235` already handles unexpected exit + `recoverPartial()`).
+- Gains nothing from DLL: it's a single open-ended session — no parallelism need; cleanup is
+  already handled (`cleanupOnShutdown`, `onWindowClose`).
+- Cost is near zero: the *shared* FFmpeg build ships a thin `ffmpeg.exe` (~300 KB) that links
+  the same DLLs we bundle anyway (§6). No duplicate 90 MB static exe.
+
+The user-cited *cleanup* benefit still lands: all job-shaped work becomes in-process, so a
+force-killed app can no longer orphan job ffmpeg processes; the one remaining exe use
+(recording) already has kill-on-shutdown handling.
+
+---
+
+## 4. Concurrency & scheduling
+
+- **`FfmpegDllBackend implements FfmpegBackend`** — same interface, so `FfmpegService`,
+  controllers, and tests need **no changes**. Internally each `run()` allocates a session id,
+  executes `gm_execute` inside `Isolate.run(...)` (blocking FFI call on that isolate's worker
+  thread — UI isolate never blocks), and completes with `Result<File, FfmpegError>` exactly as
+  today.
+- **`FfmpegJobPool`** (small Dart semaphore inside the backend): caps concurrent `gm_execute`
+  sessions. Default **2** (FFmpeg is internally multithreaded; more parallel encodes mostly
+  fight over cores + RAM). Probes bypass the pool (cheap, thread-safe).
+- **Cancellation:** `cancel()` keeps its current contract (cancel active work) by cancelling all
+  live sessions. Per-session handles exist internally, so a future interface extension
+  (returning a job handle) is trivial — not done now, nothing needs it yet.
+- **`FfmpegService._currentJobDir`** stays as-is (one *export* job at a time is a UI-flow fact,
+  not a backend limit). Parallel capacity is immediately used by: probe-during-encode, preview
+  jobs while an export runs, and any future batch feature.
+
+### Progress reporting
+
+`-progress pipe:1` has no meaning in-process (stdout is the app's). Swap: backend rewrites the
+trailing `-progress pipe:1` pair (already appended by every `FfmpegCommand` builder) to
+`-progress <jobDir>/progress.txt`, then **tails that file** (poll ~150 ms). Format is identical
+key=value lines (`frame=`, `out_time_ms=`, `progress=end`) — the existing
+`_parseProgressLine` logic moves to a shared helper and is reused verbatim. fftools flushes the
+progress AVIO each report interval, so file tailing is reliable. No fftools patch needed for
+progress.
+
+---
+
+## 5. Licensing (decided: GPL — app will be open source)
+
+The app ships under a GPL-compatible open-source license, so the GPL FFmpeg builds stay on
+both platforms — **no encoder changes anywhere**:
+
+- Windows keeps `libx264` (`ffmpeg_command.dart:659,698`, `video_encoder.dart:8`) and bundles a
+  GPL **shared** build (gyan.dev `release-full-shared` or BtbN `win64-gpl-shared` — DLLs +
+  import libs + headers + thin exe in one archive).
+- Android keeps `ffmpeg-kit-full-gpl:2.1.0` (`packages/ffmpeg_kit_flutter_new/android/build.gradle:54`)
+  unchanged. Today's in-process GPL linking becomes compliant the moment the app source is
+  public under a compatible license.
+- Combined-work consequence: distributed binaries carry GPL terms regardless of the app's own
+  license choice (own code under MIT/Apache is fine; the shipped combination must satisfy GPL).
+
+**Hard gate before any public release:** repo public **with a GPL-compatible `LICENSE` file
+committed** (GPLv3 is the friction-free pick; MIT/Apache-2.0 also work). "Source-available",
+non-commercial terms, or a missing LICENSE are *not* GPL-compatible — bundling `libx264` would
+then be a violation. This gate blocks Phase 3, not the engineering phases.
+
+Remaining obligations (cheap once the repo is public, both platforms):
+
+1. **Attribution notice** — About screen (`lib/features/about/view/about_screen.dart`) gains an
+   "Open-source licenses" / FFmpeg section: *"This software uses code of FFmpeg
+   (https://ffmpeg.org) licensed under the GPLv2 or later"* + no implied endorsement, FFmpeg
+   name/logo not used as product branding.
+2. **License texts** — bundle GPL + LGPL texts and FFmpeg copyright notices (asset shown from
+   the About screen; also a `THIRD_PARTY_LICENSES` file in the install/MSIX payload).
+3. **Corresponding source links**, kept release-accurate: Windows — the exact build release's
+   matching source tarball (gyan/BtbN publish them); Android — the ffmpeg-kit fork's source tag
+   for `2.1.0`. The shim's source is covered automatically — it lives in the public app repo.
+4. **Release checklist entry** — `build_msix_release.ps1` gets a comment block: verify notice
+   text, license assets, and source links match the bundled binary versions before shipping.
+
+**Verify item (phase 0):** chosen GPL shared build lists `libx264`, `libvpx`, `libaom`,
+`libopus`, `gdigrab`, `dshow` under its enabled components ("full" builds carry all of these —
+light check, expected to pass).
+
+---
+
+## 6. Bundling & build changes
+
+New contents of `assets/bin/windows/` (git-ignored, same as today):
+
+```
+avcodec-62.dll avformat-62.dll avutil-60.dll avfilter-11.dll avdevice-62.dll
+swscale-9.dll swresample-6.dll          ← from the GPL shared build (§5)
+ffmpeg.exe                              ← thin exe from the SAME shared build (recorder)
+ffmpeg_shim.dll                         ← ours (fftools + patches + SEH + exports)
+```
+
+(`ffprobe.exe` dropped — probe goes through `gm_probe`. Version numbers per chosen FFmpeg release.)
+
+- **Shim build:** `windows/ffmpeg_shim/` — vendored `fftools/*.c` for the pinned FFmpeg version
+  + ffmpeg-kit patch port + `gm_*.c`. Built with **MSYS2/mingw-w64** (fftools needs FFmpeg's
+  generated `config.h` and gcc-isms; mingw's `__thread` matches the patches; C-ABI DLL links
+  fine into the MSVC app). New `scripts/build_ffmpeg_shim.ps1` drives it; produced DLL is a
+  committed **release artifact**, not built per-dev — devs download the bundle like they
+  download ffmpeg.exe today (`setup_windows_dev.ps1` error message updated with the new list).
+- `scripts/setup_windows_dev.ps1` and `scripts/build_msix_release.ps1`: copy the new file set.
+- `FfmpegProcessBackend.resolveBin` unchanged (still resolves next to
+  `Platform.resolvedExecutable`); `FfmpegDllBackend` resolves `ffmpeg_shim.dll` the same way and
+  `DynamicLibrary.open`s it (the libav DLLs sit beside it → normal Windows DLL search finds them).
+
+### Factory wiring
 
 ```dart
-enum WebmItemStatus { queued, converting, done, error }
-
-class WebmItem {          // immutable
-  File source; MediaInfo? info; WebmItemStatus status;
-  File? output; int? outputBytes;   // + source length → "2.4 MB → 780 KB · −68%" row label
-  double progressFraction; String? error;
+// ffmpeg_factory.dart
+static FfmpegBackend create() {
+  if (Platform.isAndroid || Platform.isIOS) return FfmpegKitBackend();
+  if (Platform.isWindows) {
+    final dll = FfmpegDllBackend.tryLoad();      // null if shim/DLLs missing or load fails
+    if (dll != null) return FallbackFfmpegBackend(primary: dll, fallback: _processBackend());
+  }
+  return _processBackend();                      // Linux + any Windows load failure
 }
-
-class WebmConverterState {
-  List<WebmItem> items;   // ≤ 20, enforced in addFiles() with AppToast on overflow
-  int crf; int speedPreset; bool av1; int? maxWidth; bool alpha;
-  bool isProcessing; int currentIndex;
-  bool get isBatch => items.length > 1;
-  double get overallProgress => (doneCount + currentFraction) / items.length;
-}
 ```
 
-No global `error` field — errors are per-item; a service-level failure toasts. No `canceled`
-status — cancel puts the in-flight item back to `queued`, so Convert resumes exactly where it
-stopped instead of dead-ending the batch.
-
-- `addFiles(List<File>)` — append (drop zone stays visible above the list, so more files can be
-  added to an existing batch), cap 20, probe each sequentially (a null `info` renders as
-  "probing…"; no per-item probing flag).
-- `convertAll()` — for-loop over queued items; per item: mark `converting`, call
-  `convertToWebm`, fold into `done` (stat output size) / `error`; check `_cancelRequested`
-  between items. An `error` item does not stop the batch — remaining files still convert.
-- `cancel()` — set flag + backend `cancel()`; current item → back to `queued`, its job dir
-  cleaned; `done` items keep their outputs.
-- Changing any option while `done` items exist resets them to `queued` (outputs freed) — the
-  options card is live, the button reads "Convert again"; no stale outputs that silently ignore
-  the new settings.
-- `removeItem(i)` / `clear()` — clean owned job dirs.
-- Options (crf/speed/av1/maxWidth/alpha) load from and persist to `shared_preferences` as
-  last-used values — a user converting for the same target twice shouldn't re-dial the knobs.
-- Export (§5) then `recentsProvider.notifier.add(...)` per saved file (notifier already caps
-  at 10).
+`FallbackFfmpegBackend` is the poison switch from §3: delegates to `primary` until it reports a
+fault, then permanently (per app session) delegates to `fallback`, logging loudly. Missing DLLs
+= silent exe fallback → **the app can never be *more* broken than it is today.**
 
 ---
 
-## 5. Export (locked flow preserved)
+## 7. Phases & gates
 
-Everything converts into temp job dirs first; writing to the user's disk is always explicit —
-per ARCHITECTURE.md "Export flow (locked decision)".
+**Baseline first (before any change):** record `flutter analyze` (expect 0) and full
+`flutter test` pass/fail counts + names. All later "no regression" claims diff against this.
 
-- **Single file:** `ExportService.saveWebm(tempFile, defaultName: '<basename>.webm')` — same
-  shape as the existing `saveVideo()`, extension `webm`.
-- **Batch:** one `FilePicker.platform.getDirectoryPath()` dialog, then copy every `done` item
-  as `<basename>.webm`, suffixing ` (1)`, ` (2)`… on collision. Twenty sequential `saveFile`
-  dialogs is not a UX.
-- After each successful copy: `cleanJobAt` that item's dir.
-
-**Android risk (flagged, not solved on paper):** `getDirectoryPath()` may return a SAF tree URI
-that plain `File.copy` can't write into. Mitigation order: (1) test on device — many paths
-(Downloads, primary storage) work with the `permission_handler` storage grant the app already
-holds; (2) if writes fail, fall back to per-file `saveFile` dialogs on Android only (acceptable —
-mobile batch sizes are small in practice). Decide from the device test, not speculation.
-
-Disk note: up to 20 converted WebMs sit in temp until export. WebM output is typically smaller
-than source; `TempFileService.sweepStale()` already reclaims leftovers on next launch if the
-user bails.
-
----
-
-## 6. Screen
-
-Standard 4-step skeleton:
-
-1. **Pick** — `FileDropZone(allowMultiple: true, allowedExtensions: [mp4, mov, mkv, avi, m4v,
-   webm, gif])` — drag-drop already works on Windows via the existing widget.
-2. **Options** — glass card: Codec chips (VP9 recommended / AV1 smallest·slower — hidden when
-   `supportsAv1()` is false, disabled when transparency ON), Quality `OptionSlider` (CRF 18–45
-   shown as value, hint "lower = sharper, bigger"), Speed chips (Fast/Balanced/Best), Max width
-   chips (Original/1080/720/480), Keep transparency toggle (shown only when any input is GIF).
-   Options are global — apply to every file in the batch — and persist as last-used (§4).
-3. **Convert** — file rows: name, resolution/duration from probe, status chip, per-file progress
-   bar; `done` rows show the size delta ("2.4 MB → 780 KB · −68%") — the number the user came
-   for. Overall `ProgressOverlay` with "Converting 3 of 12 · 41%" + cancel while `isProcessing`.
-4. **Export** — single: save dialog; batch: "Export all (N)" → directory picker. Success
-   `AppToast` includes total saved ("12 files · 34 MB → 11 MB") + recents.
-
-Preview: tap a `done` row → play via the existing `media_kit` `Video` player (libmpv plays WebM
-on both platforms). Skipped: pre-convert quality preview — a converter isn't an editor; the
-convert itself is the preview.
+- **Phase 0 — Spike (go/no-go gate).** Build the shim with one export (`gm_execute`), run one
+  real `videoToGif` argv through FFI from a scratch Dart script. Prove: (a) success path,
+  (b) error path returns instead of exiting the process, (c) SEH catches a forced AV,
+  (d) two sessions run concurrently on two threads without corrupting each other,
+  (e) chosen GPL shared build lists every component from §5's verify item. **If (b) or (d) fail
+  after porting the ffmpeg-kit patches, stop and re-plan** (fallback plan: process pool of exe
+  workers gets the parallelism/cleanup goals with zero crash risk — smaller win, zero native work).
+- **Phase 1 — Backend.** `FfmpegDllBackend` (run/probe/supportsEncoder/cancel/dispose), progress
+  file tailing, log-ring → `FfmpegError.stderr`, `FfmpegJobPool`. Unit-testable behind the
+  existing interface; existing fakes/tests untouched.
+- **Phase 2 — Wiring + safeguards.** Factory + `FallbackFfmpegBackend` + poison + watchdog.
+  No encoder or arg-builder changes — GPL build keeps `libx264` everywhere (§5).
+- **Phase 3 — Bundling + compliance.** Shared-build DLLs + thin exe in `assets/bin/windows/`;
+  update both scripts; MSIX build; verify packaged app runs on a machine without dev tooling.
+  About-screen FFmpeg section + bundled GPL/LGPL texts + source links (§5) land in the same
+  release as the binaries they describe. **Blocked by the §5 hard gate: repo public with a
+  GPL-compatible LICENSE before this release ships.**
+- **Phase 4 — Hardening + verification.** Full manual matrix (§8), crash-injection test (feed a
+  deliberately corrupt file / bad argv; confirm: error surfaced, app alive, next job runs via
+  fallback), cancel-during-encode test, parallel probe+encode test, 10-min recording test.
+- **Deferred (explicit non-goal):** recorder → DLL; Linux → shim; per-job handles in the
+  `FfmpegBackend` interface; parallel *export* UI.
 
 ---
 
-## 7. Implementation order
+## 8. Feature-parity checklist (must all pass on Windows before merge)
 
-1. `FfmpegCommand.toWebm` + arg-builder unit test.
-2. `FfmpegService.convertToWebm`.
-3. Controller + state.
-4. Screen; router + tool catalog entries.
-5. `ExportService` additions (single, then batch dir copy).
-6. Gate: `flutter analyze` → 0 issues; `flutter test`.
-7. Manual verify (Windows dev run): odd-dimension mp4 (e.g. 641×359) → even clamp; audio-less
-   video (must emit `-an`, not fail); audio video → Opus track present; GIF with transparency,
-   alpha ON vs OFF; batch of 3 mixed video+GIF — size deltas shown per row; cancel mid-batch →
-   in-flight item back to queued, Convert resumes, no orphan temp dirs; option change after done
-   → items reset to queued; 21-file pick → cap toast; AV1 smoke encode (plays in Chrome, smaller
-   than VP9 at same CRF); AV1 chip disables when transparency ON; options + studio format
-   restored after app restart. Android device: single convert + batch export directory write
-   (the §5 risk) + `supportsAv1()` probe result (expect false — chip hidden).
+Every `FfmpegService` op via DLL: `imagesToGif`, `videoToGif`, `resizeGif`, `cropGif`,
+`textOverlay`, `textOverlayMulti` (multi-layer + custom fonts via `fontfile=`), `reverseGif`,
+`changeSpeed`, `editVideo` (encoder fallback loop exercises log capture), `videoStreamCopy`,
+`bakeVideoToGif` (two-pass palette), `editGif` (incl. boomerang + trim), WebM export (VP9 + AV1
++ alpha + opus audio), `probe` on mp4/gif/webm, `supportsAv1` gate, progress % + cancel in
+`ProgressOverlay`, `optimizeGif` (pure Dart — unaffected, regression-check only).
+Screen record: start/pause/resume/stop, mic + system audio mux, cap, crash recovery, dshow
+device listing (still exe — regression-check only). Export flow + temp cleanup + recents.
+Error surfaces: a failing job shows a real stderr-derived message, not a blank.
+
+**Android:** binaries unchanged — regression-check only (one export per tool on a real device).
+About screen shows the FFmpeg notice on both platforms.
 
 ---
 
-## 8. Video Studio — Export Video format choice (MP4 | WebM)
+## 9. Open decisions (owner: you)
 
-Today `exportVideo()` (`video_studio_controller.dart:1206`) is a direct button → h264/mp4 via
-`editVideo`'s encoder-candidate fallback, hardcoded `studio.mp4`. Change: Export Video opens a
-**format page** first, then runs the chosen pipeline.
+1. ~~License route~~ — **decided: GPL** (app will be open source under a GPL-compatible
+   license). Binaries stay GPL on both platforms; obligations in §5. **Your remaining action:
+   pick the app's LICENSE (GPLv3 recommended) and make the repo public before the Phase-3
+   release.**
+2. **Recorder on exe** (recommended, §3) vs. all-in on DLL.
+3. **Pool size default 2** — fine, or expose in Settings?
 
-**UI.** Export button pushes a compact glass page (standard fade+slide route, matching the rest
-of the app) with two selectable format cards:
-- **MP4** — "H.264 · best compatibility · hardware-accelerated" (default)
-- **WebM** — "VP9 · smaller files · web-friendly"
-plus the existing "you'll be asked where to save" note and an Export button. The chosen format
-persists as last-used (`shared_preferences`) and preselects next time — repeat exporters skip a
-tap. No quality knobs here — WebM uses the §1 defaults (CRF 32, cpu-used 4, Opus 128k); a quality
-slider can join the page later if asked. GIF-stage export is untouched.
+## 10. Risk register
 
-**Pipeline.**
-- `FfmpegCommand.videoEdit` gains a format switch: same filter graph (crop · scale · speed ·
-  text · cuts · volume), but WebM swaps the encoder block to the §1 VP9 arg set (shared private
-  helper with `toWebm` — one place owns the VP9 flags) + `-c:a libopus -b:a 128k`, output
-  extension `webm`.
-- `FfmpegService.editVideo` gains `format`; for WebM the encoder-candidate loop runs with the
-  single candidate `libvpx-vp9` (no hw VP9 encoders exist — §1). H.264 path unchanged.
-- **No stream-copy / fast path for WebM.** WebM only admits VP8/VP9/AV1, so an h264 source can
-  never be remuxed — every WebM export encodes:
-  - `editsApplied` fast path (baked mp4, nothing pending): MP4 → `saveVideo` as-is (unchanged);
-    WebM → `convertToWebm(baked)` (§3) then save. One encode, from the already-baked frames.
-  - No-edits + WebM likewise routes through `convertToWebm` — it's exactly the converter-tool op.
-- Save: WebM uses `ExportService.saveWebm` (§5), default name `studio.webm`; MP4 keeps
-  `saveVideo` / `studio.mp4`.
-
-**Order.** Implement after §7 steps 1–2 (reuses `toWebm` args + `convertToWebm`); before or
-parallel with the converter screen — no dependency between the two UIs.
-
-**Verify.** MP4 export unchanged (regression check); WebM export with edits pending (single
-encode, plays in Chrome); WebM export right after Apply (routes via `convertToWebm`, no
-double-encode of pending layers); volume ≠ 1.0 survives into Opus track.
-
----
-
-## 9. Open questions (defaults chosen, revisit only if wrong)
-
-- CRF default 32 — not wired to `SettingsService` (its fps/width/colors/lossy defaults are
-  GIF-shaped). Add a settings slider later only if users ask.
-- `webm` accepted as *input* (re-encode to smaller/newer settings) — trivially free since ffmpeg
-  demuxes it; drop from the extension list if product-wise confusing.
-- Studio format page (§8) stays MP4 | WebM(VP9) — AV1 lives in the converter tool; add a third
-  card there only if asked.
+| Risk | Likelihood | Mitigation |
+|---|---|---|
+| ffmpeg-kit fftools patches don't port cleanly to current FFmpeg + mingw | Medium | Phase-0 gate; pin FFmpeg version the patches target; fallback plan named in §7 |
+| SEH misses a crash class (fast-fail) → app dies | Low | Accepted residual; recorder (worst risk) stays out-of-process; document |
+| Hung native session can't be killed | Low | Watchdog: leak thread + poison + exe fallback |
+| Heap corruption *after* a caught SEH fault | Low | Poison switch stops using the DLL immediately |
+| GPL shared build missing a needed component | Low | Phase-0 verify ("full" builds carry all of §5's list); custom MSYS2 build script as fallback |
+| App ships before repo is public / LICENSE committed → GPL violation | Medium | §5 hard gate blocks Phase 3; release checklist entry in `build_msix_release.ps1` |
+| Two backends drift (exe fallback rots) | Low | Fallback shares all arg builders; Phase-4 matrix runs once with DLL force-disabled |

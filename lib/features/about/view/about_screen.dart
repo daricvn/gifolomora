@@ -15,10 +15,19 @@ class AboutScreen extends StatelessWidget {
     return GradientScaffold(
       appBar: GlassAppBar(
         title: 'About',
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: AppColors.textHi, size: 20),
-          onPressed: () => Navigator.of(context).maybePop(),
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 16),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: IconButton(
+              iconSize: 20,
+              icon: const Icon(
+                Icons.arrow_back_ios_new_rounded,
+                color: AppColors.textHi,
+              ),
+              onPressed: () => Navigator.of(context).maybePop(),
+            ),
+          ),
         ),
       ),
       body: ListView(

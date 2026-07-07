@@ -17,6 +17,7 @@ import '../../../core/theme/app_gradients.dart';
 import '../../../core/utils/font_registry.dart';
 import '../../../core/widgets/common/gradient_scaffold.dart';
 import '../../../core/widgets/glass/glass_app_bar.dart';
+import '../../../core/widgets/glass/glass_confirm_dialog.dart';
 import '../../../core/widgets/glass/glass_container.dart';
 import '../../_shared/widgets/file_drop_zone.dart';
 import '../../_shared/widgets/local_palettes_toggle.dart';
@@ -261,27 +262,12 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                 size: 22,
               ),
               onPressed: () async {
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    title: const Text('Start over?'),
-                    content: const Text(
-                      'This discards the loaded file and all edits.',
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: const Text('Cancel'),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        child: const Text(
-                          'Start over',
-                          style: TextStyle(color: Colors.redAccent),
-                        ),
-                      ),
-                    ],
-                  ),
+                final ok = await GlassConfirmDialog.show(
+                  context,
+                  title: 'Start over?',
+                  message: 'This discards the loaded file and all edits.',
+                  confirmLabel: 'Start over',
+                  isDestructive: true,
                 );
                 if (ok == true) ctrl.clear();
               },
@@ -2664,24 +2650,12 @@ class _GifPanel extends StatelessWidget {
             label: 'Make GIF',
             onTap: () async {
               if (state.effectiveOutputMs > 40000) {
-                final proceed = await showDialog<bool>(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    title: const Text('Video too long'),
-                    content: const Text(
+                final proceed = await GlassConfirmDialog.show(
+                  context,
+                  title: 'Video too long',
+                  message:
                       'GIF is limited to 40 seconds. Trim the video first for best results, or only the first 40 seconds will be used.',
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: const Text('Cancel'),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        child: const Text('Use first 40s'),
-                      ),
-                    ],
-                  ),
+                  confirmLabel: 'Use first 40s',
                 );
                 if (proceed != true) return;
               }
@@ -3076,27 +3050,13 @@ class _ActionBar extends StatelessWidget {
               icon: Icons.arrow_back_rounded,
               label: 'Back to video',
               onTap: () async {
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    title: const Text('Discard GIF edits?'),
-                    content: const Text(
+                final ok = await GlassConfirmDialog.show(
+                  context,
+                  title: 'Discard GIF edits?',
+                  message:
                       'Going back will discard all changes made to the GIF.',
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: const Text('Cancel'),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        child: const Text(
-                          'Discard',
-                          style: TextStyle(color: Colors.redAccent),
-                        ),
-                      ),
-                    ],
-                  ),
+                  confirmLabel: 'Discard',
+                  isDestructive: true,
                 );
                 if (ok == true) ctrl.discardGif();
               },

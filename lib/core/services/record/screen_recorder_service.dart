@@ -382,7 +382,15 @@ class ScreenRecorderService {
   Future<void> cleanupOnShutdown() async {
     _capTimer?.cancel();
     _expectingExit = true;
-    _process?.kill();
+    final proc = _process;
+    if (proc != null) {
+      proc.kill();
+      // Bounded wait so a zombie ffmpeg can't hold the job dir's file lock
+      // when TempFileService.wipeAll() tries to delete it right after this.
+      try {
+        await proc.exitCode.timeout(const Duration(seconds: 2));
+      } catch (_) {}
+    }
     _process = null;
     _jobDir = null;
   }
