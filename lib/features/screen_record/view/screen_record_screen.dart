@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/services/record/screen_recorder_service.dart';
 import '../../../core/theme/app_colors.dart';
@@ -59,7 +60,8 @@ class _ScreenRecordScreenState extends ConsumerState<ScreenRecordScreen> {
             child: IconButton(
               icon: const Icon(Icons.arrow_back_ios_new_rounded,
                   color: AppColors.textHi, size: 20),
-              onPressed: () => Navigator.of(context).maybePop(),
+              onPressed: () =>
+                  context.canPop() ? context.pop() : context.go('/'),
             ),
           ),
         ),

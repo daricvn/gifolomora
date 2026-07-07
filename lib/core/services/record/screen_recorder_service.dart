@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
 import '../ffmpeg/ffmpeg_command.dart';
-import '../ffmpeg/ffmpeg_process_backend.dart';
+import '../ffmpeg/ffmpeg_dll_backend.dart';
+import '../ffmpeg/gm_shim_ffi.dart';
 import '../files/temp_file_service.dart';
 import '../../utils/logger.dart';
 import 'record_settings_service.dart' show RecordOutputResolution;
@@ -36,6 +36,33 @@ abstract interface class LoopbackController {
   Future<int> stop();
 }
 
+/// Narrow interface the recorder talks to for running ffmpeg -- gm_execute/
+/// gm_cancel stand in for the old Process.start/stdin "q" pair. Fakeable in
+/// tests; the real implementation is [GmShimRecorderEngine].
+abstract interface class RecorderEngine {
+  Future<GmExecResult> execute(int sessionId, List<String> argv);
+  void cancel(int sessionId);
+}
+
+class GmShimRecorderEngine implements RecorderEngine {
+  GmShimRecorderEngine(String dllPath) : _shim = GmShim(dllPath);
+  final GmShim _shim;
+
+  @override
+  Future<GmExecResult> execute(int sessionId, List<String> argv) =>
+      _shim.execute(sessionId, argv);
+
+  @override
+  void cancel(int sessionId) => _shim.cancel(sessionId);
+
+  /// Null if gm_shim.dll isn't present/loadable -- there is no exe fallback
+  /// for the recorder (all-in on the DLL backend, PLAN.md §9 decision #2).
+  static RecorderEngine? tryCreate() {
+    final path = FfmpegDllBackend.tryResolvePath();
+    return path == null ? null : GmShimRecorderEngine(path);
+  }
+}
+
 const int kMaxRecordSeconds = 600;
 
 /// Seconds left before the 10-minute cap, given [finishedElapsed] already
@@ -45,7 +72,7 @@ const int kMaxRecordSeconds = 600;
 int remainingCaptureSeconds(Duration finishedElapsed) =>
     kMaxRecordSeconds - finishedElapsed.inSeconds;
 
-/// Parses `ffmpeg -list_devices true -f dshow -i dummy` stderr text for the
+/// Parses `ffmpeg -list_devices true -f dshow -i dummy` log text for the
 /// first DirectShow **audio** device name (ffmpeg lists audio after video;
 /// the "DirectShow audio devices" header marks the start of the section).
 String? parseDshowDefaultMicName(String stderrText) {
@@ -66,22 +93,27 @@ String? parseDshowDefaultMicName(String stderrText) {
   return null;
 }
 
-/// Owns the ffmpeg `Process` directly (not `FfmpegBackend.run()` — that API
-/// is job-shaped; recording is open-ended and stdin-controlled). Segment-per-
-/// resume: ffmpeg has no pause, so pause/resume stops one segment and starts
-/// the next; stop() concatenates all segments (+ muxes system audio) into
-/// one output file.
+/// Owns ffmpeg sessions directly via [RecorderEngine] (not
+/// `FfmpegBackend.run()` — that API is job-shaped; recording is open-ended
+/// and cancel-controlled). Segment-per-resume: ffmpeg has no pause, so
+/// pause/resume stops one segment and starts the next; stop() concatenates
+/// all segments (+ muxes system audio) into one output file.
 class ScreenRecorderService {
   // `loopback` is the public param name; `this._loopback` would leak the
   // private field name into the constructor's named-arg API.
-  ScreenRecorderService({LoopbackController? loopback, TempFileService? temp})
-      : _loopback = loopback, // ignore: prefer_initializing_formals
-        _temp = temp ?? TempFileService();
+  ScreenRecorderService({
+    LoopbackController? loopback,
+    TempFileService? temp,
+    RecorderEngine? engine,
+  })  : _loopback = loopback, // ignore: prefer_initializing_formals
+        _temp = temp ?? TempFileService(),
+        _engine = engine ?? GmShimRecorderEngine.tryCreate();
 
   static const _tag = 'ScreenRecorderService';
 
   final LoopbackController? _loopback;
   final TempFileService _temp;
+  final RecorderEngine? _engine;
 
   final _statusController = StreamController<RecordStatus>.broadcast();
   final _errorController = StreamController<String>.broadcast();
@@ -98,11 +130,11 @@ class ScreenRecorderService {
   RecordOutputResolution _resolution = RecordOutputResolution.original;
 
   int _segmentIndex = 0;
-  Process? _process;
+  int? _currentSessionId;
+  Future<GmExecResult>? _segmentFuture;
   bool _expectingExit = false;
   final _videoSegments = <String>[];
   final _wavSegments = <String>[];
-  final _stderrTail = <String>[]; // last ~20 lines, for crash diagnostics
 
   Duration _finishedElapsed = Duration.zero;
   final _segmentStopwatch = Stopwatch();
@@ -122,16 +154,18 @@ class ScreenRecorderService {
     _statusController.add(s);
   }
 
-  String get _ffmpegPath => FfmpegProcessBackend.resolveBin('ffmpeg');
-
-  /// Parses `ffmpeg -list_devices true -f dshow -i dummy` stderr for the
+  /// Parses `ffmpeg -list_devices true -f dshow -i dummy` log output for the
   /// first listed DirectShow audio device name. Cached per session.
   Future<String?> discoverDefaultMicDeviceName() async {
     if (_cachedMicDeviceName != null) return _cachedMicDeviceName;
+    final engine = _engine;
+    if (engine == null) return null;
     try {
-      final result = await Process.run(
-          _ffmpegPath, FfmpegCommand.listDshowDevicesArgs());
-      _cachedMicDeviceName = parseDshowDefaultMicName(result.stderr as String);
+      final result = await engine.execute(
+        GmSessionIds.allocate(),
+        ['ffmpeg', ...FfmpegCommand.listDshowDevicesArgs()],
+      );
+      _cachedMicDeviceName = parseDshowDefaultMicName(result.logs);
       return _cachedMicDeviceName;
     } catch (e) {
       Log.e(_tag, 'mic device discovery failed', e);
@@ -146,6 +180,10 @@ class ScreenRecorderService {
     String? saveDirectory,
   }) async {
     if (_status != RecordStatus.idle) return;
+    if (_engine == null) {
+      _errorController.add('FFmpeg engine unavailable (gm_shim.dll not found)');
+      return;
+    }
     _monitor = monitor;
     _audio = audio;
     _resolution = resolution;
@@ -185,25 +223,12 @@ class ScreenRecorderService {
     );
 
     final tProcessStart = DateTime.now();
-    _process = await Process.start(_ffmpegPath, args);
+    final sessionId = GmSessionIds.allocate();
+    _currentSessionId = sessionId;
     _expectingExit = false;
-    _stderrTail.clear();
-    // ffmpeg writes a constantly-updating stats line to stderr for the
-    // entire (open-ended, potentially minutes-long) recording. Nothing else
-    // in this class reads stdout/stderr, so left undrained the pipe buffer
-    // fills and ffmpeg's own write() blocks — the process goes silently
-    // unresponsive (still "alive": exitCode never resolves, status stays
-    // recording) while producing no more output. Must drain both for the
-    // whole lifetime of the process, not just while polling for exit.
-    _process!.stdout.drain<void>();
-    _process!.stderr
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen((line) {
-      _stderrTail.add(line);
-      if (_stderrTail.length > 20) _stderrTail.removeAt(0);
-    });
-    _process!.exitCode.then((code) => _onSegmentExit(code, videoPath));
+    final future = _engine!.execute(sessionId, ['ffmpeg', ...args]);
+    _segmentFuture = future;
+    future.then((result) => _onSegmentExit(sessionId, result, videoPath));
 
     if (_audio.captureSystemAudio && _loopback != null) {
       final wavPath = p.join(
@@ -232,40 +257,42 @@ class ScreenRecorderService {
     });
   }
 
-  void _onSegmentExit(int code, String videoPath) {
+  void _onSegmentExit(int sessionId, GmExecResult result, String videoPath) {
     if (_expectingExit) return; // pause()/stop() already handled bookkeeping
-    final tail = _stderrTail.join('\n');
-    Log.e(_tag, 'ffmpeg segment exited unexpectedly (code=$code)\n$tail');
+    if (_currentSessionId != sessionId) return; // a stale future, already superseded
+    Log.e(_tag,
+        'ffmpeg segment exited unexpectedly (rc=${result.rc})\n${result.logs}');
     // MKV has no moov atom to lose — a killed/crashed segment is still
     // playable, so keep it for partial-recording recovery.
     _videoSegments.add(videoPath);
     _finishedElapsed += _segmentStopwatch.elapsed;
     _segmentStopwatch.stop();
     _capTimer?.cancel();
+    _currentSessionId = null;
+    _segmentFuture = null;
     _setStatus(RecordStatus.idle);
-    _errorController.add('Recording stopped unexpectedly (ffmpeg exit $code)');
+    _errorController.add('Recording stopped unexpectedly (ffmpeg exit ${result.rc})');
   }
 
-  /// Gracefully stops the live segment (`q` over stdin, 5s timeout, kill
-  /// fallback) and stops loopback capture for it, if any.
+  /// Gracefully stops the live segment (gm_cancel, 5s timeout) and stops
+  /// loopback capture for it, if any. Unlike the old Process.kill()
+  /// fallback, a session that doesn't honor cancel within the timeout can't
+  /// be force-killed in-process (PLAN.md §3) — it's leaked; the segment file
+  /// recorded up to the cancel point is still kept for playback/recovery.
   Future<void> _stopCurrentSegment(String videoPath) async {
     _expectingExit = true;
-    final process = _process;
-    if (process != null) {
+    final sessionId = _currentSessionId;
+    final future = _segmentFuture;
+    if (sessionId != null && future != null) {
+      _engine!.cancel(sessionId);
       try {
-        process.stdin.write('q\n');
-        await process.stdin.flush();
-      } catch (_) {
-        // stdin already closed — process is likely exiting on its own.
-      }
-      try {
-        await process.exitCode.timeout(const Duration(seconds: 5));
+        await future.timeout(const Duration(seconds: 5));
       } on TimeoutException {
-        process.kill();
-        await process.exitCode;
+        Log.e(_tag, 'segment $sessionId did not stop within 5s of cancel(); leaking it');
       }
     }
-    _process = null;
+    _currentSessionId = null;
+    _segmentFuture = null;
     _capTimer?.cancel();
     _segmentStopwatch.stop();
     _finishedElapsed += _segmentStopwatch.elapsed;
@@ -353,19 +380,24 @@ class ScreenRecorderService {
   }
 
   Future<void> _runFfmpeg(List<String> args) async {
-    final result = await Process.run(_ffmpegPath, args);
-    if (result.exitCode != 0) {
-      Log.e(_tag, 'ffmpeg finalize step failed: ${result.stderr}');
-      throw ProcessException(_ffmpegPath, args, result.stderr.toString(),
-          result.exitCode);
+    final engine = _engine;
+    if (engine == null) {
+      throw StateError('FFmpeg engine unavailable (gm_shim.dll not found)');
+    }
+    final result = await engine.execute(GmSessionIds.allocate(), ['ffmpeg', ...args]);
+    if (result.rc != 0) {
+      Log.e(_tag, 'ffmpeg finalize step failed (rc=${result.rc}): ${result.logs}');
+      throw Exception('FFmpeg exited with code ${result.rc}: ${result.logs}');
     }
   }
 
   Future<void> discard() async {
     _capTimer?.cancel();
     _expectingExit = true;
-    _process?.kill();
-    _process = null;
+    final sessionId = _currentSessionId;
+    if (sessionId != null) _engine?.cancel(sessionId);
+    _currentSessionId = null;
+    _segmentFuture = null;
     _segmentStopwatch.stop();
     if (_jobDir != null) await _temp.cleanJob(_jobDir!);
     _jobDir = null;
@@ -375,23 +407,24 @@ class ScreenRecorderService {
     _setStatus(RecordStatus.idle);
   }
 
-  /// Kills a live ffmpeg segment (if any) on app shutdown. Dir cleanup is
-  /// handled by `TempFileService.wipeAll()` right after this call (see
-  /// `app.dart`'s `onWindowClose`), which deletes the whole job base dir —
-  /// no need to clean `_jobDir` individually here too.
+  /// Stops a live segment (if any) on app shutdown. Dir cleanup is handled
+  /// by `TempFileService.wipeAll()` right after this call (see `app.dart`'s
+  /// `onWindowClose`), which deletes the whole job base dir — no need to
+  /// clean `_jobDir` individually here too. Bounded wait, same leak-not-kill
+  /// tradeoff as `_stopCurrentSegment`.
   Future<void> cleanupOnShutdown() async {
     _capTimer?.cancel();
     _expectingExit = true;
-    final proc = _process;
-    if (proc != null) {
-      proc.kill();
-      // Bounded wait so a zombie ffmpeg can't hold the job dir's file lock
-      // when TempFileService.wipeAll() tries to delete it right after this.
+    final sessionId = _currentSessionId;
+    final future = _segmentFuture;
+    if (sessionId != null && future != null) {
+      _engine?.cancel(sessionId);
       try {
-        await proc.exitCode.timeout(const Duration(seconds: 2));
+        await future.timeout(const Duration(seconds: 2));
       } catch (_) {}
     }
-    _process = null;
+    _currentSessionId = null;
+    _segmentFuture = null;
     _jobDir = null;
   }
 

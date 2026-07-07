@@ -4,6 +4,7 @@ import '../../../core/theme/app_gradients.dart';
 import '../../../core/widgets/common/gradient_scaffold.dart';
 import '../../../core/widgets/glass/glass_app_bar.dart';
 import '../../../core/widgets/glass/glass_container.dart';
+import 'license_viewer_screen.dart';
 
 class AboutScreen extends StatelessWidget {
   const AboutScreen({super.key});
@@ -36,6 +37,8 @@ class AboutScreen extends StatelessWidget {
           _AppHero(),
           const SizedBox(height: 28),
           _CreditsCard(),
+          const SizedBox(height: 16),
+          _LicensesCard(),
           const SizedBox(height: 16),
           _MadeWithCard(),
         ],
@@ -171,6 +174,75 @@ class _CreditRow extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+class _LicensesCard extends StatelessWidget {
+  static const _licenses = [
+    (title: 'FFmpeg notice', asset: 'assets/licenses/FFMPEG_NOTICE.txt'),
+    (title: 'GNU GPL v3', asset: 'assets/licenses/FFMPEG_GPLv3.txt'),
+    (title: 'GNU LGPL v2.1', asset: 'assets/licenses/FFMPEG_LGPLv2.1.txt'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassContainer(
+      borderRadius: 20,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Open-source licenses',
+            style: TextStyle(
+              color: AppColors.textHi,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.8,
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'This software uses code of FFmpeg (ffmpeg.org) licensed under '
+            'the GPL. No endorsement by the FFmpeg project is implied.',
+            style: TextStyle(color: AppColors.textLo, fontSize: 12.5, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          for (final license in _licenses) ...[
+            InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => LicenseViewerScreen(
+                    title: license.title,
+                    assetPath: license.asset,
+                  ),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        license.title,
+                        style: const TextStyle(
+                          color: AppColors.textHi,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right_rounded, color: AppColors.textLo, size: 20),
+                  ],
+                ),
+              ),
+            ),
+            if (license != _licenses.last)
+              const Divider(color: AppColors.glassStroke, height: 1),
+          ],
+        ],
+      ),
     );
   }
 }

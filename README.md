@@ -27,7 +27,7 @@ All tools feature:
 - **Flutter:** 3.12.0 or later
 - **Android:** minSDK 24 (API 24+)
 - **Windows:** Developer Mode enabled for symlinks (`start ms-settings:developers`)
-- **Windows (dev only):** FFmpeg + FFprobe binaries next to your built runner (see [Setup](#setup))
+- **Windows (dev only):** `gm_shim.dll` + companion FFmpeg DLLs next to your built runner (see [Setup](#setup))
 
 ### Installation
 
@@ -38,14 +38,71 @@ dart run build_runner build  # if adding @riverpod annotations (not currently us
 
 ### Setup (Windows Development)
 
-The Windows build uses bundled FFmpeg/FFprobe binaries. For local development:
+Windows runs FFmpeg **in-process** via `gm_shim.dll` (`windows/ffmpeg_shim/`) — there's no
+`ffmpeg.exe` process spawned for exports/editing anymore. `assets/bin/windows/` is git-ignored;
+you build its contents yourself once.
 
-```bash
-# PowerShell
+**If you already have `assets/bin/windows/` populated** (from a release bundle, or a prior build):
+
+```powershell
 .\scripts\setup_windows_dev.ps1
 ```
 
-This copies `ffmpeg.exe` and `ffprobe.exe` from `assets/bin/windows/` to the debug runner directory after a clean build.
+This validates the full DLL set and copies it from `assets/bin/windows/` to the build output dir
+(`build\windows\x64\runner\<Config>`) after a `flutter build windows` / `flutter run -d windows`.
+
+**If you need to build `gm_shim.dll` and the FFmpeg libs from source:**
+
+1. Install [MSYS2](https://www.msys2.org/) (default `C:\msys64`), then in an MSYS2 **CLANG64**
+   shell:
+   ```
+   pacman -S mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-nasm mingw-w64-clang-x86_64-pkgconf
+   ```
+   Clang, not GCC — MSYS2's `mingw-w64-x86_64-gcc` hits a reproducible codegen bug across several
+   libavcodec/libavformat files.
+2. Clone FFmpeg **n6.0** (the version our vendored `windows/ffmpeg_shim/fftools/*.c` patches
+   target):
+   ```sh
+   git clone --branch n6.0 --depth 1 https://github.com/FFmpeg/FFmpeg.git ffmpeg-src
+   ```
+3. Build FFmpeg + `gm_shim.dll` in one step, from **PowerShell** (not the MSYS2 shell — the script
+   shells out to MSYS2 bash itself):
+   ```powershell
+   .\scripts\build_ffmpeg_shim.ps1 `
+     -FfmpegBuildDir C:\path\to\ffmpeg-build `
+     -FfmpegSrcDir   C:\path\to\ffmpeg-src `
+     -BuildFFmpeg
+   ```
+   `-BuildFFmpeg` runs FFmpeg's own `./configure`/`make`/`make install` into `-FfmpegBuildDir`
+   before linking the shim, using the GPLv3 flags below (baked in as the script's default
+   `-ConfigureFlags`, per ARCHITECTURE.md's "gm_shim.dll" section — override that param if you
+   need a different set):
+   ```
+   --enable-gpl --enable-version3
+   --enable-libx264 --enable-libvpx --enable-libaom --enable-libopus --enable-libfreetype
+   --enable-zlib --enable-avdevice --enable-ffmpeg
+   ```
+   `--enable-zlib` and `--enable-libfreetype` are **required**, not optional — past builds that
+   omitted them shipped working but silently broken: no `--enable-zlib` means the PNG decoder is
+   unavailable (`Decoder (codec png) not found`, breaks images→GIF and the palette-bake pass), no
+   `--enable-libfreetype` means `drawtext` doesn't exist (every text-overlay job fails with
+   `No such filter: 'drawtext'`). `--enable-avdevice` is needed even though the shim doesn't call
+   into it directly — `fftools` won't build without its headers. `libx264`/`libvpx`/`libaom`/
+   `libopus`/`libfreetype` come from the MSYS2 packages installed in step 1 (prebuilt, found via
+   `pkgconf`) — the script doesn't build those from source.
+
+   Already have FFmpeg's shared libs built elsewhere? Drop `-BuildFFmpeg` and just point
+   `-FfmpegBuildDir` at that tree — the script relinks the shim only (fast, no FFmpeg rebuild).
+
+   Other params:
+   - `-Msys2Root` (optional, default `C:\msys64`).
+   - `-OutDir` (optional, default `windows\ffmpeg_shim`) — where `gm_shim.dll`/`gm_shim.lib` land.
+4. Create `assets/bin/windows/` and copy in `gm_shim.dll` plus every DLL
+   `scripts/setup_windows_dev.ps1` checks for (FFmpeg's `avcodec-60.dll`/`avformat-60.dll`/etc.
+   from `$FfmpegBuildDir\bin`, and their dependency chain — libx264/libvpx/libaom/libopus/
+   libfreetype and its own deps). Then run `setup_windows_dev.ps1` as above.
+
+See [PLAN.md](PLAN.md) §6 for the full verified DLL list and the bug history behind these flags.
 
 ### Running
 
@@ -74,7 +131,9 @@ This project uses:
 - **Design System:** Custom glass widgets (BackdropFilter-based) over animated gradient scaffold
 - **FFmpeg Backend:** 
   - **Android/iOS:** `ffmpeg_kit_flutter_new` community fork (4.2.1)
-  - **Windows/Linux:** Native `Process` + bundled binaries with progress parsing
+  - **Windows:** In-process `gm_shim.dll` (FFmpeg's `fftools` compiled into a DLL), falling back
+    to spawned `ffmpeg.exe` if the DLL is missing or faults
+  - **Linux:** Native `Process` + bundled binaries with progress parsing
 - **Video Preview:** `media_kit` (Windows-optimized)
 - **GIF Optimization:** Pure-Dart `GifOptimizer` with octree quantization and inter-frame transparency analysis
 

@@ -106,3 +106,16 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# gm_shim.dll + its companion FFmpeg/codec DLLs (assets/bin/windows/, git-ignored -- built by
+# scripts/build_ffmpeg_shim.ps1 or pulled from a release bundle). Must sit next to the exe for
+# FfmpegDllBackend/GmShimRecorderEngine to load at runtime; there is no ffmpeg.exe fallback
+# (PLAN.md §9 decision #2). install(DIRECTORY) re-copies on every build, same as flutter_assets
+# above, so `flutter run`/`flutter build windows` alone is enough -- no manual script step needed.
+set(FFMPEG_SHIM_DIR "${CMAKE_SOURCE_DIR}/../assets/bin/windows")
+if(EXISTS "${FFMPEG_SHIM_DIR}")
+  install(DIRECTORY "${FFMPEG_SHIM_DIR}/" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime FILES_MATCHING PATTERN "*.dll")
+else()
+  message(WARNING "assets/bin/windows/ not found -- gm_shim.dll won't be bundled. See scripts/build_ffmpeg_shim.ps1.")
+endif()

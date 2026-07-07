@@ -87,14 +87,17 @@ class GlassButton extends StatelessWidget {
     return SizedBox(
       width: width,
       child: GlassContainer(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        padding: EdgeInsets.zero,
         borderRadius: borderRadius,
         child: Material(
           color: Colors.transparent,
           child: InkWell(
             onTap: onPressed,
             borderRadius: BorderRadius.circular(borderRadius),
-            child: content,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              child: content,
+            ),
           ),
         ),
       ),

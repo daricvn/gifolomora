@@ -18,6 +18,9 @@ dependencies:
   path_provider: ^2.1.4
   path: ^1.9.0
 
+  # Windows in-process FFmpeg (FfmpegDllBackend): dart:ffi struct/Utf8 helpers.
+  ffi: ^2.1.3
+
   # Phase 1: file picking + permissions
   file_picker: ^8.1.2
   permission_handler: ^11.3.1
@@ -79,6 +82,7 @@ flutter:
     - assets/app.png
     - assets/noise.png
     - assets/fonts/
+    - assets/licenses/
   fonts:
     - family: Inter
       fonts:

@@ -72,21 +72,82 @@ lib/
 ## Dual-backend FFmpeg (critical constraint)
 
 `ffmpeg_kit_flutter` (Arthenica) was retired April 2025 and never supported desktop.
-The app uses **two backends behind one interface** — UI and features never touch raw process args:
+Windows is now **all-in on an in-process DLL** — no `ffmpeg.exe` anywhere (PLAN.md §9 decision #2,
+revisited). `FfmpegProcessBackend` still exists as source but is unreachable on Windows unless
+`gm_shim.dll` fails to load at startup (a dev-machine-without-the-DLL-built situation).
 
 | Platform | Backend | Notes |
 |---|---|---|
 | Android / iOS | `ffmpeg_kit_flutter_new` community fork (4.2.1) | `FFmpegKit` + statistics callback |
-| Windows / Linux | `dart:io Process` + bundled binaries | parse `-progress pipe:1` `out_time_ms` |
+| Windows | `FfmpegDllBackend` — `gm_shim.dll` via `dart:ffi` | in-process, no subprocess at all |
+| Linux (Phase 5, unbuilt) | `dart:io Process` + bundled binaries | parse `-progress pipe:1` `out_time_ms` |
 
 ```
 FfmpegBackend (abstract interface)
   ├── FfmpegKitBackend       → Android/iOS
-  └── FfmpegProcessBackend   → Windows/Linux
+  ├── FfmpegDllBackend       → Windows (gm_shim.dll, dart:ffi)
+  └── FfmpegProcessBackend   → Linux / Windows dev-fallback only
 FfmpegFactory.create()  picks impl at runtime via Platform.*
 VideoEncoder            → platformCandidates() returns ordered hw+sw encoder list for editVideo fallback
 FfmpegService           → high-level API; receives backend + temp
 ```
+
+### gm_shim.dll (Windows in-process FFmpeg)
+
+`windows/ffmpeg_shim/` — a C shim wrapping vendored, patched FFmpeg `fftools` sources
+(from the abandoned ffmpeg-kit project) into one DLL, built by `scripts/build_ffmpeg_shim.ps1`
+against MSYS2's clang toolchain (GCC hit a codegen bug — `operand type mismatch for 'shr'` — across
+many unrelated files; clang builds clean). GPLv3 build (`--enable-gpl --enable-version3
+--enable-libx264 --enable-libvpx --enable-libaom --enable-libopus --enable-libfreetype
+--enable-zlib --enable-avdevice --enable-ffmpeg`); see `assets/licenses/` + the About screen for
+attribution/license text copied verbatim from FFmpeg's own source tree.
+
+> **Build-config gaps bite silently, not loudly.** The underlying FFmpeg core (not `gm_shim.c`
+> itself) is configured with a minimal, hand-picked `--enable-*` list rather than a "full" build,
+> so a codec/filter/library nobody thought to enable simply isn't there — `gm_execute` still
+> returns a clean `rc` either way, so this looks identical to an app-level bug until you capture
+> the real FFmpeg log (`-report`, not the 8KB `gm_get_logs` buffer — see below) and read the exact
+> error text. Two hit in production so far, both root-caused this way: (1) no `zlib` → no `png`
+> encoder → `videoEditToGif`'s palette-bake pass (which writes a real `palette.png` file) failed
+> every video→GIF edit-bake with rc=1 ("Automatic encoder selection failed"); first worked around
+> at the Dart level by writing the intermediate as `.bmp` instead, later fixed properly by
+> rebuilding with `--enable-zlib` (now in the flags above) and reverting `ffmpeg_command.dart`'s
+> `videoEditToGif` back to the `palette.png` intermediate. (2) no `libfreetype` → no `drawtext`
+> filter → *every* text-overlay job (GIF or
+> video, any encoder candidate) failed with "No such filter: 'drawtext'"; unlike (1) there's no
+> app-level workaround — text overlay needs the filter compiled in — so this one required rebuilding
+> FFmpeg with `--enable-libfreetype` and relinking `gm_shim.dll` (now reflected in the flags above).
+> `gm_shim.c`'s own log callback also ignores `av_log`'s level parameter, so a verbose demuxer (e.g.
+> MOV atom trace) can fill the 8KB capture buffer before a real error line is ever written — another
+> reason `-report`'s unbounded file, not `FfmpegError.stderr`, is the reliable way to diagnose a
+> new rc=1. See PLAN.md §6 for the full incident writeup and the regression tests it named.
+
+- **C ABI** (`gm_shim.h`): `gm_execute(session_id, argv)`, `gm_cancel(session_id)`, `gm_probe`,
+  `gm_supports_encoder`, `gm_get_logs`. Sessions are identified by a caller-allocated id
+  (`GmSessionIds`, a global counter in `gm_shim_ffi.dart` shared by every consumer — exports and
+  the screen recorder both draw from it, so ids never collide between a concurrent export job and
+  a recording segment).
+- **Crash safety:** `AddVectoredExceptionHandler` + per-thread `longjmp` (not MSVC `__try/__except`
+  — mingw GCC lacks it, and clang wasn't switched to it since VEH was already proven). A crashed
+  session returns `rc = GM_ERR_CRASH (-1000)`, exposed as `gmCrashExitCode` in Dart; the caller gets
+  a clean `Err(FfmpegError)` instead of taking the whole app down.
+- **Cancellation:** `gm_cancel()` sets a per-session flag; fftools' own loop notices it and exits
+  with `rc = 255` (its own cancellation sentinel, not `0` — confirmed against the real DLL). Dart
+  side: `gmCancelledExitCode = 255`, handled explicitly in `FfmpegDllBackend.run()` for UX parity
+  with the old process backend's cancel behavior.
+- **Progress:** no OS pipe in-process, so `-progress pipe:1` args are rewritten to a temp file path
+  and tailed by a 150ms `Timer.periodic` (`FfmpegDllBackend._rewriteProgressArg`/`tailOnce`) instead
+  of parsing subprocess stdout.
+- **Concurrency:** `FfmpegJobPool` (semaphore, default `maxConcurrent: 2`) throttles concurrent
+  `gm_execute` calls; each call runs via `Isolate.run` so a blocking native call never stalls the
+  Dart UI isolate.
+- **Dart FFI layer:** `lib/core/services/ffmpeg/gm_shim_ffi.dart` — shared bindings (`GmShim` class,
+  `GmExecResult`, isolate-run helpers) used by both `FfmpegDllBackend` and the screen recorder's
+  `GmShimRecorderEngine`.
+- **No exe fallback at runtime:** `FfmpegDllBackend.tryResolvePath()` looks for `gm_shim.dll` next
+  to `Platform.resolvedExecutable`; if missing/unloadable, `FfmpegFactory` falls through to
+  `FfmpegProcessBackend` (which then needs `ffmpeg.exe`/`ffprobe.exe` that no longer ship — this
+  path exists for source-level platform coverage, not a supported Windows runtime state).
 
 ### Backend interface
 
@@ -116,7 +177,7 @@ Video Studio's GIF pipeline.
 **Composite commands (Video Studio):**
 - `videoEdit` — crop · resize · speed · trim · text · audio in one pass; selects encoder from `VideoEncoder.platformCandidates()`. Accepts `List<DrawTextSpec>? textSpecs` (multi-layer, positioned before crop/scale so text transforms with content).
 - `videoStreamCopy` — no-op fast path: stream-copy when no edits.
-- `videoEditToGif` — bakes video layers (crop · fps · resize · speed · cut) → GIF in two passes (palette pass → render pass) sharing one filter chain; two passes stream instead of FIFO-buffering every frame in RAM like a one-pass split graph. `-ss`/`-t` are input options; with cuts, `-t` = last keep-range end so decode stops there instead of source EOF.
+- `videoEditToGif` — bakes video layers (crop · fps · resize · speed · cut) → GIF in two passes (palette pass → render pass) sharing one filter chain; two passes stream instead of FIFO-buffering every frame in RAM like a one-pass split graph. Palette pass writes its intermediate as `.bmp` with an explicit `-c:v bmp`, not `.png` — our FFmpeg build has no `zlib`/png encoder (see the build-config-gaps note above). `-ss`/`-t` are input options; with cuts, `-t` = last keep-range end so decode stops there instead of source EOF.
 - `gifEdit` — applies crop · fps · resize · speed · text · trim · loop · boomerang to an existing GIF; `boomerang` appends a reversed stream via `concat=n=2` for ping-pong. `startMs`/`durationMs` emit `-ss`/`-t` as **input** options (before `-i`) — placed after `-i` they'd bind to the output and truncate the write instead of the read, silently chopping boomerang's reversed half.
 - `buildConcatFileContent` — generates concat demuxer file listing frames at a given fps.
 
@@ -172,10 +233,12 @@ editGif({ input, cropX/Y/W/H, scaleW, speedFactor, startMs, durationMs,
 cleanJobAt(String jobDir)         // frees an arbitrary temp dir (e.g. baked-GIF source)
 ```
 
-Windows binaries (`ffmpeg.exe`, `ffprobe.exe`) are resolved relative to
-`Platform.resolvedExecutable` at runtime (`FfmpegProcessBackend.resolveBin`). During dev they must
+Windows resolves `gm_shim.dll` (+ 25 companion FFmpeg/codec/freetype DLLs) relative to
+`Platform.resolvedExecutable` at runtime (`FfmpegDllBackend.tryResolvePath`). During dev they must
 sit next to the built exe (`build\windows\x64\runner\Debug\`); `scripts/setup_windows_dev.ps1`
-copies them after clean builds. Always quote paths passed to `Process`.
+copies the full required set after clean builds and errors out listing whatever's missing. The set
+comes from a release bundle or a local `scripts/build_ffmpeg_shim.ps1` + GPL FFmpeg build — none of
+it is in git (`assets/bin/windows/` is git-ignored for both `*.exe` and `*.dll`).
 
 ---
 
@@ -310,13 +373,19 @@ Every tool screen shares the 4-step skeleton:
 `lib/features/screen_record/` + `lib/core/services/record/`. Records the full virtual desktop
 (one selected monitor) into a temp video, then hands off to Video Studio. Moving parts:
 
-- **Capture:** `FfmpegCommand.screenCapture` — bundled `ffmpeg.exe`'s `gdigrab` device,
-  `libx264 -preset ultrafast`, physical-px offset/size (even-clamped). Mic (optional) joins the
-  same process via `dshow`. `ScreenRecorderService` owns the `Process` directly (not
-  `FfmpegBackend.run()` — recording is open-ended/stdin-controlled, not job-shaped): segment-per-
-  pause/resume (ffmpeg has no pause), graceful stop via `q`+stdin with a kill fallback, MKV
-  segments (crash-safe, no moov atom to lose), concat-demuxer stream-copy to remux/join, 10-minute
-  cap enforced both via `-t` per segment and a 500ms Dart tick.
+- **Capture:** `FfmpegCommand.screenCapture` — `gdigrab` device via `gm_shim.dll`, `libx264
+  -preset ultrafast`, physical-px offset/size (even-clamped). Mic (optional) joins the same
+  in-process call via `dshow`. `ScreenRecorderService` owns a `RecorderEngine` (interface:
+  `execute(sessionId, argv)`, `cancel(sessionId)`; real impl `GmShimRecorderEngine` wraps `GmShim`,
+  same one `FfmpegDllBackend` uses) instead of `dart:io Process` — recording is still open-ended/
+  session-controlled, not job-shaped, so it doesn't go through `FfmpegBackend.run()`/`FfmpegJobPool`
+  either. Segment-per-pause/resume (ffmpeg has no pause), graceful stop via `gm_cancel(sessionId)`
+  (fftools exits that session with `rc=255`, its own cancellation sentinel — not treated as an
+  error since `_expectingExit` short-circuits the exit handler first), MKV segments (crash-safe, no
+  moov atom to lose), concat-demuxer stream-copy to remux/join, 10-minute cap enforced both via
+  `-t` per segment and a 500ms Dart tick. If `gm_shim.dll` can't be resolved at startup,
+  `ScreenRecorderService(engine: null)` surfaces a clean error on `start()` instead of recording —
+  there is no exe fallback.
 - **System audio:** no WASAPI input exists for ffmpeg on Windows, so `windows/runner/
   audio_loopback.cpp` captures the default render device's loopback stream to WAV per segment
   (aligned with each video segment), muxed in at finalize (`FfmpegCommand.muxAudio`, `amix` when
@@ -389,8 +458,9 @@ Separate `package.json`; the `web/` directory is untracked (`??` in git status).
 
 ### Windows
 - Developer Mode required for Flutter symlinks (`start ms-settings:developers`)
-- Binaries in `assets/bin/windows/` (git-ignored), resolved at runtime near
-  `Platform.resolvedExecutable`; copied to build output by `scripts/setup_windows_dev.ps1`
+- `gm_shim.dll` + companion DLLs in `assets/bin/windows/` (git-ignored), resolved at runtime near
+  `Platform.resolvedExecutable`; copied to build output by `scripts/setup_windows_dev.ps1`. No
+  `ffmpeg.exe`/`ffprobe.exe` ship or exist anywhere in the bundle.
 - `window_manager` for the custom glass title bar (native bar hidden in `bootstrap.dart`;
   `GlassAppBar` adds `DragToMoveArea` + min/max/close controls)
 - `media_kit` for video preview (chosen over `video_player` — more Windows-stable)
@@ -419,7 +489,8 @@ Separate `package.json`; the `web/` directory is untracked (`??` in git status).
 | `desktop_drop` | 0.4.4 | drag-and-drop file acceptance (Windows/macOS/Linux) |
 | `flutter_colorpicker` | — | HSV/hue-wheel color picker used in `text_overlay_controls.dart` |
 | `package_info_plus` | 8.0.0 | app version / build metadata |
-| ffmpeg / ffprobe (Windows) | bundled | bundled binaries (resolved at runtime) |
+| `ffi` | 2.1.3 | Windows `dart:ffi` bindings to `gm_shim.dll` |
+| gm_shim.dll + FFmpeg 6.0 libs (Windows) | bundled, self-built | in-process FFmpeg (GPLv3); no ffmpeg.exe/ffprobe.exe |
 
 Dev deps of note: `msix` 3.16.7 (MSIX packaging via `scripts/build_msix_release.ps1`),
 `flutter_launcher_icons` 0.14.3 (generates `.ico` / adaptive icon).

@@ -164,7 +164,7 @@ class RecordController extends AsyncNotifier<RecordState> {
         state = AsyncData(s.copyWith(error: msg, status: RecordStatus.idle));
       }
       await _syncHotkeyRegistration();
-      if (recovered != null) appRouter.push('/video-studio', extra: recovered);
+      if (recovered != null) appRouter.go('/video-studio', extra: recovered);
     });
     _elapsedTicker = Timer.periodic(const Duration(milliseconds: 500), (_) {
       final s = state.valueOrNull;
@@ -328,7 +328,7 @@ class RecordController extends AsyncNotifier<RecordState> {
       s.settings.hotkeys,
       onStart: () {
         if (state.valueOrNull?.status == RecordStatus.idle) {
-          appRouter.push('/screen-record');
+          appRouter.go('/screen-record');
           startRecording();
         }
       },
@@ -436,7 +436,7 @@ class RecordController extends AsyncNotifier<RecordState> {
       await _hideIndicator();
       await _syncHotkeyRegistration();
     }
-    if (output != null) appRouter.push('/video-studio', extra: output);
+    if (output != null) appRouter.go('/video-studio', extra: output);
   }
 
   // ── Recording indicator (native, click-through overlay) ───────────────

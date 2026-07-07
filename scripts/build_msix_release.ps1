@@ -11,6 +11,19 @@
 #
 # For sideload (self-signed): run with -Sign.
 # Recipient must: (1) install the .cer, (2) enable Developer Mode or sideloading.
+#
+# GPL release checklist (PLAN.md §5) -- verify before every release that bundles
+# assets/bin/windows/ FFmpeg binaries:
+#   [ ] Repo is public with a GPL-compatible LICENSE committed (hard gate).
+#   [ ] About-screen "Open-source licenses" section (assets/licenses/*.txt) is
+#       present and matches the actually-bundled FFmpeg build.
+#   [ ] FFMPEG_NOTICE.txt's corresponding-source pointer matches this release's
+#       FFmpeg version/tag (currently n6.0) and this repo's tag/commit.
+#   [ ] Bundled DLLs (avcodec/avformat/.../libx264/libvpx/libaom/libopus/
+#       libwinpthread/libfreetype + its harfbuzz/glib/png/zlib/brotli/pcre2/
+#       iconv chain -- see scripts/setup_windows_dev.ps1's $required list)
+#       are the versions actually built by scripts/build_ffmpeg_shim.ps1 for
+#       this release, not stale dev-machine copies.
 
 param(
     [switch]$Sign,

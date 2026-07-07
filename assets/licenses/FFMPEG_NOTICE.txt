@@ -1,0 +1,22 @@
+This software uses code of FFmpeg (https://ffmpeg.org) licensed under the
+GNU General Public License, version 2 or later. This distribution's FFmpeg
+components are built with additional GPL-licensed libraries (libx264,
+libvpx, libaom, libopus), so the combined binaries you have are distributed
+under the terms of the GNU General Public License, version 3 or later
+(see FFMPEG_GPLv3.txt in this app / the LICENSE file at
+https://github.com/daricvn/gifolomora).
+
+This mention does not imply any endorsement by the FFmpeg project, and the
+FFmpeg name and logo are not used as branding for this application.
+
+Corresponding source for the exact FFmpeg build used in this release is
+available at https://github.com/daricvn/gifolomora (see the release tag
+matching this build's version for the FFmpeg tag/patches it bundles).
+
+Bundled license texts:
+  - FFMPEG_GPLv3.txt      -- GNU General Public License v3, applies to the
+                             combined FFmpeg + libx264/libvpx/libaom/libopus
+                             binaries shipped with this app.
+  - FFMPEG_LGPLv2.1.txt   -- GNU Lesser General Public License v2.1, the
+                             license of FFmpeg's own libav* libraries before
+                             the GPL components above are linked in.

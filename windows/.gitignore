@@ -1,5 +1,14 @@
 flutter/ephemeral/
 
+# ffmpeg_shim build outputs (source under ffmpeg_shim/ is tracked; the
+# compiled DLL is a release artifact built by scripts/build_ffmpeg_shim.ps1,
+# same as the ffmpeg binaries under assets/bin/windows/).
+ffmpeg_shim/*.dll
+ffmpeg_shim/*.lib
+ffmpeg_shim/*.o
+ffmpeg_shim/*.def
+ffmpeg_shim/*.exp
+
 # Visual Studio user-specific files.
 *.suo
 *.user

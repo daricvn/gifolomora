@@ -61,6 +61,20 @@ in ffmpeg-kit's vendored patches (see §4).
    file closed). Strictly better than today's `Process.kill()` which can leave truncated output.
 4. **Log capture:** `av_log_set_callback` routes logs into a per-session ring buffer so
    `FfmpegError.stderr` parity is kept (error surfaces + encoder-fallback diagnostics).
+   **[Found in Phase 1]** the vendored `fftools_opt_common.c`'s `log_callback_report` only
+   forwards to `ffmpegkit_log_callback_function` when fftools' own `-report` CLI flag is active
+   — it is *not* installed as the default sink. ffmpeg-kit's own Android/Linux wrapper calls
+   `av_log_set_callback(ffmpegkit_log_callback_function)` itself, once, at library init (not
+   per-session) — `gm_shim.c` now does the same, in `gm_install_handler_once()`. Without it,
+   logs went straight to the console via `av_log_default_callback` and `gm_get_logs` always
+   returned empty.
+5. **[Found in Phase 0, Windows-only] Disable `prepare_app_arguments()`'s argv override.**
+   fftools' `cmdutils.c` has a `HAVE_COMMANDLINETOARGVW && defined(_WIN32)` path that replaces
+   whatever `argc`/`argv` the caller passed to `split_commandline()`/`parse_options()` with the
+   **host process's own** `GetCommandLineW()` — correct for a standalone `ffmpeg.exe`, fatal for
+   in-process embedding (every session would see the same, empty, host-process argv instead of
+   its own job argv). Forced off (`#if 0 && HAVE_COMMANDLINETOARGVW...`) in the vendored copy.
+   Not in ffmpeg-kit's own patch list because ffmpeg-kit never shipped Windows.
 
 ### Shim exports (C ABI)
 
@@ -85,10 +99,15 @@ the JSON round-trip in `_parseProbeJson`.
 whole process regardless of which isolate called it. The only *perfect* isolation is a separate
 process — which is what we're moving away from. So the safeguard budget is spent on three layers:
 
-1. **SEH guard in the shim.** `gm_execute` body wrapped in `__try/__except(EXCEPTION_EXECUTE_HANDLER)`
-   → access violations, illegal instructions, div-by-zero inside FFmpeg return an error code
-   instead of terminating the process. Catches the dominant crash class. *Does not catch:*
-   `__fastfail` (heap-corruption fast-fail), some stack-overflow states. Documented limit.
+1. **Crash guard in the shim.** `gm_execute` body wrapped in a guard that catches access
+   violations, illegal instructions, and div-by-zero inside FFmpeg and returns an error code
+   instead of terminating the process. **Implementation deviates from the sketch above:**
+   `mingw`'s GCC has no `__try`/`__except` (MSVC-only keywords; confirmed in Phase 0, not
+   available even with `-fms-extensions`). Used instead: `AddVectoredExceptionHandler` +
+   per-thread `longjmp` to a `setjmp` point in `gm_execute` — same fault classes caught, proven
+   working standalone and against the real compiled `gm_shim.dll` (forced-AV test, Phase 0).
+   *Does not catch:* `__fastfail` (heap-corruption fast-fail), some stack-overflow states.
+   Documented limit, unchanged from the original sketch.
 2. **Poison + automatic exe fallback.** After any SEH-caught crash the process heap may be
    suspect. The Dart backend marks itself **poisoned**: the failed job returns `FfmpegError`
    ("engine fault, retried via fallback"), and *all* subsequent jobs in this app session route to
@@ -100,19 +119,43 @@ process — which is what we're moving away from. So the safeguard budget is spe
    one leaked thread + its memory, app keeps running. (Today's exe equivalent: `kill()` always
    works — this is the one capability we genuinely trade away; the fallback caps the cost.)
 
-**Screen recorder stays on `ffmpeg.exe` (decision, not deferral):**
-- Highest crash-risk workload in the app (gdigrab + dshow drivers, up to 10 min continuous). A
-  DLL crash mid-recording would lose the app *and* the recording session state; today a dead
-  process still leaves playable MKV segments and the app alive to recover them
-  (`screen_recorder_service.dart:235` already handles unexpected exit + `recoverPartial()`).
-- Gains nothing from DLL: it's a single open-ended session — no parallelism need; cleanup is
-  already handled (`cleanupOnShutdown`, `onWindowClose`).
-- Cost is near zero: the *shared* FFmpeg build ships a thin `ffmpeg.exe` (~300 KB) that links
-  the same DLLs we bundle anyway (§6). No duplicate 90 MB static exe.
+**[Superseded] Screen recorder stays on `ffmpeg.exe` — reverted, now all-in on the DLL.** The
+reasoning below was the original call; the user explicitly overrode it (no exe anywhere, not
+even as the crash-safety fallback for regular export jobs) after Phase 3 bundling was done and
+`ffmpeg.exe` was no longer needed by anything else. Ported and verified:
 
-The user-cited *cleanup* benefit still lands: all job-shaped work becomes in-process, so a
-force-killed app can no longer orphan job ffmpeg processes; the one remaining exe use
-(recording) already has kill-on-shutdown handling.
+- `ScreenRecorderService` no longer owns a `Process` — a new `RecorderEngine` interface
+  (`gm_execute`/`gm_cancel` via `GmShim`, `lib/core/services/ffmpeg/gm_shim_ffi.dart`) replaces
+  it. `GmShimRecorderEngine` is the real implementation; fakeable in tests like
+  `LoopbackController` already was.
+- Segment lifecycle: `Process.start` → `engine.execute(sessionId, argv)` (runs in an isolate,
+  same as `FfmpegDllBackend`); stdin `"q"` graceful-stop → `engine.cancel(sessionId)` (fftools'
+  own `cancelRequested()` path); `Process.kill()` fallback on timeout → **no equivalent**, a
+  hung segment is leaked (documented, same tradeoff as `FallbackFfmpegBackend`'s watchdog was).
+  stdout/stderr pipe-draining is gone entirely — no OS pipe in-process, `gm_shim`'s own log ring
+  buffer replaces it.
+- **New finding, confirmed against a real gdigrab capture:** a `gm_cancel()`-stopped session
+  exits with **rc 255**, not 0 — fftools' own sentinel
+  (`exit_program((received_nb_signals || cancelRequested(...)) ? 255 : main_ffmpeg_return_code)`
+  in `fftools_ffmpeg.c`). `ScreenRecorderService` doesn't need to branch on this (its
+  `_expectingExit` flag already short-circuits deliberate-cancel exits before they'd be treated
+  as crashes), but `FfmpegDllBackend.run()` now maps `gmCancelledExitCode` (255) to a clean
+  `Err(FfmpegError(message: 'Cancelled'))`, matching the old process backend's UX instead of
+  surfacing "FFmpeg exited with code 255".
+- Real integration tests (`test/unit/core/services/record/gm_shim_recorder_engine_test.dart`,
+  gated on `GM_SHIM_DLL_PATH` like the others): a real 2s gdigrab capture through `gm_execute`
+  produces a playable file; `gm_cancel()` stops a 30s-`-t` capture in under 1s. This was
+  PLAN.md's own highest-flagged crash-risk workload — tested for real, not just via the fake.
+- `FfmpegFactory` no longer wraps `FfmpegDllBackend` in `FallbackFfmpegBackend` on Windows — it
+  returns the DLL backend directly. `FallbackFfmpegBackend` itself is untouched/still tested but
+  unused; `FfmpegProcessBackend` only comes into play if `gm_shim.dll` can't be found/loaded at
+  all (dev machine without the DLL built), not as a mid-session crash fallback.
+- `assets/bin/windows/ffmpeg.exe` and `ffprobe.exe` deleted; `setup_windows_dev.ps1` no longer
+  copies or requires them.
+- **Deviation from the original zero-parallelism-benefit reasoning:** unchanged and still true
+  — the recorder gains nothing from the DLL architecturally (still one open-ended session, no
+  concurrency need). This was accepted as the cost of removing the exe dependency entirely, not
+  a benefit of the port itself.
 
 ---
 
@@ -186,7 +229,56 @@ light check, expected to pass).
 
 ## 6. Bundling & build changes
 
-New contents of `assets/bin/windows/` (git-ignored, same as today):
+**[Phase 3, verified]** Actual contents of `assets/bin/windows/` (git-ignored, same as today) —
+built from FFmpeg **n6.0** (the version our vendored fftools patches target) via clang/MSYS2,
+`--enable-gpl --enable-version3 --enable-libx264 --enable-libvpx --enable-libaom --enable-libopus
+--enable-libfreetype --enable-zlib`:
+
+```
+avcodec-60.dll avformat-60.dll avutil-58.dll avfilter-9.dll avdevice-60.dll
+swscale-7.dll swresample-4.dll          ← core FFmpeg libs (GPL build)
+libx264-165.dll libvpx-1.dll            ← dynamically linked, NOT statically baked in --
+libaom.dll libopus-0.dll                  discovered via `ldd`/`objdump -p`, not anticipated
+                                           by the original sketch below
+libwinpthread-1.dll                     ← clang/mingw runtime dep of the above 4, also not
+                                           anticipated originally
+libfreetype-6.dll libharfbuzz-0.dll     ← drawtext filter's dependency chain
+libpng16-16.dll zlib1.dll libbz2-1.dll    (`--enable-libfreetype`, added after the initial
+libbrotlidec.dll libbrotlicommon.dll      Phase 3 build shipped WITHOUT it and every
+libglib-2.0-0.dll libgraphite2.dll        text-overlay job failed with "No such filter:
+libc++.dll libintl-8.dll libpcre2-8-0.dll  'drawtext'" -- see gm_shim.dll bug log below)
+libiconv-2.dll
+gm_shim.dll                             ← ours (fftools + patches + guard + exports)
+```
+
+(No `ffmpeg.exe` — recorder moved onto the DLL too, see §3's "Superseded" note; older
+text below that still mentions a bundled exe predates that decision.)
+
+(`ffprobe.exe` dropped — probe goes through `gm_probe`, confirmed working in Phase 1.
+No prebuilt GPL **shared** package exists anywhere for the exact n6.0 tag — gyan.dev/BtbN only
+keep recent nightlies/majors — so this build is produced from source via
+`scripts/build_ffmpeg_shim.ps1`'s pipeline, same as `gm_shim.dll` itself, not downloaded.
+`libx264`/`libvpx`/`libaom`/`libopus`/`libfreetype` come from MSYS2's own
+`mingw-w64-clang-x86_64-*` packages — prebuilt, no need to build those from source too.
+
+**Post-launch bug + fix:** the first shipped build omitted `--enable-libfreetype`. Two
+consequences, both hit in production and root-caused via a real-DLL harness (`gm_execute` +
+`-report`, not guesswork): (1) the palette-bake pass (`videoEditToGif`'s two-pass GIF export)
+wrote its intermediate as `.png` — this build also lacked `zlib`, so `image2`'s default png
+encoder couldn't be auto-selected, failing every video→GIF edit-bake with rc=1 ("Automatic
+encoder selection failed"). Worked around at first by switching the intermediate to `.bmp` +
+explicit `-c:v bmp` (zero codec deps, lossless RGBA round-trip) — no rebuild needed for this half.
+**Superseded:** rebuilt FFmpeg with `--enable-zlib` (§6 flags list) and relinked `gm_shim.dll`;
+`videoEditToGif`'s palette pass reverted to the plain `palette.png` intermediate with no `-c:v`
+override (auto-selects the now-available png encoder), matching the pre-bug design.
+(2) `drawtext` itself wasn't compiled in (needs `libfreetype`), so *any* text-overlay job
+(GIF or video) failed on every encoder candidate identically with "No such filter: 'drawtext'"
+— unlike (1), no app-level workaround exists; fixed by rebuilding FFmpeg with
+`--enable-libfreetype` and relinking `gm_shim.dll`. Regression tests: `ffmpeg_command_test.dart`
+(palette pass has no `-c:v` override, still writes `palette.png`) and `ffmpeg_dll_backend_test.dart`
+(real drawtext job against the compiled DLL, gated on `GM_SHIM_DLL_PATH`).)
+
+Original sketch (kept for context, superseded by the verified list above):
 
 ```
 avcodec-62.dll avformat-62.dll avutil-60.dll avfilter-11.dll avdevice-62.dll
@@ -194,8 +286,6 @@ swscale-9.dll swresample-6.dll          ← from the GPL shared build (§5)
 ffmpeg.exe                              ← thin exe from the SAME shared build (recorder)
 ffmpeg_shim.dll                         ← ours (fftools + patches + SEH + exports)
 ```
-
-(`ffprobe.exe` dropped — probe goes through `gm_probe`. Version numbers per chosen FFmpeg release.)
 
 - **Shim build:** `windows/ffmpeg_shim/` — vendored `fftools/*.c` for the pinned FFmpeg version
   + ffmpeg-kit patch port + `gm_*.c`. Built with **MSYS2/mingw-w64** (fftools needs FFmpeg's
@@ -233,23 +323,86 @@ fault, then permanently (per app session) delegates to `fallback`, logging loudl
 **Baseline first (before any change):** record `flutter analyze` (expect 0) and full
 `flutter test` pass/fail counts + names. All later "no regression" claims diff against this.
 
-- **Phase 0 — Spike (go/no-go gate).** Build the shim with one export (`gm_execute`), run one
-  real `videoToGif` argv through FFI from a scratch Dart script. Prove: (a) success path,
-  (b) error path returns instead of exiting the process, (c) SEH catches a forced AV,
-  (d) two sessions run concurrently on two threads without corrupting each other,
-  (e) chosen GPL shared build lists every component from §5's verify item. **If (b) or (d) fail
-  after porting the ffmpeg-kit patches, stop and re-plan** (fallback plan: process pool of exe
-  workers gets the parallelism/cleanup goals with zero crash risk — smaller win, zero native work).
-- **Phase 1 — Backend.** `FfmpegDllBackend` (run/probe/supportsEncoder/cancel/dispose), progress
-  file tailing, log-ring → `FfmpegError.stderr`, `FfmpegJobPool`. Unit-testable behind the
-  existing interface; existing fakes/tests untouched.
-- **Phase 2 — Wiring + safeguards.** Factory + `FallbackFfmpegBackend` + poison + watchdog.
-  No encoder or arg-builder changes — GPL build keeps `libx264` everywhere (§5).
-- **Phase 3 — Bundling + compliance.** Shared-build DLLs + thin exe in `assets/bin/windows/`;
-  update both scripts; MSIX build; verify packaged app runs on a machine without dev tooling.
-  About-screen FFmpeg section + bundled GPL/LGPL texts + source links (§5) land in the same
-  release as the binaries they describe. **Blocked by the §5 hard gate: repo public with a
-  GPL-compatible LICENSE before this release ships.**
+- **Phase 0 — Spike (go/no-go gate). [DONE — GO.]** Built the shim with one export
+  (`gm_execute`), ran real argv (lavfi → mpeg4) through a C test harness (FFI-shaped: `LoadLibraryA`
+  + `GetProcAddress`, same call surface Dart FFI uses). Results:
+  (a) success path ✓ — real output file produced; (b) error path (missing input) returns
+  `rc=1`, process stays alive, next call still works ✓; (c) crash guard catches a forced AV
+  inside the real compiled `gm_shim.dll` (`rc=GM_ERR_CRASH`, process alive, next session still
+  runs) ✓; (d) two sessions on two threads (ids 101/102) ran concurrently, both completed with
+  correct independent output files, no corruption ✓; (e) not verified — the Phase 0 FFmpeg build
+  is a minimal LGPL build (no `libx264`/GPL libs) built purely to validate the shim mechanics
+  cheaply; §5's GPL-component verify is deferred to Phase 3 when the real bundled build is chosen.
+  **Findings/deviations, carried into §2/§3 above:**
+  - Toolchain is **clang** (MSYS2 `CLANG64`/`mingw-w64-clang-x86_64-toolchain`), not GCC. The
+    MSYS2 `mingw-w64-x86_64-gcc` (16.1.0) toolchain hit a reproducible codegen bug (`operand type
+    mismatch for 'shr'`) across many unrelated FFmpeg source files — a compiler defect, not
+    something to patch around. clang built FFmpeg 6.0 clean with zero errors and, as a bonus,
+    supports real `__try`/`__except` if a future revision wants that instead of the VEH guard.
+  - Crash guard is `AddVectoredExceptionHandler` + `longjmp`, not `__try/__except` (§3).
+  - New required patch: disable `prepare_app_arguments()`'s Windows `GetCommandLineW()` override
+    (§2 item 5) — without it every session silently parsed the host process's own (empty) argv
+    instead of its job argv, the "usage" banner on every call was the tell.
+  - FFmpeg 6.0 build needs `--enable-avdevice` even though the shim doesn't use it directly:
+    `fftools_ffmpeg.c` unconditionally `#include`s `libavdevice/avdevice.h`.
+  - Cancellation latency not yet characterized: a cancel fired 300ms into a 2s/50-frame job
+    didn't visibly interrupt it (job ran to natural completion) — likely a cancellation
+    check-point granularity question, not a correctness bug (`cancelRequested()` wiring itself
+    compiles and links correctly). Revisit with a longer job in Phase 1/4.
+  - No fallback plan needed — (b) and (d), the two stop-and-replan triggers, both passed.
+- **Phase 1 — Backend. [DONE]** `FfmpegDllBackend` (`lib/core/services/ffmpeg/ffmpeg_dll_backend.dart`):
+  run/probe/supportsEncoder/cancel/dispose behind the unchanged `FfmpegBackend` interface,
+  `FfmpegJobPool` (`ffmpeg_job_pool.dart`, default cap 2), progress-file tailing (shared
+  `FfmpegProgress.parseProgressLine` helper, used by both backends now), log capture via
+  `gm_get_logs` → `FfmpegError.stderr`. Native side gained `gm_probe`, `gm_supports_encoder`,
+  `gm_get_logs` (all from PLAN §2's export list) plus the always-on `av_log_set_callback`
+  install needed to make log capture actually fire (see §2 item 4 finding). Existing
+  `FfmpegProcessBackend`/tests untouched. Every FFI call (`gm_execute`, `gm_probe`,
+  `gm_supports_encoder`) runs inside `Isolate.run` — plain data only crosses the isolate
+  boundary, all `Pointer`s are allocated and freed inside the spawned isolate.
+  Tests: `ffmpeg_job_pool_test.dart`, `ffmpeg_progress_test.dart` (parseProgressLine), and a
+  real-DLL integration suite (`ffmpeg_dll_backend_test.dart`, gated on `GM_SHIM_DLL_PATH` env
+  var since the toolchain isn't assumed present everywhere yet) covering success/error/probe/
+  supportsEncoder/concurrency against the actual compiled `gm_shim.dll` — all passing.
+- **Phase 2 — Wiring + safeguards. [DONE]** `FfmpegFactory.create()` wraps `FfmpegDllBackend` in
+  `FallbackFfmpegBackend` on Windows when `FfmpegDllBackend.tryResolvePath()` finds a loadable
+  DLL; missing/unloadable DLL silently falls back to the exe backend, unchanged from today.
+  `FallbackFfmpegBackend` (`fallback_ffmpeg_backend.dart`): poisons (permanently, for the app
+  session) when a job's `FfmpegError.exitCode == FfmpegDllBackend.crashExitCode`; `cancel()`
+  starts a watchdog that, if the primary hasn't honored the cancel within `watchdogDuration`
+  (default 10s), poisons and unblocks the caller's `run()` with a `Cancelled` result instead of
+  hanging forever (the leaked isolate/thread is the accepted cost, per §3). No encoder or
+  arg-builder changes — GPL build keeps `libx264` everywhere (§5), unaffected by any of this.
+  Tests: `fallback_ffmpeg_backend_test.dart` (healthy passthrough, crash → poison → subsequent
+  jobs route to fallback, non-crash error does *not* poison, hung-cancel watchdog unblocks
+  `run()` and poisons, probe/supportsEncoder route to fallback once poisoned) — all passing.
+  Full suite (`flutter test`): 595 passed, 0 failed, 0 analyze issues, no regressions.
+- **Phase 3 — Bundling + compliance. [In progress — gate cleared, engineering mostly done.]**
+  §5 hard gate cleared: LICENSE (GPLv3) committed, repo made public (user-confirmed). Done:
+  real GPL production FFmpeg 6.0 built (§6, verified list) with `libx264`/`libvpx`/`libaom`/
+  `libopus` all confirmed via `gm_supports_encoder` + a real `libx264` encode through
+  `gm_execute`; `gm_shim.dll` rebuilt and re-tested against this GPL build (same 5-test
+  integration suite, all passing); `scripts/setup_windows_dev.ps1` copies the full verified
+  file set (`gm_shim.dll` + all companion DLLs now hard-required — no `ffmpeg.exe` bundled or
+  built at all, superseded by §3's "recorder all-in on DLL" decision); `build_msix_release.ps1`
+  gained the §5 release
+  checklist comment block. About-screen "Open-source licenses" card added
+  (`lib/features/about/view/about_screen.dart`, `license_viewer_screen.dart`) with the required
+  attribution text, linking to three bundled texts under `assets/licenses/`: `FFMPEG_NOTICE.txt`
+  (short attribution, authored for this app) and `FFMPEG_GPLv3.txt`/`FFMPEG_LGPLv2.1.txt`
+  (copied verbatim from the FFmpeg source tree's own `COPYING.GPLv3`/`COPYING.LGPLv2.1` — not
+  retyped from memory, to avoid any risk of an inaccurate legal text).
+  **[Done]** `flutter build windows --release` succeeded; `setup_windows_dev.ps1 -Config Release`
+  copied the full verified bundle into `build\windows\x64\runner\Release\`; the packaged
+  `gifolomora.exe` launched and stayed alive (no immediate crash from `FfmpegFactory.create()`
+  loading `gm_shim.dll` in the real packaged layout, not just via `flutter test`'s
+  `GM_SHIM_DLL_PATH` env var).
+  **Still open:** actual MSIX packaging (`dart run msix:create`, the last step of
+  `build_msix_release.ps1`) not run this session — unrelated to the FFmpeg work and low-risk,
+  but not verified; testing on a genuinely clean machine (no dev tooling at all) wasn't possible
+  from this environment. Corresponding-source link in `FFMPEG_NOTICE.txt` is a placeholder
+  pointing at "the project's source repository" — fill in the real repo URL. The license card's
+  copy should get one human read-through before shipping (not legal advice).
 - **Phase 4 — Hardening + verification.** Full manual matrix (§8), crash-injection test (feed a
   deliberately corrupt file / bad argv; confirm: error surfaced, app alive, next job runs via
   fallback), cancel-during-encode test, parallel probe+encode test, 10-min recording test.
@@ -267,7 +420,8 @@ Every `FfmpegService` op via DLL: `imagesToGif`, `videoToGif`, `resizeGif`, `cro
 + alpha + opus audio), `probe` on mp4/gif/webm, `supportsAv1` gate, progress % + cancel in
 `ProgressOverlay`, `optimizeGif` (pure Dart — unaffected, regression-check only).
 Screen record: start/pause/resume/stop, mic + system audio mux, cap, crash recovery, dshow
-device listing (still exe — regression-check only). Export flow + temp cleanup + recents.
+device listing (now all-in on the DLL backend via `RecorderEngine` — real gdigrab capture +
+cancel verified in Phase 3, full manual matrix still pending). Export flow + temp cleanup + recents.
 Error surfaces: a failing job shows a real stderr-derived message, not a blank.
 
 **Android:** binaries unchanged — regression-check only (one export per tool on a real device).
@@ -277,21 +431,24 @@ About screen shows the FFmpeg notice on both platforms.
 
 ## 9. Open decisions (owner: you)
 
-1. ~~License route~~ — **decided: GPL** (app will be open source under a GPL-compatible
-   license). Binaries stay GPL on both platforms; obligations in §5. **Your remaining action:
-   pick the app's LICENSE (GPLv3 recommended) and make the repo public before the Phase-3
-   release.**
-2. **Recorder on exe** (recommended, §3) vs. all-in on DLL.
+1. ~~License route~~ — **done: GPLv3 LICENSE committed, repo made public** (user-confirmed).
+   §5 hard gate cleared, Phase 3 unblocked.
+2. ~~Recorder on exe vs. all-in on DLL~~ — **decided: all-in on DLL.** User overrode the
+   original recommendation after Phase 3 bundling landed and `ffmpeg.exe` had no other
+   consumer left. Ported and verified (§3).
 3. **Pool size default 2** — fine, or expose in Settings?
 
 ## 10. Risk register
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| ffmpeg-kit fftools patches don't port cleanly to current FFmpeg + mingw | Medium | Phase-0 gate; pin FFmpeg version the patches target; fallback plan named in §7 |
-| SEH misses a crash class (fast-fail) → app dies | Low | Accepted residual; recorder (worst risk) stays out-of-process; document |
+| ffmpeg-kit fftools patches don't port cleanly to current FFmpeg + mingw | **Resolved (Phase 0)** | Ported clean once on clang; see §7 findings. Two new Windows-only issues found and fixed: `prepare_app_arguments()` argv override (§2.5), `--enable-avdevice` header dependency |
+| mingw **GCC** toolchain miscompiles FFmpeg 6.0 | **Confirmed, mitigated** | Reproducible `shr` codegen bug across many files in MSYS2's GCC 16.1.0; switched to clang (`mingw-w64-clang-x86_64-toolchain`), clean build. Pin clang as the required shim toolchain, not GCC |
+| Crash guard misses a crash class (fast-fail) → app dies | Low | Accepted residual; recorder (worst risk) stays out-of-process; document. (Guard is VEH+longjmp, not `__try/__except` — see §3) |
 | Hung native session can't be killed | Low | Watchdog: leak thread + poison + exe fallback |
-| Heap corruption *after* a caught SEH fault | Low | Poison switch stops using the DLL immediately |
-| GPL shared build missing a needed component | Low | Phase-0 verify ("full" builds carry all of §5's list); custom MSYS2 build script as fallback |
-| App ships before repo is public / LICENSE committed → GPL violation | Medium | §5 hard gate blocks Phase 3; release checklist entry in `build_msix_release.ps1` |
+| Heap corruption *after* a caught crash | Low | Poison switch stops using the DLL immediately |
+| GPL shared build missing a needed component | **Resolved (Phase 3)** | Real GPL build done with libx264/libvpx/libaom/libopus/gdigrab/dshow all confirmed present and working (real libx264 encode succeeded) |
+| App ships before repo is public / LICENSE committed → GPL violation | **Resolved** | §5 gate cleared: LICENSE committed, repo public (user-confirmed) |
+| Dynamically-linked GPL codec libs (libx264/libvpx/libaom/libopus) + their libwinpthread-1.dll dependency weren't in the original bundle list | **Found + fixed (Phase 3)** | `ldd`/`objdump -p` on the built DLLs surfaced them; added to §6's verified list and `setup_windows_dev.ps1` |
 | Two backends drift (exe fallback rots) | Low | Fallback shares all arg builders; Phase-4 matrix runs once with DLL force-disabled |
+| Cancellation latency/check-point granularity unverified under real load | Low | Phase 0 saw a 300ms cancel not interrupt a 2s job; re-test with longer/real-codec jobs in Phase 1 or 4 |

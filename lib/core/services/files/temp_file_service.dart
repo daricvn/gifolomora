@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -42,13 +43,22 @@ class TempFileService {
     return p.join(jobDir, 'output.$ext');
   }
 
-  /// Copies [frames] into [jobDir] with sequential names; returns new paths.
+  /// Decodes [frames] and re-writes them as BMP into [jobDir] (sequential
+  /// names); returns new paths. BMP, not a straight copy: frames can arrive
+  /// in mixed input formats (png/jpg/webp/...) and the concat demuxer needs
+  /// a uniform codec across all listed files. BMP needs no external decoder
+  /// lib and is always present, regardless of which input codecs the shim
+  /// build has compiled in.
   Future<List<String>> copyFrames(List<File> frames, String jobDir) async {
     final result = <String>[];
     for (int i = 0; i < frames.length; i++) {
-      final ext = p.extension(frames[i].path).toLowerCase();
-      final dest = p.join(jobDir, 'frame_${i.toString().padLeft(4, '0')}$ext');
-      await frames[i].copy(dest);
+      final bytes = await frames[i].readAsBytes();
+      final decoded = img.decodeImage(bytes);
+      if (decoded == null) {
+        throw FormatException('Unrecognized image format: ${frames[i].path}');
+      }
+      final dest = p.join(jobDir, 'frame_${i.toString().padLeft(4, '0')}.bmp');
+      await File(dest).writeAsBytes(img.encodeBmp(decoded));
       result.add(dest);
     }
     return result;

@@ -35,6 +35,41 @@ void main() {
     });
   });
 
+  group('FfmpegProgress.parseProgressLine', () {
+    test('parses frame= lines with totalFrames', () {
+      FfmpegProgress? got;
+      FfmpegProgress.parseProgressLine('frame=50', 100, null, (p) => got = p);
+      expect(got, isNotNull);
+      expect(got!.framesDone, equals(50));
+      expect(got!.fraction, equals(0.5));
+    });
+
+    test('parses out_time_ms= lines with totalMs', () {
+      FfmpegProgress? got;
+      FfmpegProgress.parseProgressLine('out_time_ms=2000000', null, 4000, (p) => got = p);
+      expect(got, isNotNull);
+      expect(got!.timeMs, equals(2000));
+      expect(got!.fraction, equals(0.5));
+    });
+
+    test('clamps fraction to 1.0 when frames exceed total', () {
+      FfmpegProgress? got;
+      FfmpegProgress.parseProgressLine('frame=150', 100, null, (p) => got = p);
+      expect(got!.fraction, equals(1.0));
+    });
+
+    test('ignores unrelated lines', () {
+      var called = false;
+      FfmpegProgress.parseProgressLine('progress=continue', 100, null, (_) => called = true);
+      expect(called, isFalse);
+    });
+
+    test('no-op when onProgress is null', () {
+      // Must not throw.
+      FfmpegProgress.parseProgressLine('frame=10', 100, null, null);
+    });
+  });
+
   group('MediaInfo', () {
     test('stores all required fields', () {
       const m = MediaInfo(durationMs: 2000, width: 480, height: 270, fps: 15.0);

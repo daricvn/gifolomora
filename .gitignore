@@ -46,3 +46,4 @@ app.*.map.json
 
 # Windows FFmpeg binaries (large, not tracked in git)
 assets/bin/windows/*.exe
+assets/bin/windows/*.dll

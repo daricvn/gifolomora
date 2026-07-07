@@ -423,6 +423,20 @@ void main() {
       expect(fc, isNot(contains('palettegen')));
     });
 
+    test(
+        'videoEditToGif: palette pass relies on auto-selected png encoder '
+        '(regression guard -- gm_shim.dll build must keep --enable-zlib, '
+        'or this fails with "Automatic encoder selection failed" rc=1)', () {
+      final cmds = FfmpegCommand.videoEditToGif(
+        inputPath: '/in.mp4',
+        outputPath: '/out.gif',
+        palettePath: '/palette.png',
+      );
+      final pal = cmds.palettePass;
+      expect(pal, isNot(contains('-c:v')));
+      expect(pal.last, equals('/palette.png'));
+    });
+
     test('null keepRanges → -ss/-t path unchanged (regression guard)', () {
       final without = FfmpegCommand.videoEdit(
         inputPath: '/in.mp4',
