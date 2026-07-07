@@ -98,11 +98,17 @@ class FallbackFfmpegBackend implements FfmpegBackend {
     }));
   }
 
+  // probe/supportsEncoder always go through `primary` (gm_shim), even once
+  // poisoned: no ffprobe.exe/ffmpeg.exe is bundled anymore (setup_windows_dev.ps1),
+  // so `fallback` can't serve these calls -- they'd always fail with "system
+  // cannot find the file specified". A crash caught during run() doesn't
+  // corrupt gm_probe/gm_supports_encoder, so this stays safe post-poison.
   @override
-  Future<MediaInfo?> probe(String inputPath) => _active.probe(inputPath);
+  Future<MediaInfo?> probe(String inputPath) => primary.probe(inputPath);
 
   @override
-  Future<bool> supportsEncoder(String encoderName) => _active.supportsEncoder(encoderName);
+  Future<bool> supportsEncoder(String encoderName) =>
+      primary.supportsEncoder(encoderName);
 
   @override
   void dispose() {

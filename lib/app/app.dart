@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ffi';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,6 +16,27 @@ class GifolomoraApp extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<GifolomoraApp> createState() => _GifolomoraAppState();
+}
+
+typedef _TerminateProcessNative = Int32 Function(IntPtr hProcess, Uint32 uExitCode);
+typedef _TerminateProcessDart = int Function(int hProcess, int uExitCode);
+
+// Dart's exit()/normal process exit runs ExitProcess, which walks every
+// loaded DLL's DLL_PROCESS_DETACH -- FFmpeg's bundled DLLs (gm_shim.dll and
+// friends) do slow global cleanup there (codec tables, av_log, ...), adding
+// several seconds to every close now that FFmpeg runs in-process instead of
+// as its own ffmpeg.exe. TerminateProcess skips DLL_PROCESS_DETACH entirely.
+// Safe here: only called after cleanup (recorder stop, temp wipe) already
+// ran -- see onWindowClose. -1 is the GetCurrentProcess() pseudo-handle.
+void _hardExit() {
+  if (!Platform.isWindows) {
+    exit(0);
+  }
+  final kernel32 = DynamicLibrary.open('kernel32.dll');
+  final terminateProcess = kernel32
+      .lookupFunction<_TerminateProcessNative, _TerminateProcessDart>(
+          'TerminateProcess');
+  terminateProcess(-1, 0);
 }
 
 class _GifolomoraAppState extends ConsumerState<GifolomoraApp>
@@ -117,12 +139,16 @@ class _GifolomoraAppState extends ConsumerState<GifolomoraApp>
     // Watchdog: if windowManager.destroy() (native engine/window teardown)
     // hangs, force the process down rather than leave it stuck forever.
     // Cleanup already ran above, so this is safe even mid-teardown.
-    final watchdog = Timer(const Duration(seconds: 4), () {
+    final watchdog = Timer(const Duration(seconds: 2), () {
       _logExitStepSync('watchdog fired, forcing exit');
-      exit(0);
+      _hardExit();
     });
     await windowManager.destroy();
     watchdog.cancel();
+    // Even the success path routes through ExitProcess's slow DLL_PROCESS_
+    // DETACH (see _hardExit doc) once this function returns -- skip it here
+    // too so a normal close isn't paying the same tax as the watchdog case.
+    _hardExit();
   }
 
   @override

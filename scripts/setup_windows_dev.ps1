@@ -25,6 +25,14 @@ $required = @(
     'avutil-58.dll', 'swresample-4.dll', 'swscale-7.dll',
     'libx264-165.dll', 'libvpx-1.dll', 'libaom.dll', 'libopus-0.dll',
     'libwinpthread-1.dll',
+    # hard (non-delay) import-table deps of the libs above -- LoadLibrary fails
+    # the whole gm_shim.dll load (error 126, "module not found") if any is
+    # missing, even though the app never calls into them: postproc-57.dll is
+    # libpostproc (built alongside avcodec/avformat since --enable-gpl doesn't
+    # disable it by default, avfilter's `pp` filter links it), SDL2.dll/
+    # libva.dll are avdevice/avcodec's compiled-in (unused) SDL2 output device
+    # and VAAPI hwaccel probe, liblzma-5.dll is avcodec's lzma decompress dep.
+    'postproc-57.dll', 'SDL2.dll', 'libva.dll', 'liblzma-5.dll',
     # drawtext filter's libfreetype dependency chain (--enable-libfreetype,
     # PLAN.md §6) -- without these, every text-overlay job fails with
     # "No such filter: 'drawtext'" (rc=1).

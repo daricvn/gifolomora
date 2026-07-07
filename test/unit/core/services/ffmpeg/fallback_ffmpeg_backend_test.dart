@@ -136,7 +136,10 @@ void main() {
       expect(backend.isPoisoned, isFalse);
     });
 
-    test('probe/supportsEncoder route to fallback once poisoned', () async {
+    test('probe/supportsEncoder stay on primary even once poisoned', () async {
+      // fallback (exe backend) has no ffprobe.exe bundled -- routing these
+      // there post-poison would fail every call with "system cannot find
+      // the file specified".
       final primary = _ScriptedBackend()
         ..onRun = () async => const Err(FfmpegError(
               message: 'engine fault',
@@ -151,10 +154,10 @@ void main() {
       await backend.probe('/some/file.mp4');
       await backend.supportsEncoder('libx264');
 
-      expect(fallback.probeCount, equals(1));
-      expect(fallback.supportsEncoderCount, equals(1));
-      expect(primary.probeCount, equals(0));
-      expect(primary.supportsEncoderCount, equals(0));
+      expect(primary.probeCount, equals(1));
+      expect(primary.supportsEncoderCount, equals(1));
+      expect(fallback.probeCount, equals(0));
+      expect(fallback.supportsEncoderCount, equals(0));
     });
   });
 }

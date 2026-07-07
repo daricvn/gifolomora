@@ -21,9 +21,11 @@
 #       FFmpeg version/tag (currently n6.0) and this repo's tag/commit.
 #   [ ] Bundled DLLs (avcodec/avformat/.../libx264/libvpx/libaom/libopus/
 #       libwinpthread/libfreetype + its harfbuzz/glib/png/zlib/brotli/pcre2/
-#       iconv chain -- see scripts/setup_windows_dev.ps1's $required list)
-#       are the versions actually built by scripts/build_ffmpeg_shim.ps1 for
-#       this release, not stale dev-machine copies.
+#       iconv chain, plus postproc-57/SDL2/libva/liblzma-5 -- hard import-table
+#       deps of the above, or gm_shim.dll fails to load entirely (error 126) --
+#       see scripts/setup_windows_dev.ps1's $required list) are the versions
+#       actually built by scripts/build_ffmpeg_shim.ps1 for this release, not
+#       stale dev-machine copies.
 
 param(
     [switch]$Sign,

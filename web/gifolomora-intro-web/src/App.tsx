@@ -7,7 +7,7 @@ const Showcase = lazy(() => import('./Showcase'));
 const Changelog = lazy(() => import('./Changelog'));
 
 // ponytail: fill with real release URL when available
-const DOWNLOAD_WIN = 'https://1drv.ms/u/c/15f9d9574a5f179d/IQB0HJhNzHUoSJ1p-Q8flNABAd6C3IPd_ZGdiROUsg75DyM?e=67yIPh';
+const DOWNLOAD_WIN = 'https://github.com/daricvn/gifolomora/releases/tag/release';
 const REPO_URL = 'https://github.com/daricvn/gifolomora';
 
 const features = [
