@@ -214,7 +214,10 @@ lib/
 
 ## License
 
-Gifolomora is proprietary software by Takayoshi Code.
+GPLv3 — see [LICENSE](LICENSE). Required because the Windows build links FFmpeg
+(`gm_shim.dll`, GPLv3 config: `--enable-gpl --enable-version3 --enable-libx264` etc.)
+in-process via `dart:ffi`, making the whole app a combined work under GPLv3.
+FFmpeg attribution/notices: see the About screen in-app or `assets/licenses/`.
 
 ## Questions & Support
 
