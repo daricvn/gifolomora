@@ -8,6 +8,7 @@ const Changelog = lazy(() => import('./Changelog'));
 
 // ponytail: fill with real release URL when available
 const DOWNLOAD_WIN = 'https://1drv.ms/u/c/15f9d9574a5f179d/IQB0HJhNzHUoSJ1p-Q8flNABAd6C3IPd_ZGdiROUsg75DyM?e=67yIPh';
+const REPO_URL = 'https://github.com/daricvn/gifolomora';
 
 const features = [
   { ico: '🎬', hue: '265', title: 'Video Studio', desc: 'Composite editor — crop, resize, speed, trim, cut, boomerang, smooth loop, volume, text overlay, full undo/redo. Export to video or GIF.', big: true },
@@ -139,6 +140,7 @@ const App: Component = () => {
           <a class="navlink" href="#showcase">Showcase</a>
           <button class="navlink navlink-btn" onClick={() => aboutEl?.showModal()}>About</button>
           <button class="navlink navlink-btn" onClick={() => setChangelogOpen(true)}>Changelog</button>
+          <a class="navlink" href={REPO_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
           <a class="btn btn-primary btn-sm shine" href="#download">⬇ Download</a>
         </div>
       </nav>
@@ -248,7 +250,7 @@ const App: Component = () => {
       </section>
 
       <footer class="footer wrap">
-        Gifolomora — proprietary software by Takayoshi Code. <button class="footer-link" onClick={() => aboutEl?.showModal()}>About</button> · <button class="footer-link" onClick={() => setChangelogOpen(true)}>Changelog</button>
+        Gifolomora — open source software by Takayoshi Code. <button class="footer-link" onClick={() => aboutEl?.showModal()}>About</button> · <button class="footer-link" onClick={() => setChangelogOpen(true)}>Changelog</button> · <a class="footer-link" href={REPO_URL} target="_blank" rel="noopener noreferrer">Source on GitHub</a>
       </footer>
 
       <dialog class="about glass" ref={aboutEl} onClick={(e) => { if (e.target === aboutEl) aboutEl.close(); }}>
@@ -270,6 +272,11 @@ const App: Component = () => {
             I grew up using a lot of applications for free — to learn and to grow.
             Gifolomora should be free and bring the best experience to the users. <br />
             It is free, and will always be free. 
+          </p>
+
+          <p>
+            Source code on{' '}
+            <a href={REPO_URL} target="_blank" rel="noopener noreferrer">GitHub</a>.
           </p>
 
           <p class="about-feedback">

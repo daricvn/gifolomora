@@ -2,17 +2,19 @@
 
 Cross-platform glassmorphism GIF editor & maker for Android and Windows desktop.
 
-**Create, edit, and optimize GIFs** from videos or image sequences using a sleek glass-themed interface with 7 specialized tools.
+**Create, edit, and optimize GIFs** from videos or image sequences using a sleek glass-themed interface with 8 specialized tools.
 
 ## Features
 
-- **Video Studio** — Composite editor for video layers (crop, resize, speed, trim, text overlay). Export to video or GIF.
+- **Video Studio** — Composite editor for video layers (crop, resize, speed, trim, volume, multi-layer text overlay). Non-destructive: undo/redo history on the GIF stage, hold-to-compare against the original. Export to video or GIF.
+- **Screen Record** *(Windows only)* — Capture a monitor (optional mic + system-audio loopback) straight into Video Studio for editing. Global hotkeys, pause/resume, crash-safe segment recording.
 - **Images → GIF** — Create GIFs from image sequences with frame rate and scale control.
 - **Resize** — Scale GIFs to custom dimensions.
 - **Crop** — Trim GIF content by region.
-- **Text Overlay** — Add custom text to GIFs with font and position control.
-- **Optimize** — Reduce file size via palette quantization and inter-frame transparency. Pure-Dart implementation (no external binary).
+- **Text Overlay** — Add up to 20 draggable, styled text layers to a GIF (bundled fonts + system fonts, per-layer color/stroke).
+- **Optimize** — Reduce file size via octree palette quantization, lossy inter-frame transparency, and frame-drop. Pure-Dart implementation (no external binary).
 - **Effects** — Speed adjustment and frame reversal.
+- **To WebM** — Batch-convert video or GIF to WebM (VP9/AV1 + alpha + Opus audio).
 
 All tools feature:
 - **Live previews** (downscaled sample before full export)
