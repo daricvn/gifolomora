@@ -17,6 +17,14 @@ const Map<HotKeyModifier, String> _windowsModifierLabels = {
   HotKeyModifier.fn: 'Fn',
 };
 
+/// `PhysicalKeyboardKey.debugName` is gated behind an `assert()` in the
+/// Flutter SDK, so it's null in every non-debug build — `logicalKey.keyLabel`
+/// has no such gate and covers named keys too (e.g. "Numpad 4", "F5").
+String _keyLabel(HotKey hotKey) {
+  final label = hotKey.logicalKey.keyLabel.trim();
+  return label.isNotEmpty ? label : (hotKey.physicalKey.debugName ?? 'Unknown');
+}
+
 class _KeyChip extends StatelessWidget {
   const _KeyChip({required this.label});
 
@@ -49,7 +57,7 @@ class _WindowsHotKeyView extends StatelessWidget {
       children: [
         for (final modifier in hotKey.modifiers ?? <HotKeyModifier>[])
           _KeyChip(label: _windowsModifierLabels[modifier] ?? modifier.name),
-        _KeyChip(label: hotKey.physicalKey.debugName ?? 'Unknown'),
+        _KeyChip(label: _keyLabel(hotKey)),
       ],
     );
   }

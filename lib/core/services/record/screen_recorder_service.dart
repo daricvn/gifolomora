@@ -66,7 +66,7 @@ class GmShimRecorderEngine implements RecorderEngine {
 const int kMaxRecordSeconds = 600;
 
 /// Seconds left before the 10-minute cap, given [finishedElapsed] already
-/// banked from prior segments. Belt-and-braces alongside the service's own
+/// banked from prior segments. Belt-and-braces alongside the controller's
 /// 500ms tick — even a hung Dart timer can't push a single segment's `-t`
 /// past the remaining budget.
 int remainingCaptureSeconds(Duration finishedElapsed) =>
@@ -138,7 +138,6 @@ class ScreenRecorderService {
 
   Duration _finishedElapsed = Duration.zero;
   final _segmentStopwatch = Stopwatch();
-  Timer? _capTimer;
 
   double? _syncOffsetSeconds;
   String? _cachedMicDeviceName;
@@ -228,7 +227,11 @@ class ScreenRecorderService {
     _expectingExit = false;
     final future = _engine!.execute(sessionId, ['ffmpeg', ...args]);
     _segmentFuture = future;
-    future.then((result) => _onSegmentExit(sessionId, result, videoPath));
+    future.then(
+      (result) => _onSegmentExit(sessionId, result, videoPath),
+      onError: (Object e, StackTrace st) =>
+          _onSegmentError(sessionId, videoPath, e, st),
+    );
 
     if (_audio.captureSystemAudio && _loopback != null) {
       final wavPath = p.join(
@@ -244,17 +247,6 @@ class ScreenRecorderService {
       ..start();
     _segmentIndex++;
     _setStatus(RecordStatus.recording);
-    _startCapTimer();
-  }
-
-  void _startCapTimer() {
-    _capTimer?.cancel();
-    _capTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (elapsed.inSeconds >= kMaxRecordSeconds) {
-        _capTimer?.cancel();
-        stop();
-      }
-    });
   }
 
   void _onSegmentExit(int sessionId, GmExecResult result, String videoPath) {
@@ -262,16 +254,31 @@ class ScreenRecorderService {
     if (_currentSessionId != sessionId) return; // a stale future, already superseded
     Log.e(_tag,
         'ffmpeg segment exited unexpectedly (rc=${result.rc})\n${result.logs}');
+    _handleSegmentDeath(
+        videoPath, 'Recording stopped unexpectedly (ffmpeg exit ${result.rc})');
+  }
+
+  /// Same bookkeeping as [_onSegmentExit] for a segment future that *throws*
+  /// — without this, a throw leaves status stuck at `recording` plus an
+  /// unhandled async exception.
+  void _onSegmentError(
+      int sessionId, String videoPath, Object e, StackTrace st) {
+    if (_expectingExit) return;
+    if (_currentSessionId != sessionId) return;
+    Log.e(_tag, 'ffmpeg segment future threw', e, st);
+    _handleSegmentDeath(videoPath, 'Recording stopped unexpectedly ($e)');
+  }
+
+  void _handleSegmentDeath(String videoPath, String message) {
     // MKV has no moov atom to lose — a killed/crashed segment is still
     // playable, so keep it for partial-recording recovery.
     _videoSegments.add(videoPath);
     _finishedElapsed += _segmentStopwatch.elapsed;
     _segmentStopwatch.stop();
-    _capTimer?.cancel();
     _currentSessionId = null;
     _segmentFuture = null;
     _setStatus(RecordStatus.idle);
-    _errorController.add('Recording stopped unexpectedly (ffmpeg exit ${result.rc})');
+    _errorController.add(message);
   }
 
   /// Gracefully stops the live segment (gm_cancel, 5s timeout) and stops
@@ -293,7 +300,6 @@ class ScreenRecorderService {
     }
     _currentSessionId = null;
     _segmentFuture = null;
-    _capTimer?.cancel();
     _segmentStopwatch.stop();
     _finishedElapsed += _segmentStopwatch.elapsed;
     _videoSegments.add(videoPath);
@@ -311,7 +317,15 @@ class ScreenRecorderService {
     _setStatus(RecordStatus.paused);
   }
 
-  Future<File> stop() async {
+  Future<File>? _stopFuture;
+
+  /// Single-flight: a second stop() while one is already stopping/finalizing
+  /// (hotkey mash, cap-tick + click race) awaits the first call's future
+  /// instead of running _finalize() twice concurrently.
+  Future<File> stop() =>
+      _stopFuture ??= _stop().whenComplete(() => _stopFuture = null);
+
+  Future<File> _stop() async {
     if (_status == RecordStatus.recording) {
       await _stopCurrentSegment(_currentVideoPath);
     }
@@ -392,13 +406,15 @@ class ScreenRecorderService {
   }
 
   Future<void> discard() async {
-    _capTimer?.cancel();
     _expectingExit = true;
     final sessionId = _currentSessionId;
     if (sessionId != null) _engine?.cancel(sessionId);
     _currentSessionId = null;
     _segmentFuture = null;
     _segmentStopwatch.stop();
+    if (_audio.captureSystemAudio && _loopback != null) {
+      await _loopback.stop();
+    }
     if (_jobDir != null) await _temp.cleanJob(_jobDir!);
     _jobDir = null;
     _videoSegments.clear();
@@ -413,7 +429,6 @@ class ScreenRecorderService {
   /// clean `_jobDir` individually here too. Bounded wait, same leak-not-kill
   /// tradeoff as `_stopCurrentSegment`.
   Future<void> cleanupOnShutdown() async {
-    _capTimer?.cancel();
     _expectingExit = true;
     final sessionId = _currentSessionId;
     final future = _segmentFuture;
@@ -425,11 +440,13 @@ class ScreenRecorderService {
     }
     _currentSessionId = null;
     _segmentFuture = null;
+    if (_audio.captureSystemAudio && _loopback != null) {
+      await _loopback.stop();
+    }
     _jobDir = null;
   }
 
   void dispose() {
-    _capTimer?.cancel();
     _statusController.close();
     _errorController.close();
   }

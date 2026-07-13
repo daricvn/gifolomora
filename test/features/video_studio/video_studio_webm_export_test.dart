@@ -135,6 +135,41 @@ void main() {
     });
   });
 
+  group('exportVideo(format: original) — untouched save-as-is', () {
+    test('copies the source file directly, no ffmpeg run', () async {
+      final ctrl = await loadVideo();
+
+      final ok = await ctrl.exportVideo(format: ExportVideoFormat.original);
+
+      expect(ok, isTrue);
+      expect(export.savedVideoSource!.path, equals('/input.mp4'));
+      expect(backend.runCount, equals(0));
+    });
+
+    test('originalExportExt: basename extension only — a dotted directory or extension-less file yields null',
+        () async {
+      final ctrl = await loadVideo();
+      expect(_state(c).originalExportExt, equals('mp4'));
+
+      // Dotted dir, no file extension: lastIndexOf('.') would have said "0/clip".
+      await ctrl.setInput(File('/v2.0/clip'));
+      expect(_state(c).originalExportExt, isNull);
+    });
+
+    test('gate: hasComparableEdit false when untouched, true once an edit is pending or applied',
+        () async {
+      final ctrl = await loadVideo();
+      expect(_state(c).hasComparableEdit, isFalse);
+
+      ctrl.setResize(160);
+      expect(_state(c).hasComparableEdit, isTrue);
+
+      await ctrl.applyVideoEdits();
+      // Applied (baked) still counts as modified — card must stay hidden.
+      expect(_state(c).hasComparableEdit, isTrue);
+    });
+  });
+
   group('lastExportFormat persistence', () {
     test('setLastExportFormat persists across a controller rebuild', () async {
       await loadVideo();

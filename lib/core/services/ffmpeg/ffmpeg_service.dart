@@ -75,6 +75,7 @@ class FfmpegService {
     int? totalMs,
   }) async {
     final jobDir = await _temp.createJobDir();
+    _currentJobDir = jobDir;
     try {
       final outputPath = await _temp.tempOutputPath(jobDir, 'gif');
       final args = FfmpegCommand.videoToGif(
@@ -92,6 +93,8 @@ class FfmpegService {
         totalMs: totalMs,
       );
     } catch (e) {
+      await _temp.cleanJob(jobDir);
+      _currentJobDir = null;
       return Err(FfmpegError(message: e.toString()));
     }
   }

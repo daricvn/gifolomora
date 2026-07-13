@@ -79,28 +79,43 @@ class FfmpegDllBackend implements FfmpegBackend {
     Timer? tailTimer;
     var lastOffset = 0;
     var pendingLine = '';
-    void tailOnce() {
-      if (!progressFile.existsSync()) return;
-      final raf = progressFile.openSync();
+    Future<void>? tailInFlight;
+    // ponytail: async File I/O instead of the previous *Sync calls — this
+    // timer runs on the caller's (UI) isolate, and sync disk reads block it
+    // every 150ms for the whole export. Async reads hand the work to the OS
+    // thread pool instead.
+    Future<void> tailOnce() async {
       try {
-        final length = raf.lengthSync();
-        if (length <= lastOffset) return;
-        raf.setPositionSync(lastOffset);
-        final chunk = String.fromCharCodes(raf.readSync(length - lastOffset));
-        lastOffset = length;
-        pendingLine += chunk;
-        final lines = pendingLine.split('\n');
-        pendingLine = lines.removeLast(); // may be incomplete
-        for (final line in lines) {
-          FfmpegProgress.parseProgressLine(line.trim(), totalFrames, totalMs, onProgress);
+        if (!await progressFile.exists()) return;
+        final raf = await progressFile.open();
+        try {
+          final length = await raf.length();
+          if (length <= lastOffset) return;
+          await raf.setPosition(lastOffset);
+          final chunk = String.fromCharCodes(await raf.read(length - lastOffset));
+          lastOffset = length;
+          pendingLine += chunk;
+          final lines = pendingLine.split('\n');
+          pendingLine = lines.removeLast(); // may be incomplete
+          for (final line in lines) {
+            FfmpegProgress.parseProgressLine(line.trim(), totalFrames, totalMs, onProgress);
+          }
+        } finally {
+          await raf.close();
         }
+      } catch (_) {
+        // Best-effort: a transient FS error (e.g. AV scan on the temp file)
+        // must not surface as run()'s result via the awaits below.
       } finally {
-        raf.closeSync();
+        tailInFlight = null;
       }
     }
 
     if (onProgress != null) {
-      tailTimer = Timer.periodic(const Duration(milliseconds: 150), (_) => tailOnce());
+      tailTimer = Timer.periodic(const Duration(milliseconds: 150), (_) {
+        // previous tick still in flight — skip, don't queue
+        tailInFlight ??= tailOnce();
+      });
     }
 
     try {
@@ -112,7 +127,8 @@ class FfmpegDllBackend implements FfmpegBackend {
       });
 
       tailTimer?.cancel();
-      tailOnce(); // final catch-up pass
+      await tailInFlight; // let any in-flight tick finish first
+      await tailOnce(); // final catch-up pass, guaranteed to run
 
       if (result.rc == 0) {
         return Ok(File(outputPath));
@@ -139,6 +155,7 @@ class FfmpegDllBackend implements FfmpegBackend {
       ));
     } finally {
       tailTimer?.cancel();
+      await tailInFlight; // don't delete under an open handle (Windows)
       _activeSessions.remove(sessionId);
       if (progressFile.existsSync()) {
         try {

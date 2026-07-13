@@ -88,6 +88,7 @@ class VideoPreview extends StatefulWidget {
     this.onPositionChanged,
     this.trimStartMs = 0,
     this.trimEndMs = 0,
+    this.softwareRender = false,
   });
 
   final File file;
@@ -112,6 +113,13 @@ class VideoPreview extends StatefulWidget {
   /// Preview loops within [trimStartMs, trimEndMs]. 0 = no boundary.
   final int trimStartMs;
   final int trimEndMs;
+
+  /// Render video through media_kit's software (pixel-buffer) path instead of
+  /// the D3D11/ANGLE hardware path — works around intermittent black flashes
+  /// from the plugin's unsynchronized shared-texture pipeline on some GPUs.
+  /// Read once at mount (the native player is configured in initState); a
+  /// changed value takes effect the next time this widget is created.
+  final bool softwareRender;
 
   @override
   State<VideoPreview> createState() => _VideoPreviewState();
@@ -179,7 +187,12 @@ class _VideoPreviewState extends State<VideoPreview> {
     super.initState();
     _crop = widget.cropRect ?? const Rect.fromLTWH(0, 0, 1, 1);
     _player = Player();
-    _videoController = VideoController(_player);
+    _videoController = VideoController(
+      _player,
+      configuration: VideoControllerConfiguration(
+        enableHardwareAcceleration: !widget.softwareRender,
+      ),
+    );
     widget.controller?._attach(this);
     _openInFlight = _openFile();
   }
@@ -235,6 +248,9 @@ class _VideoPreviewState extends State<VideoPreview> {
     if (_isAnimatedImage) {
       // State reused across a video->gif file swap (didUpdateWidget, same
       // State) — _player may still be open/playing the old video otherwise.
+      _positionSub?.cancel();
+      _completedSub?.cancel();
+      _playingSub?.cancel();
       await _player.stop();
       await _openGif();
       return;
@@ -417,6 +433,12 @@ class _VideoPreviewState extends State<VideoPreview> {
         return;
       }
       _gifLazyCache[_gifLazyCursor++] = info.image;
+      final evictBefore = _gifLazyCursor - _kGifLazyWindow;
+      _gifLazyCache.removeWhere((i, image) {
+        if (i >= evictBefore || identical(image, previousShown)) return false;
+        _disposeGifImage(image);
+        return true;
+      });
     }
     _gifLazyShown = _gifLazyCache[idx];
     // Only now — after the swap above — is it safe to let the old frame go.
@@ -432,7 +454,7 @@ class _VideoPreviewState extends State<VideoPreview> {
         !_gifLazyCache.containsValue(previousShown)) {
       _disposeGifImage(previousShown);
     }
-    final keep = idx - _kGifLazyWindow;
+    final keep = idx - _kGifLazyWindow + 1;
     _gifLazyCache.removeWhere((i, image) {
       if (i >= keep) return false;
       _disposeGifImage(image);
@@ -529,6 +551,10 @@ class _VideoPreviewState extends State<VideoPreview> {
     _gifFrames = const [];
     _gifFrameEndMs = const [];
     _gifTotalMs = 0;
+    final shown = _gifLazyShown;
+    if (shown != null && !_gifLazyCache.containsValue(shown)) {
+      _disposeGifImage(shown);
+    }
     for (final f in _gifLazyCache.values) {
       _disposeGifImage(f);
     }

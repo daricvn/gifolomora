@@ -44,6 +44,55 @@ void main() {
       expect(maxSeen, equals(2));
     });
 
+    test('queue-jumper during wake gap cannot push past cap', () async {
+      final pool = FfmpegJobPool(maxConcurrent: 2);
+      var running = 0;
+      var maxSeen = 0;
+      final done = <Future<void>>[];
+
+      void spawn(Completer<void> gate) {
+        done.add(pool.run(() async {
+          running++;
+          maxSeen = running > maxSeen ? running : maxSeen;
+          await gate.future;
+          running--;
+        }));
+      }
+
+      final gates = List.generate(8, (_) => Completer<void>());
+      spawn(gates[0]);
+      spawn(gates[1]);
+      spawn(gates[2]); // queued waiter
+      await Future<void>.delayed(Duration.zero);
+      expect(running, equals(2));
+
+      // Free a slot, then inject jumpers at several microtask depths so one
+      // lands in the gap between the finisher's decrement and the waiter's
+      // resume (the overshoot race the while-loop re-check guards against).
+      gates[0].complete();
+      for (var i = 3; i < 8; i++) {
+        var hops = i - 3;
+        void enqueue() {
+          if (hops-- <= 0) {
+            spawn(gates[i]);
+          } else {
+            scheduleMicrotask(enqueue);
+          }
+        }
+
+        enqueue();
+      }
+
+      await Future<void>.delayed(Duration.zero);
+      for (final g in gates) {
+        if (!g.isCompleted) {
+          g.complete();
+        }
+      }
+      await Future.wait(done);
+      expect(maxSeen, equals(2));
+    });
+
     test('a job throwing does not wedge the pool for the next job', () async {
       final pool = FfmpegJobPool(maxConcurrent: 1);
       await expectLater(

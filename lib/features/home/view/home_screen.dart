@@ -99,6 +99,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           title: 'Gifolomora',
           leading: const _BrandLockup(),
           actions: [
+            if (Platform.isWindows)
+              IconButton(
+                onPressed: () => context.push('/settings'),
+                icon: const Icon(Icons.settings_outlined,
+                    color: AppColors.textLo, size: 22),
+                tooltip: 'Settings',
+              ),
             IconButton(
               onPressed: () => context.push('/about'),
               icon: const Icon(Icons.info_outline_rounded,

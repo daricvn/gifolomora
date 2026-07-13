@@ -22,19 +22,15 @@ class FfmpegProgress {
     if (onProgress == null) return;
     if (line.startsWith('frame=')) {
       final frames = int.tryParse(line.substring('frame='.length).trim()) ?? 0;
-      double fraction = 0;
-      if (totalFrames != null && totalFrames > 0) {
-        fraction = (frames / totalFrames).clamp(0.0, 1.0);
-      }
+      if (totalFrames == null || totalFrames <= 0) return;
+      final fraction = (frames / totalFrames).clamp(0.0, 1.0);
       onProgress(FfmpegProgress(fraction: fraction, framesDone: frames));
     } else if (line.startsWith('out_time_ms=')) {
       final timeMs = int.tryParse(line.substring('out_time_ms='.length).trim()) ?? 0;
       // out_time_ms is in microseconds in some ffmpeg versions — divide by 1000
       final timeMillis = timeMs ~/ 1000;
-      double fraction = 0;
-      if (totalMs != null && totalMs > 0) {
-        fraction = (timeMillis / totalMs).clamp(0.0, 1.0);
-      }
+      if (totalMs == null || totalMs <= 0) return;
+      final fraction = (timeMillis / totalMs).clamp(0.0, 1.0);
       onProgress(FfmpegProgress(fraction: fraction, timeMs: timeMillis));
     }
   }

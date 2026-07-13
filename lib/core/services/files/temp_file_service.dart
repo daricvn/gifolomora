@@ -18,6 +18,10 @@ class TempFileService {
   /// [TempFileService] instance (see `app.dart`'s `onWindowClose`).
   static final Set<String> _overrideJobDirs = {};
 
+  /// Monotonic suffix so two same-microsecond [createJobDir] calls still get
+  /// distinct dirs. Static: uniqueness must hold across service instances.
+  static int _seq = 0;
+
   Future<String> get _baseDir async {
     if (_base != null) return _base!;
     final tmp = await getTemporaryDirectory();
@@ -31,7 +35,8 @@ class TempFileService {
   /// "save to" setting) — every other caller keeps the default.
   Future<String> createJobDir({String? baseDirOverride}) async {
     final base = baseDirOverride ?? await _baseDir;
-    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    final micros = DateTime.now().microsecondsSinceEpoch;
+    final id = '${micros}_${_seq++}';
     final dir = Directory(p.join(base, id));
     await dir.create(recursive: true);
     if (baseDirOverride != null) _overrideJobDirs.add(dir.path);

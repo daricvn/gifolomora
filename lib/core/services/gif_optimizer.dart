@@ -64,11 +64,15 @@ class GifOptimizer {
       progressPort = ReceivePort();
       progressSub = progressPort.listen((msg) => onProgress(msg as double));
     }
-    final result = await _spawn(bytes, colors.clamp(2, 256), lossy.clamp(0, 200),
-        loopCount, frameDrop, localPalettes, progressPort?.sendPort);
-    await progressSub?.cancel();
-    progressPort?.close();
-    await output.writeAsBytes(result);
+    try {
+      final result = await _spawn(bytes, colors.clamp(2, 256),
+          lossy.clamp(0, 200), loopCount, frameDrop, localPalettes,
+          progressPort?.sendPort);
+      await output.writeAsBytes(result);
+    } finally {
+      await progressSub?.cancel();
+      progressPort?.close();
+    }
   }
 
   // Isolate.run captures its whole enclosing Context, not just the variables

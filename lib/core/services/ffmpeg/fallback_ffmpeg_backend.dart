@@ -31,9 +31,10 @@ class FallbackFfmpegBackend implements FfmpegBackend {
   bool _poisoned = false;
   bool get isPoisoned => _poisoned;
 
-  Completer<Result<File, FfmpegError>>? _watchdogSignal;
-
-  FfmpegBackend get _active => _poisoned ? fallback : primary;
+  // Concurrent run()s are reachable (shared singleton behind the job pool,
+  // cap 2), so track every pending run's watchdog signal, not just the last.
+  final Set<Completer<Result<File, FfmpegError>>> _watchdogSignals =
+      <Completer<Result<File, FfmpegError>>>{};
 
   void _poison(String reason) {
     if (_poisoned) return;
@@ -56,7 +57,7 @@ class FallbackFfmpegBackend implements FfmpegBackend {
     }
 
     final watchdog = Completer<Result<File, FfmpegError>>();
-    _watchdogSignal = watchdog;
+    _watchdogSignals.add(watchdog);
     try {
       final primaryFuture = primary.run(args, outputPath,
           onProgress: onProgress, totalFrames: totalFrames, totalMs: totalMs);
@@ -72,7 +73,7 @@ class FallbackFfmpegBackend implements FfmpegBackend {
       }
       return result;
     } finally {
-      _watchdogSignal = null;
+      _watchdogSignals.remove(watchdog);
     }
   }
 
@@ -84,18 +85,19 @@ class FallbackFfmpegBackend implements FfmpegBackend {
 
     await primary.cancel();
 
-    final signal = _watchdogSignal;
-    if (signal == null || signal.isCompleted) return;
-
     // A truly hung native call can't be killed (TerminateThread would
     // corrupt the heap). Give it watchdogDuration to honor the cancel; if
     // it doesn't, leak that isolate/thread, poison, and unblock the
     // caller's run() with a cancellation result instead of hanging forever.
-    unawaited(Future.delayed(watchdogDuration, () {
-      if (signal.isCompleted) return;
-      _poison('session did not stop within ${watchdogDuration.inSeconds}s of cancel()');
-      signal.complete(const Err(FfmpegError(message: 'Cancelled (watchdog fallback)')));
-    }));
+    // Snapshot: run()s may finish (and remove themselves) meanwhile.
+    for (final signal in List.of(_watchdogSignals)) {
+      if (signal.isCompleted) continue;
+      unawaited(Future.delayed(watchdogDuration, () {
+        if (signal.isCompleted) return;
+        _poison('session did not stop within ${watchdogDuration.inSeconds}s of cancel()');
+        signal.complete(const Err(FfmpegError(message: 'Cancelled (watchdog fallback)')));
+      }));
+    }
   }
 
   // probe/supportsEncoder always go through `primary` (gm_shim), even once

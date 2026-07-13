@@ -13,6 +13,7 @@ import 'package:flutter/services.dart' show HardwareKeyboard;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/services/providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
 import '../../../core/utils/font_registry.dart';
@@ -492,6 +493,11 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                                           : state.sourceDurationMs > 0
                                           ? state.effectiveTrimEndMs
                                           : 0,
+                                      softwareRender: ref
+                                              .watch(appSettingsProvider)
+                                              .valueOrNull
+                                              ?.softwareVideoPreview ??
+                                          false,
                                     ),
                                   ),
                                   if (_comparing)
@@ -3126,9 +3132,13 @@ class _ActionBar extends StatelessWidget {
           label: 'Export',
           tooltip: 'Export Video',
           onTap: () async {
+            // Untouched video (no edits applied, none pending) → offer the
+            // save-as-is card with the source's own extension.
+            final originalExt = state.originalExportExt;
             final format = await Navigator.of(context).push<ExportVideoFormat>(
               _formatPageRoute(
-                ExportFormatScreen(initial: ctrl.lastExportFormat),
+                ExportFormatScreen(
+                    initial: ctrl.lastExportFormat, originalExt: originalExt),
               ),
             );
             if (format == null) return;

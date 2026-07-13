@@ -2,7 +2,7 @@ name: gifolomora
 description: "Cross-platform glassmorphism GIF editor & maker."
 publish_to: 'none'
 
-version: 1.0.1+1
+version: 1.0.2+1
 
 environment:
   sdk: ^3.12.0

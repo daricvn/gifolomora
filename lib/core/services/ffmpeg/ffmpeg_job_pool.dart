@@ -13,7 +13,9 @@ class FfmpegJobPool {
   final Queue<Completer<void>> _waiters = Queue<Completer<void>>();
 
   Future<T> run<T>(Future<T> Function() job) async {
-    if (_running >= maxConcurrent) {
+    // Re-check after every wake: a new caller can slip in during the
+    // waiter's microtask gap and take the freed slot first.
+    while (_running >= maxConcurrent) {
       final waiter = Completer<void>();
       _waiters.add(waiter);
       await waiter.future;

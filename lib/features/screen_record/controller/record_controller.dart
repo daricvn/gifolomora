@@ -79,6 +79,7 @@ class RecordController extends AsyncNotifier<RecordState> {
   StreamSubscription<RecordStatus>? _statusSub;
   StreamSubscription<String>? _errorSub;
   Timer? _elapsedTicker;
+  bool _capStopIssued = false;
 
   ScreenRecorderService get _recorder => _recorderInstance ??=
       ScreenRecorderService(
@@ -171,6 +172,17 @@ class RecordController extends AsyncNotifier<RecordState> {
       if (s != null && s.isRecording) {
         state = AsyncData(s.copyWith(elapsed: _recorder.elapsed));
         _updateIndicator();
+        // 10-min cap lives here (not in the service) so the capped file
+        // surfaces via stopRecording()'s finalize + navigate instead of the
+        // service silently finalizing into a temp dir wiped on exit; the
+        // segment's `-t remaining` arg stays as hard backstop. Latched —
+        // without it, every tick during the multi-second stop/finalize
+        // queues another stopRecording() and its post-stop navigation.
+        if (!_capStopIssued &&
+            _recorder.elapsed.inSeconds >= kMaxRecordSeconds) {
+          _capStopIssued = true;
+          stopRecording();
+        }
       }
     });
   }
@@ -359,6 +371,7 @@ class RecordController extends AsyncNotifier<RecordState> {
       return;
     }
     final monitor = s.selected!;
+    _capStopIssued = false;
     try {
       await ref
           .read(recordSettingsServiceProvider)

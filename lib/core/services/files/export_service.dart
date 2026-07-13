@@ -24,7 +24,8 @@ class ExportService {
     }
   }
 
-  Future<File?> saveVideo(File tempFile, {String defaultName = 'edited.mp4'}) async {
+  Future<File?> saveVideo(File tempFile,
+      {String defaultName = 'edited.mp4', String extension = 'mp4'}) async {
     if (_saving) return null;
     _saving = true;
     try {
@@ -32,7 +33,7 @@ class ExportService {
         dialogTitle: 'Save Video',
         fileName: defaultName,
         type: FileType.custom,
-        allowedExtensions: ['mp4'],
+        allowedExtensions: [extension],
       );
       if (savePath == null) return null;
       final dest = File(savePath);

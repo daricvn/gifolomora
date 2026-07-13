@@ -219,7 +219,7 @@ class FakeExportService extends ExportService {
 
   @override
   Future<File?> saveVideo(File tempFile,
-      {String defaultName = 'edited.mp4'}) async {
+      {String defaultName = 'edited.mp4', String extension = 'mp4'}) async {
     savedVideoSource = tempFile;
     return returnFile;
   }

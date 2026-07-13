@@ -11,16 +11,27 @@ import '../controller/video_studio_controller.dart';
 /// WebM, then the caller runs the chosen pipeline. Pops with the chosen
 /// [ExportVideoFormat], or null if the user backs out.
 class ExportFormatScreen extends StatefulWidget {
-  const ExportFormatScreen({super.key, required this.initial});
+  const ExportFormatScreen({super.key, required this.initial, this.originalExt});
 
   final ExportVideoFormat initial;
+
+  /// Source file extension when the video is untouched — shows the
+  /// "Original" save-as-is card, pre-selected. Null = video was modified
+  /// (or effects pending), card hidden.
+  final String? originalExt;
 
   @override
   State<ExportFormatScreen> createState() => _ExportFormatScreenState();
 }
 
 class _ExportFormatScreenState extends State<ExportFormatScreen> {
-  late ExportVideoFormat _selected = widget.initial;
+  // Untouched video defaults to the as-is save; a persisted `original` pick
+  // falls back to mp4 when the card is hidden this time.
+  late ExportVideoFormat _selected = widget.originalExt != null
+      ? ExportVideoFormat.original
+      : (widget.initial == ExportVideoFormat.original
+          ? ExportVideoFormat.mp4
+          : widget.initial);
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +58,17 @@ class _ExportFormatScreenState extends State<ExportFormatScreen> {
           32,
         ),
         children: [
+          if (widget.originalExt != null) ...[
+            _FormatCard(
+              title: 'Original (${widget.originalExt!.toUpperCase()})',
+              subtitle: 'Save as-is · no re-encode · fastest',
+              icon: Icons.file_copy_rounded,
+              selected: _selected == ExportVideoFormat.original,
+              onTap: () =>
+                  setState(() => _selected = ExportVideoFormat.original),
+            ),
+            const SizedBox(height: 12),
+          ],
           _FormatCard(
             title: 'MP4',
             subtitle: 'H.264 · best compatibility · hardware-accelerated',

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart' show FontLoader;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/services/files/export_service.dart';
@@ -21,8 +22,10 @@ enum EditStage { video, gif }
 
 /// Export Video's format choice (PLAN.md §8). WebM always uses the §1
 /// defaults (CRF 32, cpu-used 4, Opus 128k) — no quality knobs on the format
-/// page; a slider can join later if asked.
-enum ExportVideoFormat { mp4, webm }
+/// page; a slider can join later if asked. [original] copies the source file
+/// as-is (no re-encode, keeps container/codec) — only offered while the video
+/// is untouched ([VideoStudioState.hasComparableEdit] false).
+enum ExportVideoFormat { mp4, webm, original }
 
 /// Auto FPS cap for a video→GIF conversion, tuned by output length so long
 /// clips don't bloat: <15s→21, 15–20s→16, 20–25s→15, 25–30s→12, 30–40s→8.
@@ -327,6 +330,17 @@ class VideoStudioState {
       (isGif
           ? (needsGifEdit || doOptimize || hasText)
           : (hasEdits || hasTrim || hasText || hasVolumeChange || hasCut || smoothLoop));
+
+  /// Lowercased source extension for the save-as-is "Original" export card;
+  /// null when the video has edits (card hidden) or the file has no
+  /// extension. p.extension looks at the basename only, so a dotted
+  /// directory (`C:\v2.0\clip`) can't fake one.
+  String? get originalExportExt {
+    final path = sourceFile?.path;
+    if (path == null || hasComparableEdit) return null;
+    final ext = p.extension(path);
+    return ext.length > 1 ? ext.substring(1).toLowerCase() : null;
+  }
 
   /// Whether [tool]'s panel currently carries a non-default edit — drives the
   /// dot indicator on the tool selector.
@@ -927,9 +941,23 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
     );
   }
 
+  DateTime _lastProgressEmit = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // ponytail: ffmpeg's -progress pipe can fire tens of times/sec; each hit
+  // rebuilds this whole 3500-line screen since the view watches the full
+  // state. Throttling at this single funnel (all export/bake paths route
+  // through it) caps rebuilds to ~10/sec without touching every call site
+  // or splitting the view into scoped Consumers.
   void _onProgress(FfmpegProgress p) {
     final cur = state.valueOrNull;
-    if (cur != null) state = AsyncData(cur.copyWith(progress: p));
+    if (cur == null) return;
+    final now = DateTime.now();
+    if (now.difference(_lastProgressEmit).inMilliseconds < 100 &&
+        p.fraction < 1.0) {
+      return;
+    }
+    _lastProgressEmit = now;
+    state = AsyncData(cur.copyWith(progress: p));
   }
 
   List<CutSegment> _capRanges(List<CutSegment> ranges, int maxMs) {
@@ -1107,6 +1135,9 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
         return true;
       },
       err: (e) async {
+        if (workingFile.path != s.sourceFile!.path) {
+          await _ffmpeg.cleanJobAt(workingDir);
+        }
         final cur = state.valueOrNull ?? const VideoStudioState();
         state = AsyncData(cur.copyWith(
             isProcessing: false, progress: null, error: e.message));
@@ -1315,6 +1346,17 @@ class VideoStudioController extends AsyncNotifier<VideoStudioState> {
     if (s == null || s.sourceFile == null || s.isProcessing || s.isGif) {
       return false;
     }
+
+    // Untouched source → straight file copy, keeping container/codec. The UI
+    // only offers this while hasComparableEdit is false, so nothing is lost.
+    if (format == ExportVideoFormat.original) {
+      final ext = s.originalExportExt ?? 'mp4';
+      final saved = await _export.saveVideo(s.sourceFile!,
+          defaultName: 'studio.$ext', extension: ext);
+      if (saved != null) await _addRecent(saved);
+      return saved != null;
+    }
+
     final webm = format == ExportVideoFormat.webm;
 
     // Apply ran and nothing changed since → sourceFile is already the fully

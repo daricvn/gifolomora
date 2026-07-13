@@ -237,7 +237,10 @@ class ImagesToGifController extends AsyncNotifier<ImagesToGifState> {
             error: 'Text overlay: ${textResult.error.message}'));
         return;
       }
+      // Step-1 dir (frame copies + base gif) now superseded — free it.
+      final previousGif = gif;
       gif = textResult.value;
+      await _ffmpeg.cleanJobAt(previousGif.parent.path);
     }
 
     // Step 3: optional optimize
@@ -255,7 +258,10 @@ class ImagesToGifController extends AsyncNotifier<ImagesToGifState> {
             error: 'Optimize: ${optResult.error.message}'));
         return;
       }
+      // Prior step's dir now superseded — free it.
+      final previousGif = gif;
       gif = optResult.value;
+      await _ffmpeg.cleanJobAt(previousGif.parent.path);
     }
 
     final s = state.valueOrNull ?? const ImagesToGifState();

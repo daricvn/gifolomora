@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'ffmpeg/ffmpeg_backend.dart';
 import 'ffmpeg/ffmpeg_factory.dart';
 import 'ffmpeg/ffmpeg_service.dart';
@@ -54,6 +55,45 @@ final nativeWindowChannelProvider = Provider<NativeWindowChannel>(
   (_) => NativeWindowChannel(),
   name: 'nativeWindowChannelProvider',
 );
+
+// ── App settings ───────────────────────────────────────────────────────────────
+
+/// Global user preferences (app-wide, not per-tool options).
+class AppSettings {
+  const AppSettings({this.softwareVideoPreview = false});
+
+  /// Windows: render the video preview through media_kit's software
+  /// (pixel-buffer) path instead of the default D3D11/ANGLE hardware path.
+  /// Works around intermittent black flashes from the plugin's unsynchronized
+  /// shared-texture pipeline on some GPUs. Costs CPU and caps the preview
+  /// texture at 1080p. The player is configured once at preview mount, so a
+  /// change applies the next time the editor is opened.
+  final bool softwareVideoPreview;
+}
+
+final appSettingsProvider =
+    AsyncNotifierProvider<AppSettingsNotifier, AppSettings>(
+  AppSettingsNotifier.new,
+  name: 'appSettingsProvider',
+);
+
+class AppSettingsNotifier extends AsyncNotifier<AppSettings> {
+  static const _kSoftwareVideoPreview = 'software_video_preview';
+
+  @override
+  Future<AppSettings> build() async {
+    final prefs = await SharedPreferences.getInstance();
+    return AppSettings(
+      softwareVideoPreview: prefs.getBool(_kSoftwareVideoPreview) ?? false,
+    );
+  }
+
+  Future<void> setSoftwareVideoPreview(bool value) async {
+    state = AsyncData(AppSettings(softwareVideoPreview: value));
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kSoftwareVideoPreview, value);
+  }
+}
 
 // ── Recents ────────────────────────────────────────────────────────────────────
 
