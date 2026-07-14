@@ -12,6 +12,7 @@ import '../../_shared/widgets/file_drop_zone.dart';
 import '../../_shared/widgets/local_palettes_toggle.dart';
 import '../../_shared/widgets/media_preview.dart';
 import '../../_shared/widgets/option_slider.dart';
+import '../../../l10n/app_localizations.dart';
 import '../controller/optimize_controller.dart';
 
 class OptimizeScreen extends ConsumerWidget {
@@ -22,6 +23,7 @@ class OptimizeScreen extends ConsumerWidget {
     final state =
         ref.watch(optimizeControllerProvider).valueOrNull ?? const OptimizeState();
     final ctrl = ref.read(optimizeControllerProvider.notifier);
+    final l10n = AppLocalizations.of(context)!;
 
     Future<void> doExport() async {
       await ExportBottomSheet.show(
@@ -30,7 +32,7 @@ class OptimizeScreen extends ConsumerWidget {
           final ok = await ctrl.exportGif();
           if (!ok && context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Export cancelled')),
+              SnackBar(content: Text(l10n.commonExportCancelled)),
             );
           }
         },
@@ -39,7 +41,7 @@ class OptimizeScreen extends ConsumerWidget {
 
     return GradientScaffold(
       appBar: GlassAppBar(
-        title: 'Optimize GIF',
+        title: l10n.optimizeAppBarTitle,
         leading: Padding(
           padding: const EdgeInsets.only(left: 16),
           child: Align(
@@ -63,22 +65,22 @@ class OptimizeScreen extends ConsumerWidget {
         ),
         children: [
           // ── Step 1: Pick GIF ───────────────────────────────────────────
-          const _SectionHeader(number: 1, title: 'Select GIF'),
+          _SectionHeader(number: 1, title: l10n.commonSelectGif),
           const SizedBox(height: 12),
           if (state.isProbing)
             GlassContainer(
               borderRadius: 20,
               padding: const EdgeInsets.symmetric(vertical: 32),
-              child: const Column(children: [
-                CircularProgressIndicator(color: AppColors.accentB),
-                SizedBox(height: 12),
-                Text('Reading file…',
-                    style: TextStyle(color: AppColors.textLo, fontSize: 13)),
+              child: Column(children: [
+                const CircularProgressIndicator(color: AppColors.accentB),
+                const SizedBox(height: 12),
+                Text(l10n.commonReadingFile,
+                    style: const TextStyle(color: AppColors.textLo, fontSize: 13)),
               ]),
             )
           else if (!state.hasInput)
             FileDropZone(
-              hint: 'Tap to select GIF',
+              hint: l10n.commonTapToSelectGif,
               icon: Icons.compress_rounded,
               allowedExtensions: const ['gif'],
               onFilesSelected: (files) {
@@ -96,14 +98,14 @@ class OptimizeScreen extends ConsumerWidget {
           // ── Step 2: Options ────────────────────────────────────────────
           if (state.hasInput && !state.isProbing) ...[
             const SizedBox(height: 24),
-            const _SectionHeader(number: 2, title: 'Compression'),
+            _SectionHeader(number: 2, title: l10n.optimizeStepCompression),
             const SizedBox(height: 12),
             GlassContainer(
               borderRadius: 20,
               child: Column(
                 children: [
                   OptionSlider(
-                    label: 'Colors',
+                    label: l10n.optimizeColorsLabel,
                     value: state.colors.toDouble(),
                     min: 16,
                     max: 256,
@@ -115,13 +117,13 @@ class OptimizeScreen extends ConsumerWidget {
                   const SizedBox(height: 8),
                   const Divider(color: AppColors.glassStroke, height: 24),
                   OptionSlider(
-                    label: 'Lossy',
+                    label: l10n.optimizeLossyLabel,
                     value: state.lossy.toDouble(),
                     min: 0,
                     max: 80,
                     divisions: 16,
                     unit: '',
-                    displayValue: state.lossy == 0 ? 'Off' : '${state.lossy}',
+                    displayValue: state.lossy == 0 ? l10n.commonOff : '${state.lossy}',
                     onChanged: (v) => ctrl.setLossy(v.round()),
                   ),
                   const Divider(color: AppColors.glassStroke, height: 24),
@@ -140,7 +142,7 @@ class OptimizeScreen extends ConsumerWidget {
 
             // ── Step 3: Preview / Generate ─────────────────────────────
             const SizedBox(height: 24),
-            const _SectionHeader(number: 3, title: 'Preview'),
+            _SectionHeader(number: 3, title: l10n.commonPreview),
             const SizedBox(height: 12),
             if (state.isProcessing)
               _ProgressCard(
@@ -153,7 +155,7 @@ class OptimizeScreen extends ConsumerWidget {
                   OutlinedButton.icon(
                     onPressed: ctrl.generate,
                     icon: const Icon(Icons.refresh_rounded, size: 16),
-                    label: const Text('Regenerate'),
+                    label: Text(l10n.commonRegenerate),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.textLo,
                       side: const BorderSide(color: AppColors.glassStroke),
@@ -219,19 +221,20 @@ class _FrameDropSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const presets = <(String, int)>[
-      ('Keep all', 0),
-      ('1 / 4', 4),
-      ('1 / 3', 3),
-      ('1 / 2', 2),
+    final l10n = AppLocalizations.of(context)!;
+    final presets = <(String, int)>[
+      (l10n.optimizeKeepAll, 0),
+      (l10n.optimizeFrameDropQuarter, 4),
+      (l10n.optimizeFrameDropThird, 3),
+      (l10n.optimizeFrameDropHalf, 2),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Padding(
-          padding: EdgeInsets.only(bottom: 10),
-          child: Text('Remove frames',
-              style: TextStyle(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Text(l10n.optimizeRemoveFrames,
+              style: const TextStyle(
                   color: AppColors.textHi,
                   fontSize: 14,
                   fontWeight: FontWeight.w600)),
@@ -320,6 +323,7 @@ class _ProgressCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 20,
       child: Column(
@@ -339,14 +343,14 @@ class _ProgressCard extends StatelessWidget {
             children: [
               Text(
                 progress != null
-                    ? '${(progress! * 100).round()}%  processing…'
-                    : 'Processing…',
+                    ? l10n.commonProcessingPercent((progress! * 100).round())
+                    : l10n.commonProcessing,
                 style: const TextStyle(color: AppColors.textLo, fontSize: 13),
               ),
               TextButton(
                 onPressed: onCancel,
-                child: const Text('Cancel',
-                    style: TextStyle(color: AppColors.accentC)),
+                child: Text(l10n.commonCancel,
+                    style: const TextStyle(color: AppColors.accentC)),
               ),
             ],
           ),
@@ -383,7 +387,7 @@ class _GenerateButton extends StatelessWidget {
                   size: 20),
               const SizedBox(width: 8),
               Text(
-                'Generate Preview',
+                AppLocalizations.of(context)!.commonGeneratePreview,
                 style: TextStyle(
                   color: onTap != null ? Colors.white : AppColors.textLo,
                   fontSize: 15,
@@ -446,8 +450,8 @@ class _ExportBar extends StatelessWidget {
           child: ElevatedButton.icon(
             onPressed: onExport,
             icon: const Icon(Icons.save_alt_rounded, size: 18, color: Colors.white),
-            label: const Text('Export GIF',
-                style: TextStyle(
+            label: Text(AppLocalizations.of(context)!.commonExportGif,
+                style: const TextStyle(
                     color: Colors.white,
                     fontSize: 15,
                     fontWeight: FontWeight.w700)),

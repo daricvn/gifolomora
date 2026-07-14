@@ -5,6 +5,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
 import '../../../core/utils/font_registry.dart';
 import '../../../core/widgets/glass/glass_container.dart';
+import '../../../l10n/app_localizations.dart';
 import '../../text_overlay/model/text_item.dart';
 import 'option_slider.dart';
 
@@ -71,6 +72,7 @@ class _TextFormatCardState extends State<TextFormatCard> {
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 20,
       child: Column(
@@ -82,7 +84,7 @@ class _TextFormatCardState extends State<TextFormatCard> {
             style: const TextStyle(color: AppColors.textHi, fontSize: 14),
             maxLines: 1,
             decoration: InputDecoration(
-              hintText: 'Text…',
+              hintText: l10n.textOverlayTextFieldHint,
               hintStyle: const TextStyle(color: AppColors.textLo, fontSize: 14),
               filled: true,
               fillColor: AppColors.glassTint,
@@ -104,8 +106,8 @@ class _TextFormatCardState extends State<TextFormatCard> {
             ),
           ),
           const SizedBox(height: 14),
-          const Text('Style',
-              style: TextStyle(color: AppColors.textLo, fontSize: 12)),
+          Text(l10n.textOverlayStyleLabel,
+              style: const TextStyle(color: AppColors.textLo, fontSize: 12)),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -120,8 +122,8 @@ class _TextFormatCardState extends State<TextFormatCard> {
             ],
           ),
           const SizedBox(height: 14),
-          const Text('Font',
-              style: TextStyle(color: AppColors.textLo, fontSize: 12)),
+          Text(l10n.textOverlayFontLabel,
+              style: const TextStyle(color: AppColors.textLo, fontSize: 12)),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -137,7 +139,7 @@ class _TextFormatCardState extends State<TextFormatCard> {
           ),
           const SizedBox(height: 14),
           OptionSlider(
-            label: 'Font Size',
+            label: l10n.commonFontSizeLabel,
             value: item.fontSize.toDouble(),
             min: 12,
             max: 160,
@@ -150,7 +152,7 @@ class _TextFormatCardState extends State<TextFormatCard> {
             children: [
               Expanded(
                 child: _ColorButton(
-                  label: 'Fill',
+                  label: l10n.textOverlayFillLabel,
                   hex: item.fontColor,
                   onTap: () => _pickColor(true),
                 ),
@@ -158,7 +160,7 @@ class _TextFormatCardState extends State<TextFormatCard> {
               const SizedBox(width: 12),
               Expanded(
                 child: _ColorButton(
-                  label: 'Stroke',
+                  label: l10n.textOverlayStrokeLabel,
                   hex: item.strokeColor,
                   onTap: () => _pickColor(false),
                 ),
@@ -167,13 +169,13 @@ class _TextFormatCardState extends State<TextFormatCard> {
           ),
           const SizedBox(height: 14),
           OptionSlider(
-            label: 'Stroke Width',
+            label: l10n.textOverlayStrokeWidthLabel,
             value: item.strokeWidth.toDouble(),
             min: 0,
             max: 12,
             divisions: 12,
             displayValue:
-                item.strokeWidth == 0 ? 'Off' : '${item.strokeWidth}px',
+                item.strokeWidth == 0 ? l10n.commonOff : '${item.strokeWidth}px',
             onChanged: (v) => widget.onStrokeWidth(v.round()),
           ),
         ],
@@ -333,6 +335,7 @@ class TextLayersPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 20,
       child: Column(
@@ -340,8 +343,8 @@ class TextLayersPanel extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Text('Text Layers',
-                  style: TextStyle(
+              Text(l10n.textOverlayLayersTitle,
+                  style: const TextStyle(
                       color: AppColors.textHi,
                       fontSize: 14,
                       fontWeight: FontWeight.w700)),
@@ -354,8 +357,8 @@ class TextLayersPanel extends StatelessWidget {
           ),
           if (items.isEmpty) ...[
             const SizedBox(height: 12),
-            const Text('No text yet. Tap “Add” to create one.',
-                style: TextStyle(color: AppColors.textLo, fontSize: 13)),
+            Text(l10n.textOverlayNoTextYet,
+                style: const TextStyle(color: AppColors.textLo, fontSize: 13)),
           ] else
             for (final item in items) ...[
               const SizedBox(height: 8),
@@ -395,7 +398,7 @@ class _AddButton extends StatelessWidget {
             Icon(Icons.add_rounded,
                 size: 16, color: enabled ? Colors.white : AppColors.textLo),
             const SizedBox(width: 4),
-            Text('Add',
+            Text(AppLocalizations.of(context)!.textOverlayAdd,
                 style: TextStyle(
                   color: enabled ? Colors.white : AppColors.textLo,
                   fontSize: 13,
@@ -422,7 +425,9 @@ class _TextRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = item.text.trim().isEmpty ? '(empty)' : item.text;
+    final label = item.text.trim().isEmpty
+        ? AppLocalizations.of(context)!.textOverlayEmptyPlaceholder
+        : item.text;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -536,8 +541,8 @@ Future<String?> showTextColorWheel(BuildContext context, String initialHex) {
                         borderRadius: BorderRadius.circular(14),
                       ),
                     ),
-                    child: const Text('Done',
-                        style: TextStyle(
+                    child: Text(AppLocalizations.of(context)!.commonDone,
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 15,
                           fontWeight: FontWeight.w700,

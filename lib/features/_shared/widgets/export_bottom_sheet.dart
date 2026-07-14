@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_gradients.dart';
 import '../../../core/widgets/glass/glass_container.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Shows an export bottom sheet and calls [onExport] when user confirms.
 /// Shows progress overlay while exporting.
@@ -56,6 +57,7 @@ class _ExportBottomSheetState extends State<ExportBottomSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -74,19 +76,19 @@ class _ExportBottomSheetState extends State<ExportBottomSheet> {
                 ),
               ),
               const SizedBox(height: 20),
-              const Text(
-                'Export GIF',
-                style: TextStyle(
+              Text(
+                l10n.commonExportGif,
+                style: const TextStyle(
                   color: AppColors.textHi,
                   fontSize: 20,
                   fontWeight: FontWeight.w700,
                 ),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'You\'ll be asked to choose where to save the file.',
+              Text(
+                l10n.commonSaveLocationHint,
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.textLo, fontSize: 14),
+                style: const TextStyle(color: AppColors.textLo, fontSize: 14),
               ),
               if (_error != null) ...[
                 const SizedBox(height: 12),
@@ -98,13 +100,13 @@ class _ExportBottomSheetState extends State<ExportBottomSheet> {
               ],
               const SizedBox(height: 24),
               _exporting
-                  ? const Column(
+                  ? Column(
                       children: [
-                        CircularProgressIndicator(color: AppColors.accentB),
-                        SizedBox(height: 12),
+                        const CircularProgressIndicator(color: AppColors.accentB),
+                        const SizedBox(height: 12),
                         Text(
-                          'Processing…',
-                          style: TextStyle(color: AppColors.textLo, fontSize: 13),
+                          l10n.commonProcessing,
+                          style: const TextStyle(color: AppColors.textLo, fontSize: 13),
                         ),
                       ],
                     )
@@ -125,9 +127,9 @@ class _ExportBottomSheetState extends State<ExportBottomSheet> {
                               borderRadius: BorderRadius.circular(14),
                             ),
                           ),
-                          child: const Text(
-                            'Export & Save',
-                            style: TextStyle(
+                          child: Text(
+                            l10n.sharedExportAndSave,
+                            style: const TextStyle(
                               color: Colors.white,
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
@@ -139,9 +141,9 @@ class _ExportBottomSheetState extends State<ExportBottomSheet> {
               const SizedBox(height: 8),
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text(
-                  'Cancel',
-                  style: TextStyle(color: AppColors.textLo),
+                child: Text(
+                  l10n.commonCancel,
+                  style: const TextStyle(color: AppColors.textLo),
                 ),
               ),
             ],

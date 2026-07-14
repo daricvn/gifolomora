@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/glass/glass_container.dart';
+import '../../../l10n/app_localizations.dart';
 
 class FrameStrip extends StatelessWidget {
   const FrameStrip({
@@ -19,6 +20,7 @@ class FrameStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 16,
       padding: const EdgeInsets.all(12),
@@ -29,7 +31,9 @@ class FrameStrip extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '${frames.length} frame${frames.length == 1 ? '' : 's'}',
+                frames.length == 1
+                    ? l10n.imagesFrameCountOne(frames.length)
+                    : l10n.imagesFrameCountOther(frames.length),
                 style: const TextStyle(
                   color: AppColors.textHi,
                   fontSize: 14,
@@ -39,9 +43,9 @@ class FrameStrip extends StatelessWidget {
               TextButton.icon(
                 onPressed: onAddMore,
                 icon: const Icon(Icons.add, size: 16, color: AppColors.accentB),
-                label: const Text(
-                  'Add more',
-                  style: TextStyle(color: AppColors.accentB, fontSize: 13),
+                label: Text(
+                  l10n.imagesAddMore,
+                  style: const TextStyle(color: AppColors.accentB, fontSize: 13),
                 ),
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

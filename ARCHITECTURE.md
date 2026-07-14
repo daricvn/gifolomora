@@ -57,9 +57,10 @@ lib/
       widgets/      # FileDropZone, MediaPreview, OptionSlider, ExportBottomSheet,
                     # TextOverlayControls (TextFormatCard, TextLayersPanel, showTextColorWheel —
                     #   shared between Text Overlay screen and Video Studio)
-    <tool>/         # view/ + controller/ (+ widgets/) per tool — 7 tools (Video Studio owns widgets/video_trim_slider.dart)
+    <tool>/         # view/ + controller/ (+ widgets/) per tool — 8 tools (Video Studio owns widgets/video_trim_slider.dart)
     about/          # static about screen
-    settings/       # default-quality sliders + clear-history
+    settings/       # language picker + Windows-only software-preview toggle
+  l10n/             # generated AppLocalizations + .arb sources (en/de/fr/ja/vi/zh)
 ```
 
 > **No `_shared/controller/process_controller.dart`.** Earlier plans called for a shared
@@ -231,6 +232,10 @@ bakeVideoToGif({ input, cropX/Y/W/H, scaleW, speedFactor, fps, startMs, duration
 editGif({ input, cropX/Y/W/H, scaleW, speedFactor, startMs, durationMs,
           overlayText, fps, loopCount, boomerang, ... })
 cleanJobAt(String jobDir)         // frees an arbitrary temp dir (e.g. baked-GIF source)
+
+// WebM Converter
+supportsAv1()                     // cached probe: does the backend carry libaom-av1?
+convertToWebm({ input, av1, maxWidth, alpha, crf, cpuUsed, onProgress, ... })
 ```
 
 Windows resolves `gm_shim.dll` (+ 25 companion FFmpeg/codec/freetype DLLs) relative to
@@ -320,6 +325,8 @@ Service providers: `ffmpegBackendProvider`, `tempFileServiceProvider`, `ffmpegSe
 
 State notifiers:
 - `settingsProvider` (`SettingsNotifier`) — default fps/width/colors/lossy from shared_preferences
+- `appSettingsProvider` (`AppSettingsNotifier`) — app-wide prefs: `softwareVideoPreview` (Windows
+  media_kit render path) and `localeCode` (l10n override, null = system locale)
 - `recentsProvider` (`RecentsNotifier`) — last 10 exports; every tool calls `.add()` after a
   successful export, surfaced in the home `RecentsStrip`
 
@@ -334,8 +341,10 @@ options, last generated preview/output, `FfmpegProgress?`, processing flag, and 
 
 | Category | Tools | Home treatment |
 |---|---|---|
-| `create` | Video Studio, Images → GIF | large featured cards (`FeaturedToolCard`) |
-| `refine` | Resize, Crop, Text Overlay, Optimize, Effects | compact grid (`ToolCard`) |
+| `create` | Video Studio, Images → GIF, Screen Record (`windowsOnly`) | large featured cards (`FeaturedToolCard`) |
+| `refine` | Resize, Crop, Text Overlay, Optimize, Effects, To WebM | compact grid (`ToolCard`) |
+
+`ToolEntry.label`/`.description` are no longer static fields — `ToolEntryL10n` (extension in `tool_catalog.dart`) resolves them per-`BuildContext` via a `switch` on `id`, keyed to `AppLocalizations` getters (e.g. `toolVideoStudioLabel`). Adding a tool means adding both the `ToolEntry` and its two `switch` cases.
 
 Video Studio handles both video **and** GIF source files in one screen:
 - `EditStage.video` — non-destructive layers (crop/resize/speed/trim/text/volume); `makeGif()` bakes them → GIF.
@@ -350,8 +359,10 @@ Video Studio handles both video **and** GIF source files in one screen:
 - `VideoStudioState.volume` — audio gain 0–2.0; baked into encode's audio filter; ignored for GIF.
 
 Routes: `/video-studio`, `/images-to-gif`, `/resize`, `/crop`, `/text-overlay`, `/optimize`,
-`/effects`, `/screen-record`, plus `/settings` and `/about`. All non-home routes use a fade +
-4%-slide transition. The recording indicator is **not** a route — see Screen Record below.
+`/effects`, `/screen-record`, `/to-webm`, plus `/settings` and `/about`. All non-home routes use a
+fade + 4%-slide transition. `/settings` has no platform redirect (available on Android and
+Windows); only its software-preview card is `Platform.isWindows`-gated inline. The recording
+indicator is **not** a route — see Screen Record below.
 
 Every tool screen shares the 4-step skeleton:
 
@@ -433,6 +444,55 @@ Every tool screen shares the 4-step skeleton:
 
 ---
 
+## WebM Converter
+
+`lib/features/webm_converter/` — batch video/GIF → WebM conversion, separate from Video Studio's
+`videoEdit`/GIF pipelines (no crop/trim/text, just codec transcode). `WebmConverterController`
+extends `AsyncNotifier<WebmConverterState>`; `WebmConverterState.items: List<WebmItem>` drives
+queue UI, each with its own `WebmItemStatus` (`queued → converting → done/error`) and progress
+fraction — `isBatch` (items.length > 1) switches the UI between single-file and batch layouts.
+
+Shared options apply to the whole queue: `av1` (bool, gated behind `av1Supported` which caches
+`FfmpegService.supportsAv1()` — probes for `libaom-av1` once; hidden on backends that never
+bundled it, e.g. Android's `ffmpeg_kit_flutter_new`), `maxWidth` (null = original), `alpha` (GIF
+transparency — forces VP9 since AV1 has no alpha support, `setAlpha(true)` clears `av1`). Per-item
+`WebmSpeed` (`fast | balanced | best`) maps to a codec-specific `cpuUsed` value — AV1 is slower per
+step than VP9 at the same UX label, so its scale sits higher for comparable wall-clock time.
+`FfmpegCommand.toWebm`/`_webmEncoderArgs` (`ffmpeg_command.dart`) is the shared VP9/AV1 arg block;
+`FfmpegService`'s `webm`/`webmCrf`/`webmCpuUsed` params reuse the same block for the future
+video-with-webm-output path, since WebM only admits VP8/VP9/AV1 (no h264 candidate list). Options
+persist to `shared_preferences` (`webm_av1`/`webm_max_width`/`webm_alpha`); changing them resets
+any already-`done` item back to `queued` and frees its output. `exportBatch()` →
+`ExportService.saveWebmBatch()` writes every finished item to a picked directory in one go.
+
+---
+
+## Localization (l10n)
+
+`flutter_localizations` + `intl` (Flutter's standard gen-l10n pipeline, `generate: true` in
+`pubspec.yaml`, config in `l10n.yaml`: `arb-dir: lib/l10n`, template `app_en.arb`). Source strings
+live in `lib/l10n/app_<code>.arb`; `flutter gen-l10n` (runs automatically before `flutter build`/
+`flutter run`, or manually via `flutter gen-l10n`) emits `app_localizations.dart` +
+per-locale `app_localizations_<code>.dart` — all committed, not gitignored, since the repo has no
+`build_runner` codegen step to regenerate them automatically.
+
+Supported locales: `en` (template), `de`, `fr`, `ja` (arb file named `app_jp.arb`, class/locale is
+`ja`), `vi`, `zh`.
+
+- `AppSettings.localeCode` (nullable `String`, `providers.dart`) — null = follow system locale.
+  Persisted to `shared_preferences` (`locale_code`) via `AppSettingsNotifier.setLocale()`.
+- `GifolomoraApp` (`app.dart`) reads `appSettingsProvider` and passes `locale: localeCode == null
+  ? null : Locale(localeCode)` + `AppLocalizations.localizationsDelegates`/`.supportedLocales` to
+  `MaterialApp.router`.
+- Settings screen's language card (`_LanguageDropdown`) shows autonyms + flag emoji per locale
+  (`_kLanguages` map) plus a "System default" entry that calls `setLocale(null)`.
+- Access pattern app-wide: `AppLocalizations.of(context)!.someKey` — every screen/widget that
+  shows user-facing text takes a `BuildContext` for this; static string constants (`ToolEntry`
+  labels, dialog copy) were converted to `BuildContext`-taking methods/getters (see
+  `ToolEntryL10n` above) since `.arb`-generated getters can't be `const`.
+
+---
+
 ## Export flow (locked decision)
 
 Export is always **user-driven**: the full job writes to a temp job dir via `TempFileService`,
@@ -476,6 +536,7 @@ Separate `package.json`; the `web/` directory is untracked (`??` in git status).
 |---|---|---|
 | `flutter_riverpod` | 2.6.1 | state (manual providers) |
 | `go_router` | 14.6.3 | routing |
+| `flutter_localizations` (sdk) + `intl` | — / 0.20.2 | l10n (`gen-l10n`, 6 locales) |
 | `ffmpeg_kit_flutter_new` | 4.2.1 | Android FFmpeg backend |
 | `file_picker` | 8.1.2 | pick + saveFile dialog |
 | `permission_handler` | 11.3.1 | Android scoped storage |

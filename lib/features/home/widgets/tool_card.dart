@@ -25,7 +25,7 @@ class ToolCard extends StatelessWidget {
           _IconChip(icon: entry.icon, color: entry.accentColor),
           const SizedBox(height: 14),
           Text(
-            entry.label,
+            entry.label(context),
             style: const TextStyle(
               color: AppColors.textHi,
               fontSize: 14.5,
@@ -35,7 +35,7 @@ class ToolCard extends StatelessWidget {
           ),
           const SizedBox(height: 5),
           Text(
-            entry.description,
+            entry.description(context),
             style: const TextStyle(
               color: AppColors.textLo,
               fontSize: 11.5,

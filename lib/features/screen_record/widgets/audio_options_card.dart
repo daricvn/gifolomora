@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../core/services/record/native_window_channel.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/glass/glass_container.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Two glass switches — System audio / Microphone. Values persist via the
 /// controller immediately on toggle; device-name subtitles are fetched once
@@ -54,21 +55,22 @@ class _AudioOptionsCardState extends State<AudioOptionsCard> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 20,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Audio',
-              style: TextStyle(
+          Text(l10n.recordAudio,
+              style: const TextStyle(
                   color: AppColors.textHi,
                   fontWeight: FontWeight.w700,
                   fontSize: 15)),
           const SizedBox(height: 12),
           _AudioSwitchRow(
             icon: Icons.speaker_rounded,
-            title: 'System audio',
-            subtitle: _speakerName ?? 'Default output device',
+            title: l10n.recordSystemAudio,
+            subtitle: _speakerName ?? l10n.recordDefaultOutputDevice,
             value: widget.systemAudioEnabled,
             onChanged: widget.onSystemAudioChanged,
           ),
@@ -77,10 +79,10 @@ class _AudioOptionsCardState extends State<AudioOptionsCard> {
           const SizedBox(height: 10),
           _AudioSwitchRow(
             icon: Icons.mic_rounded,
-            title: 'Microphone',
+            title: l10n.recordMicrophone,
             subtitle: _noMicDevice
-                ? 'No microphone found'
-                : (_micName ?? 'Default input device'),
+                ? l10n.recordNoMicFound
+                : (_micName ?? l10n.recordDefaultInputDevice),
             value: widget.micEnabled && !_noMicDevice,
             onChanged: _noMicDevice ? null : widget.onMicChanged,
           ),

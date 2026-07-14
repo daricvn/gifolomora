@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/services/record/record_settings_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/glass/glass_container.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Output video size chips — Original / 1080p / 720p / 480p. Persisted via
 /// the controller immediately on selection, same pattern as the audio
@@ -20,13 +21,14 @@ class OutputResolutionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 20,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Output size',
-              style: TextStyle(
+          Text(l10n.recordOutputSize,
+              style: const TextStyle(
                   color: AppColors.textHi,
                   fontWeight: FontWeight.w700,
                   fontSize: 15)),
@@ -37,7 +39,9 @@ class OutputResolutionCard extends StatelessWidget {
             children: RecordOutputResolution.values.map((r) {
               final selected = r == value;
               return ChoiceChip(
-                label: Text(r.label),
+                label: Text(r == RecordOutputResolution.original
+                    ? l10n.commonOriginal
+                    : r.label),
                 selected: selected,
                 onSelected: (_) => onChanged(r),
                 selectedColor: AppColors.accentA.withValues(alpha: 0.3),

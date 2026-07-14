@@ -3,6 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/glass/glass_container.dart';
+import '../../../l10n/app_localizations.dart';
 
 class FileDropZone extends StatefulWidget {
   const FileDropZone({
@@ -10,14 +11,16 @@ class FileDropZone extends StatefulWidget {
     required this.onFilesSelected,
     this.allowMultiple = false,
     this.allowedExtensions,
-    this.hint = 'Tap to select files',
+    this.hint,
     this.icon = Icons.upload_file_rounded,
   });
 
   final void Function(List<File>) onFilesSelected;
   final bool allowMultiple;
   final List<String>? allowedExtensions;
-  final String hint;
+
+  /// Null falls back to the localized default hint.
+  final String? hint;
   final IconData icon;
 
   @override
@@ -50,6 +53,7 @@ class _FileDropZoneState extends State<FileDropZone> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
@@ -69,7 +73,7 @@ class _FileDropZoneState extends State<FileDropZone> {
                 Icon(widget.icon, size: 48, color: AppColors.accentB),
                 const SizedBox(height: 12),
                 Text(
-                  widget.hint,
+                  widget.hint ?? l10n.sharedFileDropDefaultHint,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: AppColors.textLo,
@@ -80,7 +84,7 @@ class _FileDropZoneState extends State<FileDropZone> {
                 Text(
                   widget.allowedExtensions != null
                       ? widget.allowedExtensions!.map((e) => '.$e').join(', ')
-                      : 'Any file',
+                      : l10n.sharedFileDropAnyFile,
                   style: const TextStyle(
                     color: AppColors.textLo,
                     fontSize: 12,

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/glass/glass_container.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Displays a GIF or image file using Flutter's native decoder.
 class MediaPreview extends StatelessWidget {
@@ -51,7 +52,7 @@ class MediaPreview extends StatelessWidget {
                           color: AppColors.textLo, size: 48),
                       const SizedBox(height: 8),
                       Text(
-                        'Preview unavailable',
+                        AppLocalizations.of(context)!.sharedPreviewUnavailable,
                         style: const TextStyle(
                             color: AppColors.textLo, fontSize: 12),
                       ),

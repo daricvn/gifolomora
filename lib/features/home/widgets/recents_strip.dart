@@ -8,6 +8,7 @@ import '../../../core/services/recents/recents_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/common/section_header.dart';
 import '../../../core/widgets/glass/glass_container.dart';
+import '../../../l10n/app_localizations.dart';
 
 class RecentsStrip extends ConsumerWidget {
   const RecentsStrip({super.key});
@@ -16,6 +17,7 @@ class RecentsStrip extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final recents = ref.watch(recentsProvider).valueOrNull ?? [];
     if (recents.isEmpty) return const SizedBox.shrink();
+    final l10n = AppLocalizations.of(context)!;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -24,13 +26,13 @@ class RecentsStrip extends ConsumerWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 28, 4, 14),
           child: SectionHeader(
-            overline: 'History',
-            title: 'Recent exports',
+            overline: l10n.homeRecentsOverline,
+            title: l10n.homeRecentsTitle,
             trailing: TextButton(
               onPressed: () => ref.read(recentsProvider.notifier).clear(),
-              child: const Text(
-                'Clear',
-                style: TextStyle(color: AppColors.textLo, fontSize: 13),
+              child: Text(
+                l10n.commonClear,
+                style: const TextStyle(color: AppColors.textLo, fontSize: 13),
               ),
             ),
           ),
@@ -65,12 +67,13 @@ class _RecentCardState extends State<_RecentCard> {
 
   String get _fileName => widget.item.path.split(Platform.pathSeparator).last;
 
-  String _timeAgo(DateTime ts) {
+  String _timeAgo(BuildContext context, DateTime ts) {
+    final l10n = AppLocalizations.of(context)!;
     final diff = DateTime.now().difference(ts);
-    if (diff.inSeconds < 60) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
+    if (diff.inSeconds < 60) return l10n.homeTimeJustNow;
+    if (diff.inMinutes < 60) return l10n.homeTimeMinutesAgo(diff.inMinutes);
+    if (diff.inHours < 24) return l10n.homeTimeHoursAgo(diff.inHours);
+    return l10n.homeTimeDaysAgo(diff.inDays);
   }
 
   @override
@@ -122,7 +125,7 @@ class _RecentCardState extends State<_RecentCard> {
                       ),
                       const Spacer(),
                       Text(
-                        _timeAgo(widget.item.timestamp),
+                        _timeAgo(context, widget.item.timestamp),
                         style: const TextStyle(
                           color: AppColors.textLo,
                           fontSize: 11,

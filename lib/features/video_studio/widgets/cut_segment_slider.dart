@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/services/ffmpeg/ffmpeg_command.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../l10n/app_localizations.dart';
 
 enum _CutHandle { pendingStart, pendingEnd, seek }
 
@@ -85,12 +86,12 @@ class _CutSegmentSliderState extends State<CutSegmentSlider> {
   @override
   Widget build(BuildContext context) {
     if (widget.totalMs <= 0) {
-      return const SizedBox(
+      return SizedBox(
         height: 72,
         child: Center(
           child: Text(
-            'Duration unknown — cut unavailable',
-            style: TextStyle(color: AppColors.textLo, fontSize: 12),
+            AppLocalizations.of(context)!.studioCutUnavailable,
+            style: const TextStyle(color: AppColors.textLo, fontSize: 12),
           ),
         ),
       );

@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../l10n/app_localizations.dart';
 
 enum _TrimHandle { start, end, seek }
 
@@ -70,12 +71,12 @@ class _VideoTrimSliderState extends State<VideoTrimSlider> {
   @override
   Widget build(BuildContext context) {
     if (widget.totalMs <= 0) {
-      return const SizedBox(
+      return SizedBox(
         height: 72,
         child: Center(
           child: Text(
-            'Duration unknown — trim unavailable',
-            style: TextStyle(color: AppColors.textLo, fontSize: 12),
+            AppLocalizations.of(context)!.studioTrimUnavailable,
+            style: const TextStyle(color: AppColors.textLo, fontSize: 12),
           ),
         ),
       );

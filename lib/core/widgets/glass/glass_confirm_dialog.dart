@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_colors.dart';
+import '../../../l10n/app_localizations.dart';
 import 'glass_button.dart';
 import 'glass_container.dart';
 
@@ -12,10 +13,12 @@ class GlassConfirmDialog {
     BuildContext context, {
     required String title,
     required String message,
-    String cancelLabel = 'Cancel',
+    String? cancelLabel,
     required String confirmLabel,
     bool isDestructive = false,
   }) {
+    final resolvedCancelLabel =
+        cancelLabel ?? AppLocalizations.of(context)!.commonCancel;
     return showDialog<bool>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.5),
@@ -50,7 +53,7 @@ class GlassConfirmDialog {
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       GlassButton(
-                        label: cancelLabel,
+                        label: resolvedCancelLabel,
                         borderRadius: 12,
                         onPressed: () => Navigator.of(context).pop(false),
                       ),

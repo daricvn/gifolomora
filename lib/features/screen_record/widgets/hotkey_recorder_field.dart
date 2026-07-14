@@ -4,6 +4,7 @@ import 'package:hotkey_manager/hotkey_manager.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/common/app_toast.dart';
 import '../../../core/widgets/glass/glass_container.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// `HotKeyVirtualView` from `hotkey_manager` hardcodes macOS glyphs
 /// (⌃ ⇧ ⌥ ⊞) for modifier keys on every platform. This feature is
@@ -100,6 +101,7 @@ class HotkeyRecorderField extends StatelessWidget {
       return;
     }
     HotKey? recorded;
+    final l10n = AppLocalizations.of(context)!;
     try {
       await showDialog<void>(
         context: context,
@@ -109,7 +111,7 @@ class HotkeyRecorderField extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
             side: const BorderSide(color: AppColors.glassStroke),
           ),
-          title: Text('Press keys for "$label"',
+          title: Text(l10n.recordPressKeysFor(label),
               style: const TextStyle(color: AppColors.textHi, fontSize: 15)),
           content: StatefulBuilder(
             builder: (context, setDialogState) {
@@ -142,8 +144,8 @@ class HotkeyRecorderField extends StatelessWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel',
-                  style: TextStyle(color: AppColors.textLo)),
+              child: Text(l10n.commonCancel,
+                  style: const TextStyle(color: AppColors.textLo)),
             ),
             TextButton(
               onPressed: () async {
@@ -152,12 +154,11 @@ class HotkeyRecorderField extends StatelessWidget {
                 if (k == null) return;
                 final ok = await onSave(k);
                 if (!ok && context.mounted) {
-                  AppToast.error(context,
-                      'That combo conflicts with another Screen Record hotkey, or is already taken by another app.');
+                  AppToast.error(context, l10n.recordHotkeyConflict);
                 }
               },
-              child: const Text('Save',
-                  style: TextStyle(color: AppColors.accentB)),
+              child: Text(l10n.recordSave,
+                  style: const TextStyle(color: AppColors.accentB)),
             ),
           ],
         ),
@@ -187,7 +188,7 @@ class HotkeyRecorderField extends StatelessWidget {
             icon: const Icon(Icons.edit_rounded,
                 size: 16, color: AppColors.textLo),
             onPressed: () => _openRecorder(context),
-            tooltip: 'Edit hotkey',
+            tooltip: AppLocalizations.of(context)!.recordEditHotkeyTooltip,
           ),
         ],
       ),

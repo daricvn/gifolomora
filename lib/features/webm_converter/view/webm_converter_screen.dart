@@ -12,6 +12,7 @@ import '../../../core/widgets/glass/glass_app_bar.dart';
 import '../../../core/widgets/glass/glass_container.dart';
 import '../../_shared/widgets/file_drop_zone.dart';
 import '../../_shared/widgets/option_slider.dart';
+import '../../../l10n/app_localizations.dart';
 import '../controller/webm_converter_controller.dart';
 
 const _videoExtensions = ['mp4', 'mov', 'mkv', 'avi', 'm4v', 'webm'];
@@ -25,12 +26,16 @@ class WebmConverterScreen extends ConsumerWidget {
         ref.watch(webmConverterControllerProvider).valueOrNull ??
             const WebmConverterState();
     final ctrl = ref.read(webmConverterControllerProvider.notifier);
+    final l10n = AppLocalizations.of(context)!;
 
     Future<void> pick(List<File> files) async {
       final rejected = await ctrl.addFiles(files);
       if (rejected > 0 && context.mounted) {
-        AppToast.info(context,
-            '$rejected file${rejected == 1 ? '' : 's'} skipped — 20 max per batch');
+        AppToast.info(
+            context,
+            rejected == 1
+                ? l10n.webmRejectedToastOne(rejected)
+                : l10n.webmRejectedToastOther(rejected));
       }
     }
 
@@ -39,9 +44,9 @@ class WebmConverterScreen extends ConsumerWidget {
         final ok = await ctrl.exportSingle();
         if (context.mounted) {
           if (ok) {
-            AppToast.success(context, 'Saved');
+            AppToast.success(context, l10n.webmSavedToast);
           } else {
-            AppToast.error(context, 'Export cancelled');
+            AppToast.error(context, l10n.commonExportCancelled);
           }
         }
         return;
@@ -49,16 +54,17 @@ class WebmConverterScreen extends ConsumerWidget {
       final n = await ctrl.exportBatch();
       if (context.mounted) {
         if (n != null) {
-          AppToast.success(context, 'Exported $n file${n == 1 ? '' : 's'}');
+          AppToast.success(
+              context, n == 1 ? l10n.webmExportedToastOne(n) : l10n.webmExportedToastOther(n));
         } else {
-          AppToast.error(context, 'Export cancelled');
+          AppToast.error(context, l10n.commonExportCancelled);
         }
       }
     }
 
     return GradientScaffold(
       appBar: GlassAppBar(
-        title: 'To WebM',
+        title: l10n.webmAppBarTitle,
         leading: Padding(
           padding: const EdgeInsets.only(left: 16),
           child: Align(
@@ -82,10 +88,10 @@ class WebmConverterScreen extends ConsumerWidget {
           100,
         ),
         children: [
-          const _SectionHeader(number: 1, title: 'Select files'),
+          _SectionHeader(number: 1, title: l10n.webmStepSelectFiles),
           const SizedBox(height: 12),
           FileDropZone(
-            hint: 'Drop or tap to select videos/GIFs (max 20)',
+            hint: l10n.webmDropHint,
             icon: Icons.movie_filter_rounded,
             allowMultiple: true,
             allowedExtensions: const [..._videoExtensions, 'gif'],
@@ -94,7 +100,7 @@ class WebmConverterScreen extends ConsumerWidget {
 
           if (state.items.isNotEmpty) ...[
             const SizedBox(height: 24),
-            const _SectionHeader(number: 2, title: 'Options'),
+            _SectionHeader(number: 2, title: l10n.commonOptions),
             const SizedBox(height: 12),
             _OptionsCard(state: state, ctrl: ctrl),
 
@@ -102,11 +108,11 @@ class WebmConverterScreen extends ConsumerWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const _SectionHeader(number: 3, title: 'Convert'),
+                _SectionHeader(number: 3, title: l10n.webmStepConvert),
                 TextButton(
                   onPressed: ctrl.clear,
-                  child: const Text('Clear all',
-                      style: TextStyle(color: AppColors.textLo)),
+                  child: Text(l10n.commonClearAll,
+                      style: const TextStyle(color: AppColors.textLo)),
                 ),
               ],
             ),
@@ -173,20 +179,21 @@ class _OptionsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 20,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Codec',
-              style: TextStyle(color: AppColors.textLo, fontSize: 13)),
+          Text(l10n.webmCodecLabel,
+              style: const TextStyle(color: AppColors.textLo, fontSize: 13)),
           const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
                 child: _Chip(
-                  label: 'VP9',
-                  subtitle: 'recommended',
+                  label: l10n.webmVp9,
+                  subtitle: l10n.webmVp9Sub,
                   selected: !state.av1,
                   onTap: () => ctrl.setAv1(false),
                 ),
@@ -195,8 +202,8 @@ class _OptionsCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: _Chip(
-                    label: 'AV1',
-                    subtitle: 'smallest · slower',
+                    label: l10n.webmAv1,
+                    subtitle: l10n.webmAv1Sub,
                     selected: state.av1,
                     disabled: state.alpha,
                     onTap: () => ctrl.setAv1(true),
@@ -207,7 +214,7 @@ class _OptionsCard extends StatelessWidget {
           ),
           const Divider(color: AppColors.glassStroke, height: 24),
           OptionSlider(
-            label: 'Quality (CRF)',
+            label: l10n.webmQualityLabel,
             value: state.crf.toDouble(),
             min: 18,
             max: 45,
@@ -215,24 +222,24 @@ class _OptionsCard extends StatelessWidget {
             displayValue: '${state.crf}',
             onChanged: (v) => ctrl.setCrf(v.round()),
           ),
-          const Row(
+          Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('18  sharper, bigger',
-                  style: TextStyle(color: AppColors.textLo, fontSize: 11)),
-              Text('45  smaller, softer',
-                  style: TextStyle(color: AppColors.textLo, fontSize: 11)),
+              Text(l10n.webmSharperBigger,
+                  style: const TextStyle(color: AppColors.textLo, fontSize: 11)),
+              Text(l10n.webmSmallerSofter,
+                  style: const TextStyle(color: AppColors.textLo, fontSize: 11)),
             ],
           ),
           const Divider(color: AppColors.glassStroke, height: 24),
-          const Text('Speed',
-              style: TextStyle(color: AppColors.textLo, fontSize: 13)),
+          Text(l10n.commonSpeed,
+              style: const TextStyle(color: AppColors.textLo, fontSize: 13)),
           const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
                 child: _Chip(
-                  label: 'Fast',
+                  label: l10n.webmFast,
                   selected: state.speed == WebmSpeed.fast,
                   onTap: () => ctrl.setSpeed(WebmSpeed.fast),
                 ),
@@ -240,7 +247,7 @@ class _OptionsCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: _Chip(
-                  label: 'Balanced',
+                  label: l10n.webmBalanced,
                   selected: state.speed == WebmSpeed.balanced,
                   onTap: () => ctrl.setSpeed(WebmSpeed.balanced),
                 ),
@@ -248,7 +255,7 @@ class _OptionsCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: _Chip(
-                  label: 'Best',
+                  label: l10n.webmBest,
                   selected: state.speed == WebmSpeed.best,
                   onTap: () => ctrl.setSpeed(WebmSpeed.best),
                 ),
@@ -256,8 +263,8 @@ class _OptionsCard extends StatelessWidget {
             ],
           ),
           const Divider(color: AppColors.glassStroke, height: 24),
-          const Text('Max width',
-              style: TextStyle(color: AppColors.textLo, fontSize: 13)),
+          Text(l10n.webmMaxWidth,
+              style: const TextStyle(color: AppColors.textLo, fontSize: 13)),
           const SizedBox(height: 10),
           Row(
             children: [
@@ -265,7 +272,7 @@ class _OptionsCard extends StatelessWidget {
                 if (w != null) const SizedBox(width: 8),
                 Expanded(
                   child: _Chip(
-                    label: w == null ? 'Original' : '$w',
+                    label: w == null ? l10n.commonOriginal : '$w',
                     selected: state.maxWidth == w,
                     onTap: () => ctrl.setMaxWidth(w),
                   ),
@@ -278,9 +285,9 @@ class _OptionsCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Expanded(
-                  child: Text('Keep transparency',
-                      style: TextStyle(color: AppColors.textHi, fontSize: 14)),
+                Expanded(
+                  child: Text(l10n.webmKeepTransparency,
+                      style: const TextStyle(color: AppColors.textHi, fontSize: 14)),
                 ),
                 Switch(
                   value: state.alpha,
@@ -359,6 +366,7 @@ class _OverallProgressCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final done = state.doneCount + state.errorCount;
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 16,
       child: Column(
@@ -377,14 +385,14 @@ class _OverallProgressCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Converting ${done + 1} of ${state.items.length} · '
-                '${(state.overallProgress * 100).round()}%',
+                l10n.webmConvertingProgress(done + 1, state.items.length,
+                    (state.overallProgress * 100).round()),
                 style: const TextStyle(color: AppColors.textLo, fontSize: 13),
               ),
               TextButton(
                 onPressed: ctrl.cancel,
-                child: const Text('Cancel',
-                    style: TextStyle(color: AppColors.accentC)),
+                child: Text(l10n.commonCancel,
+                    style: const TextStyle(color: AppColors.accentC)),
               ),
             ],
           ),
@@ -402,6 +410,7 @@ class _FileRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final info = item.info;
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 16,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -428,7 +437,7 @@ class _FileRow extends StatelessWidget {
                     ),
                     Text(
                       item.isProbing
-                          ? 'probing…'
+                          ? l10n.webmProbing
                           : info == null
                               ? ''
                               : '${info.width}×${info.height}'
@@ -480,7 +489,7 @@ class _FileRow extends StatelessWidget {
           ],
           if (item.status == WebmItemStatus.error) ...[
             const SizedBox(height: 6),
-            Text(item.error ?? 'Conversion failed',
+            Text(item.error ?? l10n.webmConversionFailed,
                 style: const TextStyle(color: Colors.redAccent, fontSize: 11)),
           ],
         ],
@@ -495,11 +504,12 @@ class _StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final (label, color) = switch (item.status) {
-      WebmItemStatus.queued => ('Queued', AppColors.textLo),
-      WebmItemStatus.converting => ('Converting', AppColors.accentB),
-      WebmItemStatus.done => ('Done', AppColors.accentB),
-      WebmItemStatus.error => ('Error', Colors.redAccent),
+      WebmItemStatus.queued => (l10n.webmQueued, AppColors.textLo),
+      WebmItemStatus.converting => (l10n.webmConverting, AppColors.accentB),
+      WebmItemStatus.done => (l10n.webmDone, AppColors.accentB),
+      WebmItemStatus.error => (l10n.webmError, Colors.redAccent),
     };
     return Container(
       margin: const EdgeInsets.only(right: 4),
@@ -540,7 +550,7 @@ class _ConvertButton extends StatelessWidget {
                   color: enabled ? Colors.white : AppColors.textLo, size: 20),
               const SizedBox(width: 8),
               Text(
-                'Convert',
+                AppLocalizations.of(context)!.webmConvertButton,
                 style: TextStyle(
                   color: enabled ? Colors.white : AppColors.textLo,
                   fontSize: 15,
@@ -581,7 +591,10 @@ class _ExportBar extends StatelessWidget {
             onPressed: onExport,
             icon: const Icon(Icons.save_alt_rounded,
                 size: 18, color: Colors.white),
-            label: Text(count > 1 ? 'Export all ($count)' : 'Export WebM',
+            label: Text(
+                count > 1
+                    ? AppLocalizations.of(context)!.webmExportAll(count)
+                    : AppLocalizations.of(context)!.webmExportSingle,
                 style: const TextStyle(
                     color: Colors.white,
                     fontSize: 15,

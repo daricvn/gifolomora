@@ -57,7 +57,7 @@ class _FeaturedToolCardState extends State<FeaturedToolCard> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      entry.label,
+                      entry.label(context),
                       style: const TextStyle(
                         color: AppColors.textHi,
                         fontSize: 17,
@@ -67,7 +67,7 @@ class _FeaturedToolCardState extends State<FeaturedToolCard> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      entry.description,
+                      entry.description(context),
                       style: const TextStyle(
                         color: AppColors.textLo,
                         fontSize: 12.5,

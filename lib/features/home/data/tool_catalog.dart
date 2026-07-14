@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../../l10n/app_localizations.dart';
+
 /// Groups tools by intent so the home screen can give each group a tailored
 /// layout (featured hero row vs. compact grid) instead of one flat grid.
 enum ToolCategory {
@@ -15,8 +17,6 @@ enum ToolCategory {
 class ToolEntry {
   const ToolEntry({
     required this.id,
-    required this.label,
-    required this.description,
     required this.icon,
     required this.route,
     required this.accentColor,
@@ -25,8 +25,6 @@ class ToolEntry {
   });
 
   final String id;
-  final String label;
-  final String description;
   final IconData icon;
   final String route;
   final Color accentColor;
@@ -38,12 +36,46 @@ class ToolEntry {
   final bool windowsOnly;
 }
 
+/// Label/description are localized, so they resolve per-[BuildContext]
+/// instead of living as static [ToolEntry] fields.
+extension ToolEntryL10n on ToolEntry {
+  String label(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return switch (id) {
+      'video_studio' => l10n.toolVideoStudioLabel,
+      'images_to_gif' => l10n.toolImagesToGifLabel,
+      'screen_record' => l10n.toolScreenRecordLabel,
+      'resize' => l10n.toolResizeLabel,
+      'crop' => l10n.toolCropLabel,
+      'text_overlay' => l10n.toolTextOverlayLabel,
+      'optimize' => l10n.toolOptimizeLabel,
+      'effects' => l10n.toolEffectsLabel,
+      'to_webm' => l10n.toolToWebmLabel,
+      _ => id,
+    };
+  }
+
+  String description(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return switch (id) {
+      'video_studio' => l10n.toolVideoStudioDesc,
+      'images_to_gif' => l10n.toolImagesToGifDesc,
+      'screen_record' => l10n.toolScreenRecordDesc,
+      'resize' => l10n.toolResizeDesc,
+      'crop' => l10n.toolCropDesc,
+      'text_overlay' => l10n.toolTextOverlayDesc,
+      'optimize' => l10n.toolOptimizeDesc,
+      'effects' => l10n.toolEffectsDesc,
+      'to_webm' => l10n.toolToWebmDesc,
+      _ => '',
+    };
+  }
+}
+
 const List<ToolEntry> toolCatalog = [
   // ── Create ──────────────────────────────────────────────────────────────
   ToolEntry(
     id: 'video_studio',
-    label: 'Video Studio',
-    description: 'Crop, resize & speed — export as video or GIF',
     icon: Icons.movie_creation_rounded,
     route: '/video-studio',
     accentColor: Color(0xFFFF8C00),
@@ -51,8 +83,6 @@ const List<ToolEntry> toolCatalog = [
   ),
   ToolEntry(
     id: 'images_to_gif',
-    label: 'Images → GIF',
-    description: 'Stitch a sequence of frames into a smooth loop',
     icon: Icons.photo_library_rounded,
     route: '/images-to-gif',
     accentColor: Color(0xFF00C2FF),
@@ -60,8 +90,6 @@ const List<ToolEntry> toolCatalog = [
   ),
   ToolEntry(
     id: 'screen_record',
-    label: 'Screen Record',
-    description: 'Capture your screen, then edit in Video Studio',
     icon: Icons.fiber_manual_record_rounded,
     route: '/screen-record',
     accentColor: Color(0xFFFF3B5C),
@@ -72,8 +100,6 @@ const List<ToolEntry> toolCatalog = [
   // ── Refine ──────────────────────────────────────────────────────────────
   ToolEntry(
     id: 'resize',
-    label: 'Resize',
-    description: 'Scale to any resolution or preset',
     icon: Icons.photo_size_select_large_rounded,
     route: '/resize',
     accentColor: Color(0xFF00E5CC),
@@ -81,8 +107,6 @@ const List<ToolEntry> toolCatalog = [
   ),
   ToolEntry(
     id: 'crop',
-    label: 'Crop',
-    description: 'Trim the frame with a draggable rect',
     icon: Icons.crop_rounded,
     route: '/crop',
     accentColor: Color(0xFFFF5CAA),
@@ -90,8 +114,6 @@ const List<ToolEntry> toolCatalog = [
   ),
   ToolEntry(
     id: 'text_overlay',
-    label: 'Text Overlay',
-    description: 'Add styled captions to any GIF',
     icon: Icons.text_fields_rounded,
     route: '/text-overlay',
     accentColor: Color(0xFF4CAF50),
@@ -99,8 +121,6 @@ const List<ToolEntry> toolCatalog = [
   ),
   ToolEntry(
     id: 'optimize',
-    label: 'Optimize',
-    description: 'Compress for the smallest file size',
     icon: Icons.compress_rounded,
     route: '/optimize',
     accentColor: Color(0xFFFFB800),
@@ -108,8 +128,6 @@ const List<ToolEntry> toolCatalog = [
   ),
   ToolEntry(
     id: 'effects',
-    label: 'Effects',
-    description: 'Reverse or change playback speed',
     icon: Icons.auto_awesome_rounded,
     route: '/effects',
     accentColor: Color(0xFF9C27B0),
@@ -117,8 +135,6 @@ const List<ToolEntry> toolCatalog = [
   ),
   ToolEntry(
     id: 'to_webm',
-    label: 'To WebM',
-    description: 'Convert video or GIF to WebM',
     icon: Icons.video_settings_rounded,
     route: '/to-webm',
     accentColor: Color(0xFF7C9EFF),

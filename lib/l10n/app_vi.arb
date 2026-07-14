@@ -1,0 +1,540 @@
+{
+  "@@locale": "vi",
+  "appTitle": "Gifolomora",
+  "settingsTooltip": "Cài đặt",
+  "aboutTooltip": "Giới thiệu",
+  "exitDialogTitle": "Thoát Gifolomora?",
+  "exitDialogMessage": "Bạn có công việc chưa lưu. Bạn có chắc chắn muốn thoát không?",
+  "exitConfirmLabel": "Thoát",
+  "commonCancel": "Hủy",
+  "commonClear": "Xóa",
+  "commonClearAll": "Xóa tất cả",
+  "commonDone": "Xong",
+  "commonReadingFile": "Đang đọc tệp…",
+  "commonProcessing": "Đang xử lý…",
+  "commonProcessingPercent": "{percent}% đang xử lý…",
+  "@commonProcessingPercent": {
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "commonRegenerate": "Tạo lại",
+  "commonGeneratePreview": "Tạo xem trước",
+  "commonExportGif": "Xuất GIF",
+  "commonExportCancelled": "Đã hủy xuất",
+  "commonSelectGif": "Chọn GIF",
+  "commonTapToSelectGif": "Nhấn để chọn GIF",
+  "commonPreview": "Xem trước",
+  "commonReset": "Đặt lại",
+  "commonOriginal": "Gốc",
+  "commonOff": "Tắt",
+  "commonOptions": "Tùy chọn",
+  "commonSpeed": "Tốc độ",
+  "commonFontSizeLabel": "Kích thước chữ",
+  "commonFileDimensions": "{width}×{height} px",
+  "@commonFileDimensions": {
+    "placeholders": {
+      "width": {
+        "type": "int"
+      },
+      "height": {
+        "type": "int"
+      }
+    }
+  },
+  "commonSaveLocationHint": "Bạn sẽ được yêu cầu chọn nơi lưu tệp.",
+  "homeSectionCreateOverline": "Bắt đầu tại đây",
+  "homeSectionCreateTitle": "Tạo GIF",
+  "homeSectionRefineOverline": "Bộ công cụ",
+  "homeSectionRefineTitle": "Chỉnh sửa & tối ưu hóa",
+  "homeDropUnsupported": ".{ext} không được hỗ trợ. Thả video hoặc GIF vào.",
+  "@homeDropUnsupported": {
+    "placeholders": {
+      "ext": {
+        "type": "String"
+      }
+    }
+  },
+  "homeDropVideoOrGif": "Thả video hoặc GIF",
+  "homeVersionBadge": "v{version}",
+  "@homeVersionBadge": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "homeDragDropHint": "Kéo và thả tệp bất kỳ để bắt đầu",
+  "homeRecentsOverline": "Lịch sử",
+  "homeRecentsTitle": "Xuất gần đây",
+  "homeTimeJustNow": "vừa xong",
+  "homeTimeMinutesAgo": "{minutes} phút trước",
+  "@homeTimeMinutesAgo": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "homeTimeHoursAgo": "{hours} giờ trước",
+  "@homeTimeHoursAgo": {
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      }
+    }
+  },
+  "homeTimeDaysAgo": "{days} ngày trước",
+  "@homeTimeDaysAgo": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "toolVideoStudioLabel": "Studio Video",
+  "toolVideoStudioDesc": "Cắt, thay đổi kích thước & tốc độ — xuất dưới dạng video hoặc GIF",
+  "toolImagesToGifLabel": "Ảnh → GIF",
+  "toolImagesToGifDesc": "Ghép nối chuỗi khung hình thành vòng lặp mượt mà",
+  "toolScreenRecordLabel": "Ghi màn hình",
+  "toolScreenRecordDesc": "Quay màn hình của bạn, sau đó chỉnh sửa trong Studio Video",
+  "toolResizeLabel": "Thay đổi kích thước",
+  "toolResizeDesc": "Co giãn đến độ phân giải bất kỳ hoặc mẫu có sẵn",
+  "toolCropLabel": "Cắt xén",
+  "toolCropDesc": "Cắt khung hình bằng hình chữ nhật có thể kéo",
+  "toolTextOverlayLabel": "Chồng chữ",
+  "toolTextOverlayDesc": "Thêm chú thích được tạo kiểu vào bất kỳ GIF nào",
+  "toolOptimizeLabel": "Tối ưu hóa",
+  "toolOptimizeDesc": "Nén để có kích thước tệp nhỏ nhất",
+  "toolEffectsLabel": "Hiệu ứng",
+  "toolEffectsDesc": "Đảo ngược hoặc thay đổi tốc độ phát lại",
+  "toolToWebmLabel": "Sang WebM",
+  "toolToWebmDesc": "Chuyển đổi video hoặc GIF sang WebM",
+  "settingsScreenTitle": "Cài đặt",
+  "settingsSoftwarePreviewTitle": "Kết xuất xem trước phần mềm",
+  "settingsSoftwarePreviewDesc": "Sửa lỗi nhấp nháy đen hiếm gặp trong xem trước Studio Video trên một số GPU. Sử dụng nhiều CPU hơn và giới hạn xem trước ở 1080p. Các bản xuất không bị ảnh hưởng. Có hiệu lực vào lần tiếp theo bạn mở trình chỉnh sửa.",
+  "settingsLanguageTitle": "Ngôn ngữ",
+  "settingsLanguageDesc": "Chọn ngôn ngữ hiển thị của ứng dụng.",
+  "settingsLanguageSystemDefault": "Theo hệ thống",
+  "settingsSectionGeneral": "Chung",
+  "settingsAboutDesc": "Phiên bản, ghi công và giấy phép",
+  "cropAppBarTitle": "Cắt GIF",
+  "cropStepCropArea": "Vùng cắt",
+  "cropStepCropAreaSubtitle": "Kéo các góc để điều chỉnh · Kéo bên trong để di chuyển",
+  "cropSizeLabel": "{width}×{height}px",
+  "@cropSizeLabel": {
+    "placeholders": {
+      "width": {
+        "type": "int"
+      },
+      "height": {
+        "type": "int"
+      }
+    }
+  },
+  "cropCouldNotReadDims": "Không thể đọc kích thước GIF — không thể cắt",
+  "resizeAppBarTitle": "Thay đổi kích thước GIF",
+  "resizeStepOutputSize": "Kích thước đầu ra",
+  "resizePresetsLabel": "Mẫu có sẵn",
+  "resizeCustomWidth": "Chiều rộng tùy chỉnh",
+  "resizeOutputLabel": "Đầu ra: {width}×{height}px",
+  "@resizeOutputLabel": {
+    "placeholders": {
+      "width": {
+        "type": "int"
+      },
+      "height": {
+        "type": "int"
+      }
+    }
+  },
+  "effectsAppBarTitle": "Hiệu ứng",
+  "effectsStepEffect": "Hiệu ứng",
+  "effectsModeLabel": "Chế độ",
+  "effectsReverseLabel": "Đảo ngược",
+  "effectsReverseSubtitle": "Phát ngược lại",
+  "effectsSpeedSubtitle": "Thay đổi nhịp độ",
+  "effectsSpeedSlower": "0.25× chậm hơn",
+  "effectsSpeedFaster": "4× nhanh hơn",
+  "effectsSpeedLabelOriginal": "1× (gốc)",
+  "effectsSpeedLabelSlower": "{speed}× (chậm hơn)",
+  "@effectsSpeedLabelSlower": {
+    "placeholders": {
+      "speed": {
+        "type": "String"
+      }
+    }
+  },
+  "effectsSpeedLabelFaster": "{speed}× (nhanh hơn)",
+  "@effectsSpeedLabelFaster": {
+    "placeholders": {
+      "speed": {
+        "type": "String"
+      }
+    }
+  },
+  "optimizeAppBarTitle": "Tối ưu hóa GIF",
+  "optimizeStepCompression": "Nén",
+  "optimizeColorsLabel": "Màu sắc",
+  "optimizeLossyLabel": "Mất dữ liệu",
+  "optimizeRemoveFrames": "Xóa khung hình",
+  "optimizeKeepAll": "Giữ tất cả",
+  "optimizeFrameDropQuarter": "1 / 4",
+  "optimizeFrameDropThird": "1 / 3",
+  "optimizeFrameDropHalf": "1 / 2",
+  "imagesToGifAppBarTitle": "Ảnh → GIF",
+  "imagesStepSelectFrames": "Chọn khung hình",
+  "imagesStepSelectFramesSubtitle": "Chọn ảnh theo thứ tự bạn muốn chúng phát",
+  "imagesTapToSelectImages": "Nhấn để chọn ảnh",
+  "imagesFrameCountOne": "{count} khung hình",
+  "@imagesFrameCountOne": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "imagesFrameCountOther": "{count} khung hình",
+  "@imagesFrameCountOther": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "imagesAddMore": "Thêm nữa",
+  "imagesFrameRateLabel": "Tốc độ khung hình",
+  "imagesWidthLabel": "Chiều rộng",
+  "imagesStepCaption": "Chú thích",
+  "imagesStepCaptionSubtitle": "Văn bản tùy chọn được vẽ trên mỗi khung hình",
+  "imagesStepOptimizeGif": "Tối ưu hóa GIF",
+  "imagesStepOptimizeGifSubtitle": "Giảm màu sắc và kích thước tệp",
+  "imagesNoFontWarning": "Không tìm thấy phông chữ hệ thống. Chồng chữ có thể thất bại.",
+  "imagesCaptionHint": "Để trống để bỏ qua…",
+  "imagesPositionLabel": "Vị trí",
+  "imagesPositionTop": "Trên cùng",
+  "imagesPositionCenter": "Giữa",
+  "imagesPositionBottom": "Dưới cùng",
+  "imagesColorLabel": "Màu",
+  "imagesColorWhite": "Trắng",
+  "imagesColorYellow": "Vàng",
+  "imagesColorBlack": "Đen",
+  "imagesColorRed": "Đỏ",
+  "imagesOptimizeToggleLabel": "Tối ưu hóa GIF đầu ra",
+  "textOverlayAppBarTitle": "Chồng chữ",
+  "textOverlayStepEditText": "Chỉnh sửa văn bản",
+  "textOverlayStepEditTextSubtitle": "Kéo để định vị · nhấn để chọn",
+  "textOverlayCannotReadDims": "Không thể đọc kích thước",
+  "textOverlayFontWarning": "Không tìm thấy phông chữ hệ thống. Kết xuất văn bản có thể thất bại khi Tạo.",
+  "textOverlayTextFieldHint": "Văn bản…",
+  "textOverlayStyleLabel": "Kiểu cách",
+  "textOverlayFontLabel": "Phông chữ",
+  "textOverlayFillLabel": "Tô",
+  "textOverlayStrokeLabel": "Nét viền",
+  "textOverlayStrokeWidthLabel": "Độ rộng nét viền",
+  "textOverlayLayersTitle": "Lớp văn bản",
+  "textOverlayNoTextYet": "Chưa có văn bản. Nhấn “Thêm” để tạo một cái.",
+  "textOverlayAdd": "Thêm",
+  "textOverlayEmptyPlaceholder": "(trống)",
+  "webmAppBarTitle": "Sang WebM",
+  "webmRejectedToastOne": "Đã bỏ qua {count} tệp — tối đa 20 mỗi đợt",
+  "@webmRejectedToastOne": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "webmRejectedToastOther": "Đã bỏ qua {count} tệp — tối đa 20 mỗi đợt",
+  "@webmRejectedToastOther": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "webmSavedToast": "Đã lưu",
+  "webmExportedToastOne": "Đã xuất {count} tệp",
+  "@webmExportedToastOne": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "webmExportedToastOther": "Đã xuất {count} tệp",
+  "@webmExportedToastOther": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "webmStepSelectFiles": "Chọn tệp",
+  "webmDropHint": "Thả hoặc nhấn để chọn video/GIF (tối đa 20)",
+  "webmStepConvert": "Chuyển đổi",
+  "webmCodecLabel": "Bộ giải mã",
+  "webmVp9": "VP9",
+  "webmVp9Sub": "khuyến nghị",
+  "webmAv1": "AV1",
+  "webmAv1Sub": "nhỏ nhất · chậm hơn",
+  "webmQualityLabel": "Chất lượng (CRF)",
+  "webmSharperBigger": "18 sắc nét hơn, lớn hơn",
+  "webmSmallerSofter": "45 nhỏ hơn, mềm hơn",
+  "webmFast": "Nhanh",
+  "webmBalanced": "Cân bằng",
+  "webmBest": "Tốt nhất",
+  "webmMaxWidth": "Chiều rộng tối đa",
+  "webmKeepTransparency": "Giữ độ trong suốt",
+  "webmProbing": "đang thăm dò…",
+  "webmConversionFailed": "Chuyển đổi thất bại",
+  "webmQueued": "Đã xếp hàng",
+  "webmConverting": "Đang chuyển đổi",
+  "webmDone": "Xong",
+  "webmError": "Lỗi",
+  "webmConvertingProgress": "Đang chuyển đổi {done} trên {total} · {percent}%",
+  "@webmConvertingProgress": {
+    "placeholders": {
+      "done": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      },
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "webmConvertButton": "Chuyển đổi",
+  "webmExportAll": "Xuất tất cả ({count})",
+  "@webmExportAll": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "webmExportSingle": "Xuất WebM",
+  "recordAppBarTitle": "Ghi màn hình",
+  "recordFailedToLoad": "Không thể tải Ghi màn hình: {error}",
+  "@recordFailedToLoad": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "recordStepSelectMonitor": "Chọn màn hình",
+  "recordStepRecord": "Ghi",
+  "recordButtonLabel": "Ghi",
+  "recordMaxDuration": "Tối đa 10:00",
+  "recordPaused": "Đã tạm dừng",
+  "recordRecording": "Đang ghi",
+  "recordElapsedOfMax": "{elapsed} / 10:00",
+  "@recordElapsedOfMax": {
+    "placeholders": {
+      "elapsed": {
+        "type": "String"
+      }
+    }
+  },
+  "recordResume": "Tiếp tục",
+  "recordPause": "Tạm dừng",
+  "recordStop": "Dừng",
+  "recordHotkeyStart": "Bắt đầu",
+  "recordHotkeyPauseResume": "Tạm dừng / Tiếp tục",
+  "recordAudio": "Âm thanh",
+  "recordSystemAudio": "Âm thanh hệ thống",
+  "recordDefaultOutputDevice": "Thiết bị đầu ra mặc định",
+  "recordMicrophone": "Micrô",
+  "recordNoMicFound": "Không tìm thấy micrô",
+  "recordDefaultInputDevice": "Thiết bị đầu vào mặc định",
+  "recordEditHotkeyTooltip": "Chỉnh sửa phím tắt",
+  "recordPressKeysFor": "Nhấn phím cho \"{label}\"",
+  "@recordPressKeysFor": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "recordSave": "Lưu",
+  "recordHotkeyConflict": "Tổ hợp phím đó xung đột với phím tắt Ghi màn hình khác, hoặc đã được ứng dụng khác sử dụng.",
+  "recordNoDisplays": "Không phát hiện màn hình nào",
+  "recordDisplay": "Màn hình",
+  "recordSelectDisplay": "Chọn màn hình",
+  "recordOutputSize": "Kích thước đầu ra",
+  "recordStorage": "Bộ nhớ",
+  "recordSaveLocation": "Vị trí lưu",
+  "recordDefaultTempFolder": "Mặc định (thư mục tạm)",
+  "recordChoose": "Chọn",
+  "recordResetToDefault": "Đặt lại về mặc định",
+  "recordDeleteTempOnExit": "Xóa video tạm khi thoát",
+  "recordChooseFolderDialogTitle": "Chọn thư mục cho video đã ghi",
+  "sharedFileDropDefaultHint": "Nhấn để chọn tệp",
+  "sharedFileDropAnyFile": "Bất kỳ tệp nào",
+  "sharedExportAndSave": "Xuất & Lưu",
+  "sharedPreviewUnavailable": "Xem trước không khả dụng",
+  "sharedPerFramePalettes": "Bảng màu mỗi khung hình",
+  "sharedPerFramePalettesDesc": "Nén thêm không mất dữ liệu, chậm hơn",
+  "studioStartOverLabel": "Bắt đầu lại",
+  "studioStartOverDialogTitle": "Bắt đầu lại?",
+  "studioStartOverDialogMessage": "Thao tác này sẽ hủy tệp đã tải và tất cả chỉnh sửa.",
+  "studioRenderingGif": "Đang kết xuất GIF…",
+  "studioEncoding": "Đang mã hóa…",
+  "studioTapToSelectVideoOrGif": "Nhấn để chọn video hoặc GIF",
+  "studioEditingGif": "Đang chỉnh sửa GIF",
+  "studioEditingVideo": "Đang chỉnh sửa video",
+  "studioAudioLabel": "âm thanh",
+  "studioNoAudioLabel": "không âm thanh",
+  "studioChangeButton": "Thay đổi",
+  "studioZoomFit": "Vừa",
+  "studioZoomFitToWindow": "Vừa cửa sổ",
+  "studioZoomTooltip": "Thu phóng",
+  "studioCompareLabel": "So sánh",
+  "studioOriginalBadge": "GỐC",
+  "studioCutBadge": "CẮT",
+  "studioPositionOfDuration": "{position} / {duration}",
+  "@studioPositionOfDuration": {
+    "placeholders": {
+      "position": {
+        "type": "String"
+      },
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "studioToolTrim": "Cắt bớt",
+  "studioToolCut": "Cắt",
+  "studioToolText": "Chữ",
+  "studioToolOptimize": "Tối ưu",
+  "studioToolProps": "Thuộc tính",
+  "studioCropDragHint": "Kéo các tay cầm trên xem trước để cắt",
+  "studioPlaybackSpeedLabel": "Tốc độ phát lại",
+  "studioTrimInLabel": "Vào",
+  "studioTrimClipLabel": "Đoạn",
+  "studioTrimOutLabel": "Ra",
+  "studioGifCappedFpsHint": "GIF sẽ bị giới hạn ở {maxFps} fps cho độ dài này.",
+  "@studioGifCappedFpsHint": {
+    "placeholders": {
+      "maxFps": {
+        "type": "int"
+      }
+    }
+  },
+  "studioCutFromLabel": "Từ",
+  "studioCutToLabel": "Đến",
+  "studioCantAddSegment": "Không thể thêm đoạn đó",
+  "studioMarkForRemoval": "Đánh dấu để xóa",
+  "studioMarkSpanHint": "Đánh dấu một khoảng để xóa nó",
+  "studioCutOutputLabel": "Đầu ra ≈ {duration}",
+  "@studioCutOutputLabel": {
+    "placeholders": {
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "studioNoFontWarning": "Không tìm thấy phông chữ hệ thống. Văn bản có thể không kết xuất được.",
+  "studioScaleLabel": "Tỷ lệ",
+  "studioScaleSmaller": "Nhỏ hơn 10%",
+  "studioScaleLarger": "Lớn hơn 200%",
+  "studioFrameRateLabel": "Tốc độ khung hình",
+  "studioCappedFpsHint": "Giới hạn ở {maxFps} fps cho độ dài này.",
+  "@studioCappedFpsHint": {
+    "placeholders": {
+      "maxFps": {
+        "type": "int"
+      }
+    }
+  },
+  "studioGifCappedWidthHint": "GIF bị giới hạn ở {width}px chiều rộng",
+  "@studioGifCappedWidthHint": {
+    "placeholders": {
+      "width": {
+        "type": "int"
+      }
+    }
+  },
+  "studioIgnoreGifSizeLimit": "Bỏ qua giới hạn kích thước GIF",
+  "studioFullSizeSlowWarning": "Kích thước đầy đủ có thể chạy chậm",
+  "studioMakeGifButton": "Tạo GIF",
+  "studioVideoTooLongTitle": "Video quá dài",
+  "studioGifLimitMessage": "GIF được giới hạn ở 40 giây. Cắt video trước để có kết quả tốt nhất, hoặc chỉ 40 giây đầu tiên sẽ được sử dụng.",
+  "studioUseFirst40s": "Sử dụng 40 giây đầu",
+  "studioCouldNotCreateGif": "Không thể tạo GIF",
+  "studioWebmConvertHint": "Chuyển đổi GIF này sang video WebM, sau đó chuyển sang chỉnh sửa video. Một chiều — không thể quay lại GIF.",
+  "studioConvertToWebmButton": "Chuyển sang WebM",
+  "studioCouldNotConvertWebm": "Không thể chuyển sang WebM",
+  "studioSmoothLoopLabel": "Vòng lặp mượt — hòa tan {ms}ms cuối vào {ms}ms đầu",
+  "@studioSmoothLoopLabel": {
+    "placeholders": {
+      "ms": {
+        "type": "int"
+      }
+    }
+  },
+  "studioNounClips": "Đoạn",
+  "studioNounGifs": "GIF",
+  "studioLoopMinLengthHint": "{noun} dài hơn 3 giây thôi.",
+  "@studioLoopMinLengthHint": {
+    "placeholders": {
+      "noun": {
+        "type": "String"
+      }
+    }
+  },
+  "studioCrossfadeTooShort": "Tốc độ/cắt để lại quá ít để hòa tan — tắt Vòng lặp mượt.",
+  "studioLoopsSeamlessly": "Lặp lại liền mạch bằng cách hòa tan đuôi vào đầu.",
+  "studioCrossfadeDurationLabel": "Thời lượng hòa tan",
+  "studioVolumeLabel": "Âm lượng",
+  "studioNoAudioCaption": "Không âm thanh",
+  "studioVolumeHint": "100% = gốc · 0% tắt tiếng · lên đến 200% to hơn.",
+  "studioNoAudioTrackHint": "Video này không có track âm thanh.",
+  "studioFpsLowerHint": "Giảm tốc độ khung hình sẽ thay đổi thời gian GIF; bạn không thể thêm khung hình trở lại.",
+  "studioFpsHigherHint": "Cao hơn = mượt hơn nhưng lớn hơn.",
+  "studioLoopsLabel": "Vòng lặp",
+  "studioPlaysForever": "Phát mãi mãi",
+  "studioPlaysThenRepeats": "Phát sau đó lặp lại {count}×",
+  "@studioPlaysThenRepeats": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "studioBoomerangLabel": "Boomerang — đảo ngược để tạo vòng lặp liền mạch",
+  "studioBackToVideoButton": "Quay lại video",
+  "studioDiscardGifTitle": "Hủy chỉnh sửa GIF?",
+  "studioDiscardGifMessage": "Quay lại sẽ hủy tất cả thay đổi đã thực hiện trên GIF.",
+  "studioDiscardButton": "Hủy",
+  "studioUndoTooltip": "Hoàn tác",
+  "studioNothingToUndo": "Không có gì để hoàn tác",
+  "studioRedoTooltip": "Làm lại",
+  "studioNothingToRedo": "Không có gì để làm lại",
+  "studioApplyButton": "Áp dụng",
+  "studioAppliedToPreview": "Đã áp dụng cho xem trước",
+  "studioExportButton": "Xuất",
+  "studioGifSaved": "GIF đã lưu",
+  "studioExportVideoTooltip": "Xuất Video",
+  "studioWebmSaved": "WebM đã lưu",
+  "studioVideoSaved": "Video đã lưu",
+  "studioCutUnavailable": "Không biết thời lượng — không thể cắt",
+  "studioTrimUnavailable": "Không biết thời lượng — không thể cắt bớt",
+  "studioExportFormatTitle": "Định dạng xuất",
+  "studioFormatOriginalTitle": "Gốc ({ext})",
+  "@studioFormatOriginalTitle": {
+    "placeholders": {
+      "ext": {
+        "type": "String"
+      }
+    }
+  },
+  "studioFormatOriginalSubtitle": "Lưu như hiện tại · không mã hóa lại · nhanh nhất",
+  "studioFormatMp4Subtitle": "H.264 · tương thích tốt nhất · tăng tốc phần cứng",
+  "studioFormatWebmSubtitle": "VP9 · tệp nhỏ hơn · thân thiện web"
+}

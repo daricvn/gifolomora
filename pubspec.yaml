@@ -10,6 +10,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: ^0.20.2
 
   flutter_riverpod: ^2.6.1
   riverpod_annotation: ^2.3.5
@@ -76,6 +79,7 @@ dependency_overrides:
 
 flutter:
   uses-material-design: true
+  generate: true
   assets:
     - assets/banner.png
     - assets/banner.gif

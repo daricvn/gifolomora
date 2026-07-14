@@ -1,0 +1,540 @@
+{
+  "@@locale": "fr",
+  "appTitle": "Gifolomora",
+  "settingsTooltip": "Paramètres",
+  "aboutTooltip": "À propos",
+  "exitDialogTitle": "Quitter Gifolomora ?",
+  "exitDialogMessage": "Vous avez un travail non sauvegardé en cours. Êtes-vous sûr de vouloir quitter ?",
+  "exitConfirmLabel": "Quitter",
+  "commonCancel": "Annuler",
+  "commonClear": "Effacer",
+  "commonClearAll": "Tout effacer",
+  "commonDone": "Terminé",
+  "commonReadingFile": "Lecture du fichier…",
+  "commonProcessing": "Traitement…",
+  "commonProcessingPercent": "{percent}% en cours…",
+  "@commonProcessingPercent": {
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "commonRegenerate": "Régénérer",
+  "commonGeneratePreview": "Générer l'aperçu",
+  "commonExportGif": "Exporter le GIF",
+  "commonExportCancelled": "Exportation annulée",
+  "commonSelectGif": "Sélectionner un GIF",
+  "commonTapToSelectGif": "Appuyez pour sélectionner un GIF",
+  "commonPreview": "Aperçu",
+  "commonReset": "Réinitialiser",
+  "commonOriginal": "Original",
+  "commonOff": "Désactivé",
+  "commonOptions": "Options",
+  "commonSpeed": "Vitesse",
+  "commonFontSizeLabel": "Taille de police",
+  "commonFileDimensions": "{width}×{height} px",
+  "@commonFileDimensions": {
+    "placeholders": {
+      "width": {
+        "type": "int"
+      },
+      "height": {
+        "type": "int"
+      }
+    }
+  },
+  "commonSaveLocationHint": "Il vous sera demandé de choisir l'emplacement de sauvegarde.",
+  "homeSectionCreateOverline": "Commencer ici",
+  "homeSectionCreateTitle": "Créer un GIF",
+  "homeSectionRefineOverline": "Boîte à outils",
+  "homeSectionRefineTitle": "Éditer & optimiser",
+  "homeDropUnsupported": ".{ext} n'est pas pris en charge. Déposez une vidéo ou un GIF.",
+  "@homeDropUnsupported": {
+    "placeholders": {
+      "ext": {
+        "type": "String"
+      }
+    }
+  },
+  "homeDropVideoOrGif": "Déposez une vidéo ou un GIF",
+  "homeVersionBadge": "v{version}",
+  "@homeVersionBadge": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "homeDragDropHint": "Glissez-déposez un fichier n'importe où pour commencer",
+  "homeRecentsOverline": "Historique",
+  "homeRecentsTitle": "Exportations récentes",
+  "homeTimeJustNow": "à l'instant",
+  "homeTimeMinutesAgo": "il y a {minutes} min",
+  "@homeTimeMinutesAgo": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "homeTimeHoursAgo": "il y a {hours} h",
+  "@homeTimeHoursAgo": {
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      }
+    }
+  },
+  "homeTimeDaysAgo": "il y a {days} j",
+  "@homeTimeDaysAgo": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "toolVideoStudioLabel": "Studio Vidéo",
+  "toolVideoStudioDesc": "Recadrage, redimensionnement & vitesse — exportez en vidéo ou GIF",
+  "toolImagesToGifLabel": "Images → GIF",
+  "toolImagesToGifDesc": "Assemblez une séquence d'images en une boucle fluide",
+  "toolScreenRecordLabel": "Enregistrement d'écran",
+  "toolScreenRecordDesc": "Capturez votre écran, puis éditez dans le Studio Vidéo",
+  "toolResizeLabel": "Redimensionner",
+  "toolResizeDesc": "Mettez à l'échelle vers n'importe quelle résolution ou préréglage",
+  "toolCropLabel": "Recadrer",
+  "toolCropDesc": "Taillez l'image avec un rectangle déplaçable",
+  "toolTextOverlayLabel": "Superposition de texte",
+  "toolTextOverlayDesc": "Ajoutez des légendes stylisées à n'importe quel GIF",
+  "toolOptimizeLabel": "Optimiser",
+  "toolOptimizeDesc": "Compressez pour obtenir la plus petite taille de fichier",
+  "toolEffectsLabel": "Effets",
+  "toolEffectsDesc": "Inverser ou changer la vitesse de lecture",
+  "toolToWebmLabel": "Vers WebM",
+  "toolToWebmDesc": "Convertissez une vidéo ou un GIF en WebM",
+  "settingsScreenTitle": "Paramètres",
+  "settingsSoftwarePreviewTitle": "Rendu de l'aperçu logiciel",
+  "settingsSoftwarePreviewDesc": "Corrige les rares scintillements noirs dans l'aperçu du Studio Vidéo sur certains GPU. Utilise plus de CPU et limite l'aperçu à 1080p. Les exportations ne sont jamais affectées. Prend effet à la prochaine ouverture de l'éditeur.",
+  "settingsLanguageTitle": "Langue",
+  "settingsLanguageDesc": "Choisissez la langue d'affichage de l'application.",
+  "settingsLanguageSystemDefault": "Par défaut du système",
+  "settingsSectionGeneral": "Général",
+  "settingsAboutDesc": "Version, crédits et licences",
+  "cropAppBarTitle": "Recadrer le GIF",
+  "cropStepCropArea": "Zone de recadrage",
+  "cropStepCropAreaSubtitle": "Faites glisser les coins pour ajuster · Faites glisser l'intérieur pour déplacer",
+  "cropSizeLabel": "{width}×{height}px",
+  "@cropSizeLabel": {
+    "placeholders": {
+      "width": {
+        "type": "int"
+      },
+      "height": {
+        "type": "int"
+      }
+    }
+  },
+  "cropCouldNotReadDims": "Impossible de lire les dimensions du GIF — recadrage indisponible",
+  "resizeAppBarTitle": "Redimensionner le GIF",
+  "resizeStepOutputSize": "Taille de sortie",
+  "resizePresetsLabel": "Préréglages",
+  "resizeCustomWidth": "Largeur personnalisée",
+  "resizeOutputLabel": "Sortie : {width}×{height}px",
+  "@resizeOutputLabel": {
+    "placeholders": {
+      "width": {
+        "type": "int"
+      },
+      "height": {
+        "type": "int"
+      }
+    }
+  },
+  "effectsAppBarTitle": "Effets",
+  "effectsStepEffect": "Effet",
+  "effectsModeLabel": "Mode",
+  "effectsReverseLabel": "Inverser",
+  "effectsReverseSubtitle": "Lire à l'envers",
+  "effectsSpeedSubtitle": "Changer le tempo",
+  "effectsSpeedSlower": "0,25× plus lent",
+  "effectsSpeedFaster": "4× plus rapide",
+  "effectsSpeedLabelOriginal": "1× (original)",
+  "effectsSpeedLabelSlower": "{speed}× (plus lent)",
+  "@effectsSpeedLabelSlower": {
+    "placeholders": {
+      "speed": {
+        "type": "String"
+      }
+    }
+  },
+  "effectsSpeedLabelFaster": "{speed}× (plus rapide)",
+  "@effectsSpeedLabelFaster": {
+    "placeholders": {
+      "speed": {
+        "type": "String"
+      }
+    }
+  },
+  "optimizeAppBarTitle": "Optimiser le GIF",
+  "optimizeStepCompression": "Compression",
+  "optimizeColorsLabel": "Couleurs",
+  "optimizeLossyLabel": "Avec perte (Lossy)",
+  "optimizeRemoveFrames": "Supprimer des images",
+  "optimizeKeepAll": "Tout garder",
+  "optimizeFrameDropQuarter": "1 / 4",
+  "optimizeFrameDropThird": "1 / 3",
+  "optimizeFrameDropHalf": "1 / 2",
+  "imagesToGifAppBarTitle": "Images → GIF",
+  "imagesStepSelectFrames": "Sélectionner les images",
+  "imagesStepSelectFramesSubtitle": "Choisissez les images dans l'ordre où vous voulez qu'elles soient lues",
+  "imagesTapToSelectImages": "Appuyez pour sélectionner des images",
+  "imagesFrameCountOne": "{count} image",
+  "@imagesFrameCountOne": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "imagesFrameCountOther": "{count} images",
+  "@imagesFrameCountOther": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "imagesAddMore": "Ajouter plus",
+  "imagesFrameRateLabel": "Fréquence d'images",
+  "imagesWidthLabel": "Largeur",
+  "imagesStepCaption": "Légende",
+  "imagesStepCaptionSubtitle": "Texte optionnel dessiné sur chaque image",
+  "imagesStepOptimizeGif": "Optimiser le GIF",
+  "imagesStepOptimizeGifSubtitle": "Réduire les couleurs et la taille du fichier",
+  "imagesNoFontWarning": "Aucune police système trouvée. La superposition de texte peut échouer.",
+  "imagesCaptionHint": "Laisser vide pour ignorer…",
+  "imagesPositionLabel": "Position",
+  "imagesPositionTop": "Haut",
+  "imagesPositionCenter": "Centre",
+  "imagesPositionBottom": "Bas",
+  "imagesColorLabel": "Couleur",
+  "imagesColorWhite": "Blanc",
+  "imagesColorYellow": "Jaune",
+  "imagesColorBlack": "Noir",
+  "imagesColorRed": "Rouge",
+  "imagesOptimizeToggleLabel": "Optimiser le GIF de sortie",
+  "textOverlayAppBarTitle": "Superposition de texte",
+  "textOverlayStepEditText": "Modifier le texte",
+  "textOverlayStepEditTextSubtitle": "Faites glisser pour positionner · appuyez pour sélectionner",
+  "textOverlayCannotReadDims": "Impossible de lire les dimensions",
+  "textOverlayFontWarning": "Aucune police système trouvée. Le rendu du texte peut échouer à la génération.",
+  "textOverlayTextFieldHint": "Texte…",
+  "textOverlayStyleLabel": "Style",
+  "textOverlayFontLabel": "Police",
+  "textOverlayFillLabel": "Remplissage",
+  "textOverlayStrokeLabel": "Contour",
+  "textOverlayStrokeWidthLabel": "Épaisseur du contour",
+  "textOverlayLayersTitle": "Couches de texte",
+  "textOverlayNoTextYet": "Pas encore de texte. Appuyez sur « Ajouter » pour en créer un.",
+  "textOverlayAdd": "Ajouter",
+  "textOverlayEmptyPlaceholder": "(vide)",
+  "webmAppBarTitle": "Vers WebM",
+  "webmRejectedToastOne": "{count} fichier ignoré — 20 max par lot",
+  "@webmRejectedToastOne": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "webmRejectedToastOther": "{count} fichiers ignorés — 20 max par lot",
+  "@webmRejectedToastOther": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "webmSavedToast": "Enregistré",
+  "webmExportedToastOne": "{count} fichier exporté",
+  "@webmExportedToastOne": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "webmExportedToastOther": "{count} fichiers exportés",
+  "@webmExportedToastOther": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "webmStepSelectFiles": "Sélectionner des fichiers",
+  "webmDropHint": "Déposez ou appuyez pour sélectionner des vidéos/GIFs (max 20)",
+  "webmStepConvert": "Convertir",
+  "webmCodecLabel": "Codec",
+  "webmVp9": "VP9",
+  "webmVp9Sub": "recommandé",
+  "webmAv1": "AV1",
+  "webmAv1Sub": "plus petit · plus lent",
+  "webmQualityLabel": "Qualité (CRF)",
+  "webmSharperBigger": "18 plus net, plus gros",
+  "webmSmallerSofter": "45 plus petit, plus doux",
+  "webmFast": "Rapide",
+  "webmBalanced": "Équilibré",
+  "webmBest": "Meilleur",
+  "webmMaxWidth": "Largeur max",
+  "webmKeepTransparency": "Garder la transparence",
+  "webmProbing": "analyse…",
+  "webmConversionFailed": "La conversion a échoué",
+  "webmQueued": "En attente",
+  "webmConverting": "Conversion…",
+  "webmDone": "Terminé",
+  "webmError": "Erreur",
+  "webmConvertingProgress": "Conversion de {done} sur {total} · {percent}%",
+  "@webmConvertingProgress": {
+    "placeholders": {
+      "done": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      },
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "webmConvertButton": "Convertir",
+  "webmExportAll": "Tout exporter ({count})",
+  "@webmExportAll": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "webmExportSingle": "Exporter en WebM",
+  "recordAppBarTitle": "Enregistrement d'écran",
+  "recordFailedToLoad": "Impossible de charger l'enregistrement d'écran : {error}",
+  "@recordFailedToLoad": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "recordStepSelectMonitor": "Sélectionner un moniteur",
+  "recordStepRecord": "Enregistrer",
+  "recordButtonLabel": "Enregistrer",
+  "recordMaxDuration": "Max 10:00",
+  "recordPaused": "En pause",
+  "recordRecording": "Enregistrement en cours",
+  "recordElapsedOfMax": "{elapsed} / 10:00",
+  "@recordElapsedOfMax": {
+    "placeholders": {
+      "elapsed": {
+        "type": "String"
+      }
+    }
+  },
+  "recordResume": "Reprendre",
+  "recordPause": "Pause",
+  "recordStop": "Arrêter",
+  "recordHotkeyStart": "Démarrer",
+  "recordHotkeyPauseResume": "Pause / Reprendre",
+  "recordAudio": "Audio",
+  "recordSystemAudio": "Audio du système",
+  "recordDefaultOutputDevice": "Périphérique de sortie par défaut",
+  "recordMicrophone": "Microphone",
+  "recordNoMicFound": "Aucun microphone trouvé",
+  "recordDefaultInputDevice": "Périphérique d'entrée par défaut",
+  "recordEditHotkeyTooltip": "Modifier le raccourci",
+  "recordPressKeysFor": "Appuyez sur les touches pour « {label} »",
+  "@recordPressKeysFor": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "recordSave": "Enregistrer",
+  "recordHotkeyConflict": "Ce raccourci entre en conflit avec un autre raccourci d'enregistrement, ou est déjà utilisé par une autre application.",
+  "recordNoDisplays": "Aucun écran détecté",
+  "recordDisplay": "Écran",
+  "recordSelectDisplay": "Sélectionner un écran",
+  "recordOutputSize": "Taille de sortie",
+  "recordStorage": "Stockage",
+  "recordSaveLocation": "Emplacement de sauvegarde",
+  "recordDefaultTempFolder": "Défaut (dossier temp)",
+  "recordChoose": "Choisir",
+  "recordResetToDefault": "Réinitialiser par défaut",
+  "recordDeleteTempOnExit": "Supprimer la vidéo temporaire à la sortie",
+  "recordChooseFolderDialogTitle": "Choisir un dossier pour la vidéo enregistrée",
+  "sharedFileDropDefaultHint": "Appuyez pour sélectionner des fichiers",
+  "sharedFileDropAnyFile": "Tous les fichiers",
+  "sharedExportAndSave": "Exporter & Enregistrer",
+  "sharedPreviewUnavailable": "Aperçu indisponible",
+  "sharedPerFramePalettes": "Palettes par image",
+  "sharedPerFramePalettesDesc": "Compression supplémentaire sans perte, plus lent",
+  "studioStartOverLabel": "Recommencer",
+  "studioStartOverDialogTitle": "Recommencer ?",
+  "studioStartOverDialogMessage": "Cela effacera le fichier chargé et toutes les modifications.",
+  "studioRenderingGif": "Rendu du GIF…",
+  "studioEncoding": "Encodage…",
+  "studioTapToSelectVideoOrGif": "Appuyez pour sélectionner une vidéo ou un GIF",
+  "studioEditingGif": "Édition du GIF",
+  "studioEditingVideo": "Édition de la vidéo",
+  "studioAudioLabel": "audio",
+  "studioNoAudioLabel": "pas d'audio",
+  "studioChangeButton": "Modifier",
+  "studioZoomFit": "Ajuster",
+  "studioZoomFitToWindow": "Ajuster à la fenêtre",
+  "studioZoomTooltip": "Zoom",
+  "studioCompareLabel": "Comparer",
+  "studioOriginalBadge": "ORIGINAL",
+  "studioCutBadge": "COUPE",
+  "studioPositionOfDuration": "{position} / {duration}",
+  "@studioPositionOfDuration": {
+    "placeholders": {
+      "position": {
+        "type": "String"
+      },
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "studioToolTrim": "Découper",
+  "studioToolCut": "Couper",
+  "studioToolText": "Texte",
+  "studioToolOptimize": "Optimiser",
+  "studioToolProps": "Propriétés",
+  "studioCropDragHint": "Faites glisser les poignées sur l'aperçu pour recadrer",
+  "studioPlaybackSpeedLabel": "Vitesse de lecture",
+  "studioTrimInLabel": "Début",
+  "studioTrimClipLabel": "Clip",
+  "studioTrimOutLabel": "Fin",
+  "studioGifCappedFpsHint": "Le GIF sera limité à {maxFps} fps pour cette durée.",
+  "@studioGifCappedFpsHint": {
+    "placeholders": {
+      "maxFps": {
+        "type": "int"
+      }
+    }
+  },
+  "studioCutFromLabel": "De",
+  "studioCutToLabel": "À",
+  "studioCantAddSegment": "Impossible d'ajouter ce segment",
+  "studioMarkForRemoval": "Marquer pour suppression",
+  "studioMarkSpanHint": "Marquez une plage pour la supprimer",
+  "studioCutOutputLabel": "Sortie ≈ {duration}",
+  "@studioCutOutputLabel": {
+    "placeholders": {
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "studioNoFontWarning": "Aucune police système trouvée. Le rendu du texte peut échouer.",
+  "studioScaleLabel": "Échelle",
+  "studioScaleSmaller": "10% plus petit",
+  "studioScaleLarger": "200% plus grand",
+  "studioFrameRateLabel": "Fréquence d'images",
+  "studioCappedFpsHint": "Limité à {maxFps} fps pour cette durée.",
+  "@studioCappedFpsHint": {
+    "placeholders": {
+      "maxFps": {
+        "type": "int"
+      }
+    }
+  },
+  "studioGifCappedWidthHint": "GIF limité à {width}px de large",
+  "@studioGifCappedWidthHint": {
+    "placeholders": {
+      "width": {
+        "type": "int"
+      }
+    }
+  },
+  "studioIgnoreGifSizeLimit": "Ignorer la limite de taille GIF",
+  "studioFullSizeSlowWarning": "La taille réelle peut être lente",
+  "studioMakeGifButton": "Créer le GIF",
+  "studioVideoTooLongTitle": "Vidéo trop longue",
+  "studioGifLimitMessage": "Le GIF est limité à 40 secondes. Taillez d'abord la vidéo pour de meilleurs résultats, sinon seules les 40 premières secondes seront utilisées.",
+  "studioUseFirst40s": "Utiliser les 40 premières secondes",
+  "studioCouldNotCreateGif": "Impossible de créer le GIF",
+  "studioWebmConvertHint": "Convertit ce GIF en vidéo WebM, puis passe à l'édition vidéo. Opération irréversible — impossible de revenir au GIF.",
+  "studioConvertToWebmButton": "Convertir en WebM",
+  "studioCouldNotConvertWebm": "Impossible de convertir en WebM",
+  "studioSmoothLoopLabel": "Boucle fluide — fondu enchaîné des {ms} derniers ms sur les {ms} premiers ms",
+  "@studioSmoothLoopLabel": {
+    "placeholders": {
+      "ms": {
+        "type": "int"
+      }
+    }
+  },
+  "studioNounClips": "Clips",
+  "studioNounGifs": "GIFs",
+  "studioLoopMinLengthHint": "{noun} de plus de 3s uniquement.",
+  "@studioLoopMinLengthHint": {
+    "placeholders": {
+      "noun": {
+        "type": "String"
+      }
+    }
+  },
+  "studioCrossfadeTooShort": "La vitesse ou le découpage laisse trop peu de place pour le fondu — désactivez la boucle fluide.",
+  "studioLoopsSeamlessly": "Boucle de manière transparente en dissolvant la fin dans le début.",
+  "studioCrossfadeDurationLabel": "Durée du fondu",
+  "studioVolumeLabel": "Volume",
+  "studioNoAudioCaption": "Pas d'audio",
+  "studioVolumeHint": "100% = original · 0% muet · jusqu'à 200% plus fort.",
+  "studioNoAudioTrackHint": "Cette vidéo n'a pas de piste audio.",
+  "studioFpsLowerHint": "Réduire recalcule le timing du GIF ; vous ne pourrez plus rajouter d'images.",
+  "studioFpsHigherHint": "Plus élevé = plus fluide mais plus volumineux.",
+  "studioLoopsLabel": "Boucles",
+  "studioPlaysForever": "Lecture infinie",
+  "studioPlaysThenRepeats": "Lecture puis répète {count}×",
+  "@studioPlaysThenRepeats": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "studioBoomerangLabel": "Boomerang — inversion pour une boucle transparente",
+  "studioBackToVideoButton": "Retour à la vidéo",
+  "studioDiscardGifTitle": "Abandonner les modifications du GIF ?",
+  "studioDiscardGifMessage": "Revenir en arrière abandonnera tous les changements effectués sur le GIF.",
+  "studioDiscardButton": "Abandonner",
+  "studioUndoTooltip": "Annuler",
+  "studioNothingToUndo": "Rien à annuler",
+  "studioRedoTooltip": "Rétablir",
+  "studioNothingToRedo": "Rien à rétablir",
+  "studioApplyButton": "Appliquer",
+  "studioAppliedToPreview": "Appliqué à l'aperçu",
+  "studioExportButton": "Exporter",
+  "studioGifSaved": "GIF enregistré",
+  "studioExportVideoTooltip": "Exporter la vidéo",
+  "studioWebmSaved": "WebM enregistré",
+  "studioVideoSaved": "Vidéo enregistrée",
+  "studioCutUnavailable": "Durée inconnue — coupe indisponible",
+  "studioTrimUnavailable": "Durée inconnue — découpage indisponible",
+  "studioExportFormatTitle": "Format d'exportation",
+  "studioFormatOriginalTitle": "Original ({ext})",
+  "@studioFormatOriginalTitle": {
+    "placeholders": {
+      "ext": {
+        "type": "String"
+      }
+    }
+  },
+  "studioFormatOriginalSubtitle": "Enregistrer tel quel · pas de ré-encodage · le plus rapide",
+  "studioFormatMp4Subtitle": "H.264 · meilleure compatibilité · accélération matérielle",
+  "studioFormatWebmSubtitle": "VP9 · fichiers plus petits · adapté au web"
+}

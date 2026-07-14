@@ -6,6 +6,7 @@ import 'package:screen_retriever/screen_retriever.dart' show Display;
 import '../../../core/services/record/record_target.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/glass/glass_container.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// One glass card per display; a proportional mini-sketch of the virtual
 /// desktop layout when there's more than one, or a plain read-only card for
@@ -26,6 +27,7 @@ class MonitorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     if (monitors.isEmpty) {
       return GlassContainer(
         borderRadius: 20,
@@ -36,7 +38,7 @@ class MonitorCard extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                'No displays detected',
+                l10n.recordNoDisplays,
                 style: const TextStyle(color: AppColors.textLo, fontSize: 13),
               ),
             ),
@@ -58,7 +60,7 @@ class MonitorCard extends StatelessWidget {
                   color: AppColors.accentB, size: 20),
               const SizedBox(width: 10),
               Text(
-                single ? 'Display' : 'Select a display',
+                single ? l10n.recordDisplay : l10n.recordSelectDisplay,
                 style: const TextStyle(
                     color: AppColors.textHi,
                     fontSize: 15,

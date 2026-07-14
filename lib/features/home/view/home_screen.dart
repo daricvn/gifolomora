@@ -9,6 +9,7 @@ import '../../../core/widgets/glass/glass_app_bar.dart';
 import '../../../core/widgets/common/entrance.dart';
 import '../../../core/widgets/common/gradient_scaffold.dart';
 import '../../../core/widgets/common/section_header.dart';
+import '../../../l10n/app_localizations.dart';
 import '../../screen_record/controller/record_controller.dart';
 import '../data/tool_catalog.dart';
 import '../widgets/home_hero.dart';
@@ -71,7 +72,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('.$ext is not supported. Drop a video or GIF.'),
+          content: Text(AppLocalizations.of(context)!.homeDropUnsupported(ext)),
         ),
       );
     }
@@ -79,6 +80,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final width = MediaQuery.sizeOf(context).width;
     final isWide = width > 700;
     final topPad = MediaQuery.of(context).padding.top + 64 + 12;
@@ -99,18 +101,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           title: 'Gifolomora',
           leading: const _BrandLockup(),
           actions: [
-            if (Platform.isWindows)
-              IconButton(
-                onPressed: () => context.push('/settings'),
-                icon: const Icon(Icons.settings_outlined,
-                    color: AppColors.textLo, size: 22),
-                tooltip: 'Settings',
-              ),
+            IconButton(
+              onPressed: () => context.push('/settings'),
+              icon: const Icon(Icons.settings_outlined,
+                  color: AppColors.textLo, size: 22),
+              tooltip: l10n.settingsTooltip,
+            ),
             IconButton(
               onPressed: () => context.push('/about'),
               icon: const Icon(Icons.info_outline_rounded,
                   color: AppColors.textLo, size: 22),
-              tooltip: 'About',
+              tooltip: l10n.aboutTooltip,
             ),
           ],
         ),
@@ -139,12 +140,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     // ── Create ─────────────────────────────────────────────
                     SliverPadding(
                       padding: const EdgeInsets.fromLTRB(16, 28, 16, 14),
-                      sliver: const SliverToBoxAdapter(
+                      sliver: SliverToBoxAdapter(
                         child: Entrance(
-                          delay: Duration(milliseconds: 100),
+                          delay: const Duration(milliseconds: 100),
                           child: SectionHeader(
-                            overline: 'Start here',
-                            title: 'Create a GIF',
+                            overline: l10n.homeSectionCreateOverline,
+                            title: l10n.homeSectionCreateTitle,
                           ),
                         ),
                       ),
@@ -178,12 +179,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     // ── Refine ─────────────────────────────────────────────
                     SliverPadding(
                       padding: const EdgeInsets.fromLTRB(16, 28, 16, 14),
-                      sliver: const SliverToBoxAdapter(
+                      sliver: SliverToBoxAdapter(
                         child: Entrance(
-                          delay: Duration(milliseconds: 200),
+                          delay: const Duration(milliseconds: 200),
                           child: SectionHeader(
-                            overline: 'Toolkit',
-                            title: 'Edit & optimize',
+                            overline: l10n.homeSectionRefineOverline,
+                            title: l10n.homeSectionRefineTitle,
                           ),
                         ),
                       ),
@@ -229,7 +230,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   child: Opacity(
                     opacity: 0.5,
                     child: Text(
-                      'v$_version',
+                      l10n.homeVersionBadge(_version!),
                       style: const TextStyle(
                         color: AppColors.textLo,
                         fontSize: 11,
@@ -268,16 +269,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           width: 2,
                         ),
                       ),
-                      child: const Center(
+                      child: Center(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.file_download_rounded,
+                            const Icon(Icons.file_download_rounded,
                                 color: AppColors.accentB, size: 64),
-                            SizedBox(height: 12),
+                            const SizedBox(height: 12),
                             Text(
-                              'Drop video or GIF',
-                              style: TextStyle(
+                              l10n.homeDropVideoOrGif,
+                              style: const TextStyle(
                                 color: AppColors.textHi,
                                 fontSize: 22,
                                 fontWeight: FontWeight.w700,

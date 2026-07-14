@@ -123,6 +123,7 @@ flutter analyze                    # lint + type-check (0 issues required before
 flutter test                       # all tests
 flutter test test/widget_test.dart # single test file
 dart run build_runner watch        # codegen watch mode (if using @riverpod)
+flutter gen-l10n                   # generate i18n from ARB files (lib/l10n/)
 ```
 
 ## Architecture

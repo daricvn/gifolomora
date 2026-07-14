@@ -27,6 +27,7 @@ import '../../_shared/widgets/option_slider.dart';
 import '../../_shared/widgets/text_overlay_controls.dart';
 import '../../_shared/widgets/video_preview.dart';
 import '../../text_overlay/model/text_item.dart';
+import '../../../l10n/app_localizations.dart';
 import '../widgets/cut_segment_slider.dart';
 import '../widgets/video_trim_slider.dart';
 import '../controller/video_studio_controller.dart';
@@ -154,7 +155,7 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
     final file = details.files.first;
     final ext = file.path.split('.').last.toLowerCase();
     if (!_kAllExtensions.contains(ext)) {
-      toast('.$ext is not supported. Drop a video or GIF.');
+      toast(AppLocalizations.of(context)!.homeDropUnsupported(ext));
       return;
     }
     await ctrl.setInput(File(file.path));
@@ -237,9 +238,10 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
     void Function(String) toast,
     double topInset,
   ) {
+    final l10n = AppLocalizations.of(context)!;
     return GradientScaffold(
       appBar: GlassAppBar(
-        title: 'Video Studio',
+        title: l10n.toolVideoStudioLabel,
         leading: Padding(
           padding: const EdgeInsets.only(left: 16),
           child: Align(
@@ -258,7 +260,7 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
         actions: [
           if (state.hasInput && !state.isProcessing)
             IconButton(
-              tooltip: 'Start over',
+              tooltip: l10n.studioStartOverLabel,
               icon: const Icon(
                 Icons.restart_alt_rounded,
                 color: AppColors.textLo,
@@ -267,9 +269,9 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
               onPressed: () async {
                 final ok = await GlassConfirmDialog.show(
                   context,
-                  title: 'Start over?',
-                  message: 'This discards the loaded file and all edits.',
-                  confirmLabel: 'Start over',
+                  title: l10n.studioStartOverDialogTitle,
+                  message: l10n.studioStartOverDialogMessage,
+                  confirmLabel: l10n.studioStartOverLabel,
                   isDestructive: true,
                 );
                 if (ok == true) ctrl.clear();
@@ -285,7 +287,7 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
           ),
           if (state.isProcessing)
             _ProcessingOverlay(
-              label: state.isGif ? 'Rendering GIF…' : 'Encoding…',
+              label: state.isGif ? l10n.studioRenderingGif : l10n.studioEncoding,
               progress: state.progress?.fraction,
               onCancel: ctrl.cancel,
             ),
@@ -305,20 +307,20 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                           width: 2,
                         ),
                       ),
-                      child: const Padding(
-                        padding: EdgeInsets.all(32),
+                      child: Padding(
+                        padding: const EdgeInsets.all(32),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
+                            const Icon(
                               Icons.file_download_rounded,
                               color: AppColors.accentB,
                               size: 64,
                             ),
-                            SizedBox(height: 12),
+                            const SizedBox(height: 12),
                             Text(
-                              'Drop video or GIF',
-                              style: TextStyle(
+                              l10n.homeDropVideoOrGif,
+                              style: const TextStyle(
                                 color: AppColors.textHi,
                                 fontSize: 22,
                                 fontWeight: FontWeight.w700,
@@ -343,16 +345,17 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
     VideoStudioController ctrl,
     void Function(String) toast,
   ) {
+    final l10n = AppLocalizations.of(context)!;
     if (state.isProbing || _awaitingInitialFile) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(color: AppColors.accentB),
-            SizedBox(height: 12),
+            const CircularProgressIndicator(color: AppColors.accentB),
+            const SizedBox(height: 12),
             Text(
-              'Reading file…',
-              style: TextStyle(color: AppColors.textLo, fontSize: 13),
+              l10n.commonReadingFile,
+              style: const TextStyle(color: AppColors.textLo, fontSize: 13),
             ),
           ],
         ),
@@ -364,7 +367,7 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
         padding: const EdgeInsets.all(16),
         child: Center(
           child: FileDropZone(
-            hint: 'Tap to select a video or GIF',
+            hint: l10n.studioTapToSelectVideoOrGif,
             icon: Icons.perm_media_rounded,
             allowedExtensions: _kAllExtensions,
             onFilesSelected: (files) {
@@ -504,7 +507,7 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                                     Positioned(
                                       top: 10,
                                       left: 10,
-                                      child: _chip('ORIGINAL'),
+                                      child: _chip(l10n.studioOriginalBadge),
                                     ),
                                   if (state.textItems.isNotEmpty && !_comparing)
                                     Positioned.fill(
@@ -562,19 +565,19 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                                                           6,
                                                         ),
                                                   ),
-                                                  child: const Row(
+                                                  child: Row(
                                                     mainAxisSize:
                                                         MainAxisSize.min,
                                                     children: [
-                                                      Icon(
+                                                      const Icon(
                                                         Icons.cut_rounded,
                                                         color: Colors.white,
                                                         size: 11,
                                                       ),
-                                                      SizedBox(width: 4),
+                                                      const SizedBox(width: 4),
                                                       Text(
-                                                        'CUT',
-                                                        style: TextStyle(
+                                                        l10n.studioCutBadge,
+                                                        style: const TextStyle(
                                                           color: Colors.white,
                                                           fontSize: 10,
                                                           fontWeight:
@@ -607,7 +610,10 @@ class _VideoStudioScreenState extends ConsumerState<VideoStudioScreen> {
                                           left: 10,
                                           bottom: 8,
                                           child: _chip(
-                                            '${_fmtMs(pos)} / ${_fmtMs(state.sourceDurationMs)}',
+                                            l10n.studioPositionOfDuration(
+                                              _fmtMs(pos),
+                                              _fmtMs(state.sourceDurationMs),
+                                            ),
                                             alpha: 0.55,
                                             weight: FontWeight.w600,
                                           ),
@@ -804,6 +810,7 @@ class _StageBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final dims = state.sourceWidth > 0
         ? '${state.sourceWidth}×${state.sourceHeight}'
         : '';
@@ -830,7 +837,7 @@ class _StageBanner extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  state.isGif ? 'Editing GIF' : 'Editing video',
+                  state.isGif ? l10n.studioEditingGif : l10n.studioEditingVideo,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 12,
@@ -845,7 +852,8 @@ class _StageBanner extends StatelessWidget {
             child: Text(
               [
                 if (dims.isNotEmpty) dims,
-                if (!state.isGif) state.hasAudio ? 'audio' : 'no audio',
+                if (!state.isGif)
+                  state.hasAudio ? l10n.studioAudioLabel : l10n.studioNoAudioLabel,
               ].join(' · '),
               style: const TextStyle(color: AppColors.textLo, fontSize: 12),
               maxLines: 1,
@@ -865,9 +873,9 @@ class _StageBanner extends StatelessWidget {
                 size: 15,
                 color: AppColors.accentB,
               ),
-              label: const Text(
-                'Change',
-                style: TextStyle(color: AppColors.accentB, fontSize: 12),
+              label: Text(
+                l10n.studioChangeButton,
+                style: const TextStyle(color: AppColors.accentB, fontSize: 12),
               ),
             ),
         ],
@@ -897,8 +905,8 @@ class _ZoomControl extends StatelessWidget {
   final double? zoom;
   final void Function(double?) onChanged;
 
-  String get _label {
-    if (zoom == null) return 'Fit';
+  String _label(AppLocalizations l10n) {
+    if (zoom == null) return l10n.studioZoomFit;
     for (final p in _kZoomPresets) {
       if (p.$2 == zoom) return p.$1;
     }
@@ -907,8 +915,9 @@ class _ZoomControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return PopupMenuButton<int>(
-      tooltip: 'Zoom',
+      tooltip: l10n.studioZoomTooltip,
       position: PopupMenuPosition.under,
       color: AppColors.bg1,
       shape: RoundedRectangleBorder(
@@ -933,7 +942,7 @@ class _ZoomControl extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(
                   _kZoomPresets[i].$1 == 'Fit'
-                      ? 'Fit to window'
+                      ? l10n.studioZoomFitToWindow
                       : _kZoomPresets[i].$1,
                   style: TextStyle(
                     color: _kZoomPresets[i].$2 == zoom
@@ -962,7 +971,7 @@ class _ZoomControl extends StatelessWidget {
             ),
             const SizedBox(width: 5),
             Text(
-              _label,
+              _label(l10n),
               style: const TextStyle(
                 color: AppColors.textHi,
                 fontSize: 12,
@@ -992,6 +1001,7 @@ class _CompareButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GestureDetector(
       onTapDown: (_) => onHoldChanged(true),
       onTapUp: (_) => onHoldChanged(false),
@@ -1009,7 +1019,7 @@ class _CompareButton extends StatelessWidget {
             ),
             const SizedBox(width: 5),
             Text(
-              active ? 'Original' : 'Compare',
+              active ? l10n.commonOriginal : l10n.studioCompareLabel,
               style: TextStyle(
                 color: active ? AppColors.accentB : AppColors.textHi,
                 fontSize: 12,
@@ -1362,18 +1372,19 @@ class _ToolSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final active = state.activeTool;
     final isGif = state.isGif;
     // (tool, icon, label)
     final tools = [
-      (StudioTool.crop, Icons.crop_rounded, 'Crop'),
-      (StudioTool.resize, Icons.photo_size_select_large_rounded, 'Resize'),
-      (StudioTool.speed, Icons.speed_rounded, 'Speed'),
-      (StudioTool.trim, Icons.straighten_rounded, 'Trim'),
-      if (!isGif) (StudioTool.cut, Icons.cut_rounded, 'Cut'),
-      (StudioTool.text, Icons.title_rounded, 'Text'),
-      if (isGif) (StudioTool.optimize, Icons.tune_rounded, 'Optimise'),
-      (StudioTool.properties, Icons.settings_suggest_rounded, 'Props'),
+      (StudioTool.crop, Icons.crop_rounded, l10n.toolCropLabel),
+      (StudioTool.resize, Icons.photo_size_select_large_rounded, l10n.toolResizeLabel),
+      (StudioTool.speed, Icons.speed_rounded, l10n.commonSpeed),
+      (StudioTool.trim, Icons.straighten_rounded, l10n.studioToolTrim),
+      if (!isGif) (StudioTool.cut, Icons.cut_rounded, l10n.studioToolCut),
+      (StudioTool.text, Icons.title_rounded, l10n.studioToolText),
+      if (isGif) (StudioTool.optimize, Icons.tune_rounded, l10n.studioToolOptimize),
+      (StudioTool.properties, Icons.settings_suggest_rounded, l10n.studioToolProps),
       if (!isGif) (StudioTool.gif, Icons.gif_box_rounded, 'GIF'),
       if (isGif) (StudioTool.webm, Icons.movie_creation_rounded, 'WebM'),
     ];
@@ -1655,21 +1666,22 @@ class _ToolPanel extends StatelessWidget {
           child: child,
         ),
       ),
-      child: _panel(),
+      child: _panel(context),
     );
   }
 
-  Widget _panel() {
+  Widget _panel(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     switch (state.activeTool) {
       case StudioTool.crop:
         return Row(
           key: const ValueKey('crop'),
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Flexible(
+            Flexible(
               child: Text(
-                'Drag the handles on the preview to crop',
-                style: TextStyle(color: AppColors.textLo, fontSize: 12),
+                l10n.studioCropDragHint,
+                style: const TextStyle(color: AppColors.textLo, fontSize: 12),
               ),
             ),
             if (!state.isCropFull)
@@ -1680,9 +1692,9 @@ class _ToolPanel extends StatelessWidget {
                   size: 14,
                   color: AppColors.accentB,
                 ),
-                label: const Text(
-                  'Reset',
-                  style: TextStyle(color: AppColors.accentB, fontSize: 12),
+                label: Text(
+                  l10n.commonReset,
+                  style: const TextStyle(color: AppColors.accentB, fontSize: 12),
                 ),
               ),
           ],
@@ -1699,24 +1711,24 @@ class _ToolPanel extends StatelessWidget {
           key: const ValueKey('speed'),
           children: [
             OptionSlider(
-              label: 'Playback speed',
+              label: l10n.studioPlaybackSpeedLabel,
               value: state.speedFactor,
               min: 0.25,
               max: 4.0,
               divisions: 75,
-              displayValue: _speedLabel(state.speedFactor),
+              displayValue: _speedLabel(l10n, state.speedFactor),
               onChanged: (v) => ctrl.setSpeed(_snapSpeed(v)),
             ),
-            const Row(
+            Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  '0.25× slower',
-                  style: TextStyle(color: AppColors.textLo, fontSize: 11),
+                  l10n.effectsSpeedSlower,
+                  style: const TextStyle(color: AppColors.textLo, fontSize: 11),
                 ),
                 Text(
-                  '4× faster',
-                  style: TextStyle(color: AppColors.textLo, fontSize: 11),
+                  l10n.effectsSpeedFaster,
+                  style: const TextStyle(color: AppColors.textLo, fontSize: 11),
                 ),
               ],
             ),
@@ -1782,10 +1794,12 @@ class _ToolPanel extends StatelessWidget {
     }
   }
 
-  String _speedLabel(double v) {
-    if ((v - 1.0).abs() < 0.01) return '1× (original)';
-    if (v < 1.0) return '${v.toStringAsFixed(2)}× (slower)';
-    return '${v.toStringAsFixed(2)}× (faster)';
+  String _speedLabel(AppLocalizations l10n, double v) {
+    if ((v - 1.0).abs() < 0.01) return l10n.effectsSpeedLabelOriginal;
+    if (v < 1.0) {
+      return l10n.effectsSpeedLabelSlower(v.toStringAsFixed(2));
+    }
+    return l10n.effectsSpeedLabelFaster(v.toStringAsFixed(2));
   }
 
   double _snapSpeed(double v) {
@@ -1813,6 +1827,7 @@ class _TrimPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final totalMs = state.sourceDurationMs;
     final endMs = state.effectiveTrimEndMs;
     final clipMs = (endMs - state.trimStartMs).clamp(
@@ -1839,16 +1854,16 @@ class _TrimPanel extends StatelessWidget {
           children: [
             _TrimChip(
               icon: Icons.login_rounded,
-              label: 'In',
+              label: l10n.studioTrimInLabel,
               ms: state.trimStartMs,
             ),
             _TrimChip(
               icon: Icons.straighten_rounded,
-              label: 'Clip',
+              label: l10n.studioTrimClipLabel,
               ms: clipMs,
               highlight: true,
             ),
-            _TrimChip(icon: Icons.logout_rounded, label: 'Out', ms: endMs),
+            _TrimChip(icon: Icons.logout_rounded, label: l10n.studioTrimOutLabel, ms: endMs),
             if (state.hasTrim)
               TextButton.icon(
                 onPressed: ctrl.resetTrim,
@@ -1857,9 +1872,9 @@ class _TrimPanel extends StatelessWidget {
                   size: 13,
                   color: AppColors.accentB,
                 ),
-                label: const Text(
-                  'Reset',
-                  style: TextStyle(color: AppColors.accentB, fontSize: 12),
+                label: Text(
+                  l10n.commonReset,
+                  style: const TextStyle(color: AppColors.accentB, fontSize: 12),
                 ),
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -1875,7 +1890,7 @@ class _TrimPanel extends StatelessWidget {
             const Icon(Icons.speed_rounded, size: 13, color: AppColors.textLo),
             const SizedBox(width: 4),
             Text(
-              'GIF will be capped at ${state.maxGifFps} fps for this length.',
+              l10n.studioGifCappedFpsHint(state.maxGifFps),
               style: const TextStyle(color: AppColors.textLo, fontSize: 11),
             ),
           ],
@@ -1949,6 +1964,7 @@ class _CutPanelState extends State<_CutPanel> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final s = widget.state;
     final totalMs = s.sourceDurationMs;
 
@@ -1976,13 +1992,13 @@ class _CutPanelState extends State<_CutPanel> {
           children: [
             _TrimChip(
               icon: Icons.login_rounded,
-              label: 'From',
+              label: l10n.studioCutFromLabel,
               ms: _pendingStartMs,
             ),
             const SizedBox(width: 8),
             _TrimChip(
               icon: Icons.logout_rounded,
-              label: 'To',
+              label: l10n.studioCutToLabel,
               ms: _pendingEndMs,
             ),
             const Spacer(),
@@ -2000,7 +2016,7 @@ class _CutPanelState extends State<_CutPanel> {
                             _pendingStartMs,
                             _pendingEndMs,
                           );
-                          if (!ok) widget.toast("Can't add that segment");
+                          if (!ok) widget.toast(l10n.studioCantAddSegment);
                         },
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -2018,7 +2034,7 @@ class _CutPanelState extends State<_CutPanel> {
                         Icon(Icons.cut_rounded, color: color, size: 14),
                         const SizedBox(width: 6),
                         Text(
-                          'Mark for removal',
+                          l10n.studioMarkForRemoval,
                           style: TextStyle(
                             color: color,
                             fontSize: 13,
@@ -2035,9 +2051,9 @@ class _CutPanelState extends State<_CutPanel> {
         ),
         const SizedBox(height: 8),
         if (s.cutSegments.isEmpty)
-          const Text(
-            'Mark a span to remove it',
-            style: TextStyle(color: AppColors.textLo, fontSize: 12),
+          Text(
+            l10n.studioMarkSpanHint,
+            style: const TextStyle(color: AppColors.textLo, fontSize: 12),
           )
         else ...[
           ...s.cutSegments.map(
@@ -2097,7 +2113,7 @@ class _CutPanelState extends State<_CutPanel> {
           Row(
             children: [
               Text(
-                'Output ≈ ${_fmtMs(s.cutOutputMs)}',
+                l10n.studioCutOutputLabel(_fmtMs(s.cutOutputMs)),
                 style: const TextStyle(color: AppColors.textLo, fontSize: 12),
               ),
               const Spacer(),
@@ -2108,9 +2124,9 @@ class _CutPanelState extends State<_CutPanel> {
                   size: 13,
                   color: AppColors.accentB,
                 ),
-                label: const Text(
-                  'Clear all',
-                  style: TextStyle(color: AppColors.accentB, fontSize: 12),
+                label: Text(
+                  l10n.commonClearAll,
+                  style: const TextStyle(color: AppColors.accentB, fontSize: 12),
                 ),
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -2139,6 +2155,7 @@ class _StudioTextPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return ConstrainedBox(
       constraints: const BoxConstraints(maxHeight: 340),
       child: SingleChildScrollView(
@@ -2150,18 +2167,18 @@ class _StudioTextPanel extends StatelessWidget {
                 borderRadius: 16,
                 tint: Colors.orange,
                 opacity: 0.08,
-                child: const Row(
+                child: Row(
                   children: [
-                    Icon(
+                    const Icon(
                       Icons.warning_amber_rounded,
                       color: Colors.orange,
                       size: 20,
                     ),
-                    SizedBox(width: 10),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'No system font found. Text may fail to render.',
-                        style: TextStyle(color: Colors.orange, fontSize: 13),
+                        l10n.studioNoFontWarning,
+                        style: const TextStyle(color: Colors.orange, fontSize: 13),
                       ),
                     ),
                   ],
@@ -2489,8 +2506,9 @@ class _ResizeChips extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final presets = <(String, int?)>[
-      ('Original', null),
+      (l10n.commonOriginal, null),
       ('1080p', 1920),
       ('720p', 1280),
       ('480p', 854),
@@ -2537,7 +2555,7 @@ class _ResizeChips extends StatelessWidget {
         if (sourceWidth > 0) ...[
           const SizedBox(height: 16),
           OptionSlider(
-            label: 'Scale',
+            label: l10n.studioScaleLabel,
             value: sliderPct,
             min: 10,
             max: 200,
@@ -2552,16 +2570,16 @@ class _ResizeChips extends StatelessWidget {
               }
             },
           ),
-          const Row(
+          Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '10% smaller',
-                style: TextStyle(color: AppColors.textLo, fontSize: 11),
+                l10n.studioScaleSmaller,
+                style: const TextStyle(color: AppColors.textLo, fontSize: 11),
               ),
               Text(
-                '200% larger',
-                style: TextStyle(color: AppColors.textLo, fontSize: 11),
+                l10n.studioScaleLarger,
+                style: const TextStyle(color: AppColors.textLo, fontSize: 11),
               ),
             ],
           ),
@@ -2588,12 +2606,13 @@ class _GifPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final maxFps = state.maxGifFps;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         OptionSlider(
-          label: 'Frame rate',
+          label: l10n.studioFrameRateLabel,
           value: state.fps.toDouble().clamp(2, maxFps.toDouble()),
           min: 2,
           max: maxFps.toDouble(),
@@ -2603,7 +2622,7 @@ class _GifPanel extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'Capped at $maxFps fps for this length.',
+          l10n.studioCappedFpsHint(maxFps),
           style: const TextStyle(color: AppColors.textLo, fontSize: 11),
         ),
         if (state.gifWidthCapped) ...[
@@ -2618,7 +2637,7 @@ class _GifPanel extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  'GIF capped at ${state.maxGifWidth}px wide',
+                  l10n.studioGifCappedWidthHint(state.maxGifWidth),
                   style: const TextStyle(color: AppColors.textLo, fontSize: 12),
                 ),
               ),
@@ -2629,10 +2648,10 @@ class _GifPanel extends StatelessWidget {
           const SizedBox(height: 10),
           Row(
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'Ignore GIF size limit',
-                  style: TextStyle(color: AppColors.textHi, fontSize: 14),
+                  l10n.studioIgnoreGifSizeLimit,
+                  style: const TextStyle(color: AppColors.textHi, fontSize: 14),
                 ),
               ),
               Switch(
@@ -2645,9 +2664,9 @@ class _GifPanel extends StatelessWidget {
             ],
           ),
           if (state.forceOriginalGifWidthActive)
-            const Text(
-              'Full size may run slow',
-              style: TextStyle(color: AppColors.textLo, fontSize: 11),
+            Text(
+              l10n.studioFullSizeSlowWarning,
+              style: const TextStyle(color: AppColors.textLo, fontSize: 11),
             ),
         ],
         const SizedBox(height: 14),
@@ -2655,20 +2674,19 @@ class _GifPanel extends StatelessWidget {
           width: double.infinity,
           child: _MakeActionButton(
             icon: Icons.auto_awesome_rounded,
-            label: 'Make GIF',
+            label: l10n.studioMakeGifButton,
             onTap: () async {
               if (state.effectiveOutputMs > 40000) {
                 final proceed = await GlassConfirmDialog.show(
                   context,
-                  title: 'Video too long',
-                  message:
-                      'GIF is limited to 40 seconds. Trim the video first for best results, or only the first 40 seconds will be used.',
-                  confirmLabel: 'Use first 40s',
+                  title: l10n.studioVideoTooLongTitle,
+                  message: l10n.studioGifLimitMessage,
+                  confirmLabel: l10n.studioUseFirst40s,
                 );
                 if (proceed != true) return;
               }
               final ok = await ctrl.makeGif();
-              if (!ok) toast('Could not create GIF');
+              if (!ok) toast(l10n.studioCouldNotCreateGif);
             },
           ),
         ),
@@ -2750,23 +2768,23 @@ class _WebmPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Converts this GIF to a WebM video, then switches to video editing. '
-          'One-way — there is no going back to the GIF.',
-          style: TextStyle(color: AppColors.textLo, fontSize: 12),
+        Text(
+          l10n.studioWebmConvertHint,
+          style: const TextStyle(color: AppColors.textLo, fontSize: 12),
         ),
         const SizedBox(height: 14),
         SizedBox(
           width: double.infinity,
           child: _MakeActionButton(
             icon: Icons.movie_creation_rounded,
-            label: 'Convert to WebM',
+            label: l10n.studioConvertToWebmButton,
             onTap: () async {
               final ok = await ctrl.makeWebm();
-              if (!ok) toast('Could not convert to WebM');
+              if (!ok) toast(l10n.studioCouldNotConvertWebm);
             },
           ),
         ),
@@ -2782,6 +2800,7 @@ class _OptimizePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2793,16 +2812,16 @@ class _OptimizePanel extends StatelessWidget {
               activeThumbColor: AppColors.accentB,
             ),
             const SizedBox(width: 8),
-            const Text(
-              'Optimise output GIF',
-              style: TextStyle(color: AppColors.textHi, fontSize: 14),
+            Text(
+              l10n.imagesOptimizeToggleLabel,
+              style: const TextStyle(color: AppColors.textHi, fontSize: 14),
             ),
           ],
         ),
         if (state.doOptimize) ...[
           const SizedBox(height: 10),
           OptionSlider(
-            label: 'Colors',
+            label: l10n.optimizeColorsLabel,
             value: state.optimizeColors.toDouble(),
             min: 16,
             max: 254,
@@ -2812,20 +2831,20 @@ class _OptimizePanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           OptionSlider(
-            label: 'Lossy',
+            label: l10n.optimizeLossyLabel,
             value: state.optimizeLossy.toDouble(),
             min: 0,
             max: 80,
             divisions: 16,
             displayValue: state.optimizeLossy == 0
-                ? 'Off'
+                ? l10n.commonOff
                 : '${state.optimizeLossy}',
             onChanged: (v) => ctrl.setOptimizeLossy(v.round()),
           ),
           const SizedBox(height: 14),
-          const Text(
-            'Remove frames',
-            style: TextStyle(
+          Text(
+            l10n.optimizeRemoveFrames,
+            style: const TextStyle(
               color: AppColors.textHi,
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -2836,11 +2855,11 @@ class _OptimizePanel extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children:
-                const [
-                  ('Keep all', 0),
-                  ('1 / 4', 4),
-                  ('1 / 3', 3),
-                  ('1 / 2', 2),
+                [
+                  (l10n.optimizeKeepAll, 0),
+                  (l10n.optimizeFrameDropQuarter, 4),
+                  (l10n.optimizeFrameDropThird, 3),
+                  (l10n.optimizeFrameDropHalf, 2),
                 ].map((p) {
                   final selected = p.$2 == state.optimizeFrameDrop;
                   return ChoiceChip(
@@ -2893,7 +2912,7 @@ class _PropertiesPanel extends StatelessWidget {
 
   // Shared by both stages: switch + status text + conditional crossfade
   // slider. [noun] fills the "___ longer than 3s only." gate message.
-  List<Widget> _smoothLoopControls(String noun) => [
+  List<Widget> _smoothLoopControls(AppLocalizations l10n, String noun) => [
     Row(
       children: [
         Switch(
@@ -2904,7 +2923,7 @@ class _PropertiesPanel extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            'Smooth Loop — crossfade last ${state.smoothLoopCrossfadeMs}ms into first ${state.smoothLoopCrossfadeMs}ms',
+            l10n.studioSmoothLoopLabel(state.smoothLoopCrossfadeMs),
             style: const TextStyle(color: AppColors.textHi, fontSize: 14),
           ),
         ),
@@ -2913,16 +2932,16 @@ class _PropertiesPanel extends StatelessWidget {
     const SizedBox(height: 6),
     Text(
       !state.canSmoothLoop
-          ? '$noun longer than 3s only.'
+          ? l10n.studioLoopMinLengthHint(noun)
           : (state.smoothLoop && !state.smoothLoopValid
-                ? 'Speed/trim leave too little to crossfade — turn Smooth Loop off.'
-                : 'Loops seamlessly by dissolving the tail into the head.'),
+                ? l10n.studioCrossfadeTooShort
+                : l10n.studioLoopsSeamlessly),
       style: const TextStyle(color: AppColors.textLo, fontSize: 11),
     ),
     if (state.smoothLoop) ...[
       const SizedBox(height: 8),
       OptionSlider(
-        label: 'Crossfade duration',
+        label: l10n.studioCrossfadeDurationLabel,
         value: state.smoothLoopCrossfadeMs.toDouble(),
         min: 500,
         max: 1000,
@@ -2935,6 +2954,7 @@ class _PropertiesPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     // Video: volume + smooth loop (no fps/loopCount/boomerang — GIF concepts).
     if (!state.isGif) {
       final pct = (state.volume * 100).round();
@@ -2942,23 +2962,23 @@ class _PropertiesPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           OptionSlider(
-            label: 'Volume',
+            label: l10n.studioVolumeLabel,
             value: (state.volume * 100).clamp(0, 200),
             min: 0,
             max: 200,
             divisions: 40,
-            displayValue: state.hasAudio ? '$pct%' : 'No audio',
+            displayValue: state.hasAudio ? '$pct%' : l10n.studioNoAudioCaption,
             onChanged: state.hasAudio ? (v) => ctrl.setVolume(v / 100) : (_) {},
           ),
           const SizedBox(height: 4),
           Text(
             state.hasAudio
-                ? '100% = original · 0% mutes · up to 200% louder.'
-                : 'This video has no audio track.',
+                ? l10n.studioVolumeHint
+                : l10n.studioNoAudioTrackHint,
             style: const TextStyle(color: AppColors.textLo, fontSize: 11),
           ),
           const SizedBox(height: 14),
-          ..._smoothLoopControls('Clips'),
+          ..._smoothLoopControls(l10n, l10n.studioNounClips),
         ],
       );
     }
@@ -2966,7 +2986,7 @@ class _PropertiesPanel extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         OptionSlider(
-          label: 'Frame rate',
+          label: l10n.studioFrameRateLabel,
           value: state.fps.toDouble().clamp(5, 30),
           min: 5,
           max: 30,
@@ -2977,14 +2997,14 @@ class _PropertiesPanel extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           state.isGif
-              ? 'Lowering re-times the GIF; you can\'t add frames back.'
-              : 'Higher = smoother but larger.',
+              ? l10n.studioFpsLowerHint
+              : l10n.studioFpsHigherHint,
           style: const TextStyle(color: AppColors.textLo, fontSize: 11),
         ),
         const SizedBox(height: 14),
-        const Text(
-          'Loops',
-          style: TextStyle(
+        Text(
+          l10n.studioLoopsLabel,
+          style: const TextStyle(
             color: AppColors.textHi,
             fontSize: 13,
             fontWeight: FontWeight.w600,
@@ -3006,8 +3026,8 @@ class _PropertiesPanel extends StatelessWidget {
         const SizedBox(height: 6),
         Text(
           state.loopCount == 0
-              ? 'Plays forever'
-              : 'Plays then repeats ${state.loopCount}×',
+              ? l10n.studioPlaysForever
+              : l10n.studioPlaysThenRepeats(state.loopCount),
           style: const TextStyle(color: AppColors.textLo, fontSize: 11),
         ),
         const SizedBox(height: 12),
@@ -3019,16 +3039,16 @@ class _PropertiesPanel extends StatelessWidget {
               activeThumbColor: AppColors.accentB,
             ),
             const SizedBox(width: 8),
-            const Expanded(
+            Expanded(
               child: Text(
-                'Boomerang — reverse for a seamless loop',
-                style: TextStyle(color: AppColors.textHi, fontSize: 14),
+                l10n.studioBoomerangLabel,
+                style: const TextStyle(color: AppColors.textHi, fontSize: 14),
               ),
             ),
           ],
         ),
         const SizedBox(height: 12),
-        ..._smoothLoopControls('GIFs'),
+        ..._smoothLoopControls(l10n, l10n.studioNounGifs),
       ],
     );
   }
@@ -3048,6 +3068,7 @@ class _ActionBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     if (state.isGif) {
       final inputIsGif =
           state.inputFile?.path.toLowerCase().endsWith('.gif') == true;
@@ -3056,14 +3077,13 @@ class _ActionBar extends StatelessWidget {
           if (!inputIsGif) ...[
             _SecondaryButton(
               icon: Icons.arrow_back_rounded,
-              label: 'Back to video',
+              label: l10n.studioBackToVideoButton,
               onTap: () async {
                 final ok = await GlassConfirmDialog.show(
                   context,
-                  title: 'Discard GIF edits?',
-                  message:
-                      'Going back will discard all changes made to the GIF.',
-                  confirmLabel: 'Discard',
+                  title: l10n.studioDiscardGifTitle,
+                  message: l10n.studioDiscardGifMessage,
+                  confirmLabel: l10n.studioDiscardButton,
                   isDestructive: true,
                 );
                 if (ok == true) ctrl.discardGif();
@@ -3073,41 +3093,41 @@ class _ActionBar extends StatelessWidget {
           ],
           _IconButton(
             icon: Icons.undo_rounded,
-            tooltip: 'Undo',
+            tooltip: l10n.studioUndoTooltip,
             enabled: ctrl.canUndo,
             onTap: () {
-              if (!ctrl.undo()) toast('Nothing to undo');
+              if (!ctrl.undo()) toast(l10n.studioNothingToUndo);
             },
           ),
           const SizedBox(width: 8),
           _IconButton(
             icon: Icons.redo_rounded,
-            tooltip: 'Redo',
+            tooltip: l10n.studioRedoTooltip,
             enabled: ctrl.canRedo,
             onTap: () {
-              if (!ctrl.redo()) toast('Nothing to redo');
+              if (!ctrl.redo()) toast(l10n.studioNothingToRedo);
             },
           ),
           const SizedBox(width: 10),
           Expanded(
             child: _SecondaryButton(
               icon: Icons.auto_fix_high_rounded,
-              label: 'Apply',
+              label: l10n.studioApplyButton,
               enabled: state.hasPendingApply,
               onTap: () async {
                 final ok = await ctrl.applyEdits();
-                if (ok) toast('Applied to preview');
+                if (ok) toast(l10n.studioAppliedToPreview);
               },
             ),
           ),
           const SizedBox(width: 10),
           _PrimaryButton(
             icon: Icons.save_alt_rounded,
-            label: 'Export',
-            tooltip: 'Export GIF',
+            label: l10n.studioExportButton,
+            tooltip: l10n.commonExportGif,
             onTap: () async {
               final ok = await ctrl.exportGif();
-              toast(ok ? 'GIF saved' : 'Export cancelled');
+              toast(ok ? l10n.studioGifSaved : l10n.commonExportCancelled);
             },
           ),
         ],
@@ -3118,19 +3138,19 @@ class _ActionBar extends StatelessWidget {
         Expanded(
           child: _SecondaryButton(
             icon: Icons.auto_fix_high_rounded,
-            label: 'Apply',
+            label: l10n.studioApplyButton,
             enabled: state.hasPendingApply,
             onTap: () async {
               final ok = await ctrl.applyVideoEdits();
-              if (ok) toast('Applied to preview');
+              if (ok) toast(l10n.studioAppliedToPreview);
             },
           ),
         ),
         const SizedBox(width: 10),
         _PrimaryButton(
           icon: Icons.save_alt_rounded,
-          label: 'Export',
-          tooltip: 'Export Video',
+          label: l10n.studioExportButton,
+          tooltip: l10n.studioExportVideoTooltip,
           onTap: () async {
             // Untouched video (no edits applied, none pending) → offer the
             // save-as-is card with the source's own extension.
@@ -3146,8 +3166,10 @@ class _ActionBar extends StatelessWidget {
             final ok = await ctrl.exportVideo(format: format);
             toast(
               ok
-                  ? '${format == ExportVideoFormat.webm ? 'WebM' : 'Video'} saved'
-                  : 'Export cancelled',
+                  ? (format == ExportVideoFormat.webm
+                      ? l10n.studioWebmSaved
+                      : l10n.studioVideoSaved)
+                  : l10n.commonExportCancelled,
             );
           },
         ),
@@ -3498,9 +3520,9 @@ class _ProcessingOverlay extends StatelessWidget {
                   const SizedBox(height: 16),
                   TextButton(
                     onPressed: onCancel,
-                    child: const Text(
-                      'Cancel',
-                      style: TextStyle(color: AppColors.accentC),
+                    child: Text(
+                      AppLocalizations.of(context)!.commonCancel,
+                      style: const TextStyle(color: AppColors.accentC),
                     ),
                   ),
                 ],

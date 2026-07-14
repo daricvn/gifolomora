@@ -10,6 +10,7 @@ import '../../../core/widgets/glass/glass_container.dart';
 import '../../_shared/widgets/export_bottom_sheet.dart';
 import '../../_shared/widgets/file_drop_zone.dart';
 import '../../_shared/widgets/media_preview.dart';
+import '../../../l10n/app_localizations.dart';
 import '../controller/crop_controller.dart';
 import '../widgets/crop_overlay.dart';
 
@@ -21,6 +22,7 @@ class CropScreen extends ConsumerWidget {
     final state =
         ref.watch(cropControllerProvider).valueOrNull ?? const CropState();
     final ctrl = ref.read(cropControllerProvider.notifier);
+    final l10n = AppLocalizations.of(context)!;
 
     Future<void> doExport() async {
       await ExportBottomSheet.show(
@@ -29,7 +31,7 @@ class CropScreen extends ConsumerWidget {
           final ok = await ctrl.exportGif();
           if (!ok && context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Export cancelled')),
+              SnackBar(content: Text(l10n.commonExportCancelled)),
             );
           }
         },
@@ -38,7 +40,7 @@ class CropScreen extends ConsumerWidget {
 
     return GradientScaffold(
       appBar: GlassAppBar(
-        title: 'Crop GIF',
+        title: l10n.cropAppBarTitle,
         leading: Padding(
           padding: const EdgeInsets.only(left: 16),
           child: Align(
@@ -62,23 +64,23 @@ class CropScreen extends ConsumerWidget {
         ),
         children: [
           // ── Step 1: Pick GIF ───────────────────────────────────────────
-          const _SectionHeader(number: 1, title: 'Select GIF'),
+          _SectionHeader(number: 1, title: l10n.commonSelectGif),
           const SizedBox(height: 12),
           if (state.isProbing)
             GlassContainer(
               borderRadius: 20,
               padding: const EdgeInsets.symmetric(vertical: 32),
-              child: const Column(children: [
-                CircularProgressIndicator(color: AppColors.accentB),
-                SizedBox(height: 12),
-                Text('Reading file…',
+              child: Column(children: [
+                const CircularProgressIndicator(color: AppColors.accentB),
+                const SizedBox(height: 12),
+                Text(l10n.commonReadingFile,
                     style:
-                        TextStyle(color: AppColors.textLo, fontSize: 13)),
+                        const TextStyle(color: AppColors.textLo, fontSize: 13)),
               ]),
             )
           else if (!state.hasInput)
             FileDropZone(
-              hint: 'Tap to select GIF',
+              hint: l10n.commonTapToSelectGif,
               icon: Icons.gif_box_rounded,
               allowedExtensions: const ['gif'],
               onFilesSelected: (files) {
@@ -98,9 +100,9 @@ class CropScreen extends ConsumerWidget {
             const SizedBox(height: 24),
             _SectionHeader(
               number: 2,
-              title: 'Crop Area',
+              title: l10n.cropStepCropArea,
               subtitle: state.hasValidMedia
-                  ? 'Drag corners to adjust · Drag inside to move'
+                  ? l10n.cropStepCropAreaSubtitle
                   : null,
             ),
             const SizedBox(height: 12),
@@ -127,7 +129,7 @@ class CropScreen extends ConsumerWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    '${state.cropW}×${state.cropH}px',
+                    l10n.cropSizeLabel(state.cropW, state.cropH),
                     style: const TextStyle(
                         color: AppColors.textLo, fontSize: 12),
                   ),
@@ -135,8 +137,8 @@ class CropScreen extends ConsumerWidget {
                     onPressed: ctrl.resetCrop,
                     icon: const Icon(Icons.crop_free_rounded,
                         size: 16, color: AppColors.textLo),
-                    label: const Text('Reset',
-                        style: TextStyle(
+                    label: Text(l10n.commonReset,
+                        style: const TextStyle(
                             color: AppColors.textLo, fontSize: 13)),
                   ),
                 ],
@@ -146,15 +148,14 @@ class CropScreen extends ConsumerWidget {
                 borderRadius: 20,
                 tint: Colors.orange,
                 opacity: 0.06,
-                child: const Row(
+                child: Row(
                   children: [
-                    Icon(Icons.warning_amber_rounded,
+                    const Icon(Icons.warning_amber_rounded,
                         color: Colors.orange, size: 20),
-                    SizedBox(width: 10),
+                    const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                          'Could not read GIF dimensions — crop unavailable',
-                          style: TextStyle(
+                      child: Text(l10n.cropCouldNotReadDims,
+                          style: const TextStyle(
                               color: Colors.orange, fontSize: 13)),
                     ),
                   ],
@@ -163,7 +164,7 @@ class CropScreen extends ConsumerWidget {
 
             // ── Step 3: Preview / Generate ─────────────────────────────
             const SizedBox(height: 24),
-            const _SectionHeader(number: 3, title: 'Preview'),
+            _SectionHeader(number: 3, title: l10n.commonPreview),
             const SizedBox(height: 12),
             if (state.isProcessing)
               _ProgressCard(
@@ -176,7 +177,7 @@ class CropScreen extends ConsumerWidget {
                   OutlinedButton.icon(
                     onPressed: ctrl.generate,
                     icon: const Icon(Icons.refresh_rounded, size: 16),
-                    label: const Text('Regenerate'),
+                    label: Text(l10n.commonRegenerate),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.textLo,
                       side: const BorderSide(color: AppColors.glassStroke),
@@ -308,6 +309,7 @@ class _ProgressCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 20,
       child: Column(
@@ -327,15 +329,15 @@ class _ProgressCard extends StatelessWidget {
             children: [
               Text(
                 progress != null
-                    ? '${(progress! * 100).round()}%  processing…'
-                    : 'Processing…',
+                    ? l10n.commonProcessingPercent((progress! * 100).round())
+                    : l10n.commonProcessing,
                 style: const TextStyle(
                     color: AppColors.textLo, fontSize: 13),
               ),
               TextButton(
                 onPressed: onCancel,
-                child: const Text('Cancel',
-                    style: TextStyle(color: AppColors.accentC)),
+                child: Text(l10n.commonCancel,
+                    style: const TextStyle(color: AppColors.accentC)),
               ),
             ],
           ),
@@ -371,7 +373,7 @@ class _GenerateButton extends StatelessWidget {
                   size: 20),
               const SizedBox(width: 8),
               Text(
-                'Generate Preview',
+                AppLocalizations.of(context)!.commonGeneratePreview,
                 style: TextStyle(
                   color: onTap != null ? Colors.white : AppColors.textLo,
                   fontSize: 15,
@@ -437,8 +439,8 @@ class _ExportBar extends StatelessWidget {
             onPressed: onExport,
             icon: const Icon(Icons.save_alt_rounded,
                 size: 18, color: Colors.white),
-            label: const Text('Export GIF',
-                style: TextStyle(
+            label: Text(AppLocalizations.of(context)!.commonExportGif,
+                style: const TextStyle(
                     color: Colors.white,
                     fontSize: 15,
                     fontWeight: FontWeight.w700)),

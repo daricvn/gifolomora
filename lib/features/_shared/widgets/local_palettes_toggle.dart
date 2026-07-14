@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../l10n/app_localizations.dart';
 
 class LocalPalettesToggle extends StatelessWidget {
   const LocalPalettesToggle({super.key, required this.value, required this.onChanged});
@@ -9,20 +10,21 @@ class LocalPalettesToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Row(
       children: [
-        const Expanded(
+        Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Per-frame palettes',
-                  style: TextStyle(
+              Text(l10n.sharedPerFramePalettes,
+                  style: const TextStyle(
                       color: AppColors.textHi,
                       fontSize: 14,
                       fontWeight: FontWeight.w600)),
-              SizedBox(height: 2),
-              Text('Lossless extra compression, slower',
-                  style: TextStyle(color: AppColors.textLo, fontSize: 12)),
+              const SizedBox(height: 2),
+              Text(l10n.sharedPerFramePalettesDesc,
+                  style: const TextStyle(color: AppColors.textLo, fontSize: 12)),
             ],
           ),
         ),

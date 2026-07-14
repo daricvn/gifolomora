@@ -13,6 +13,7 @@ import '../../_shared/widgets/export_bottom_sheet.dart';
 import '../../_shared/widgets/file_drop_zone.dart';
 import '../../_shared/widgets/media_preview.dart';
 import '../../_shared/widgets/text_overlay_controls.dart';
+import '../../../l10n/app_localizations.dart';
 import '../controller/text_overlay_controller.dart';
 import '../model/text_item.dart';
 
@@ -29,6 +30,7 @@ class TextOverlayScreen extends ConsumerWidget {
     final state = ref.watch(textOverlayControllerProvider).valueOrNull ??
         const TextOverlayState();
     final ctrl = ref.read(textOverlayControllerProvider.notifier);
+    final l10n = AppLocalizations.of(context)!;
 
     Future<void> doExport() async {
       await ExportBottomSheet.show(
@@ -37,7 +39,7 @@ class TextOverlayScreen extends ConsumerWidget {
           final ok = await ctrl.exportGif();
           if (!ok && context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Export cancelled')),
+              SnackBar(content: Text(l10n.commonExportCancelled)),
             );
           }
         },
@@ -46,7 +48,7 @@ class TextOverlayScreen extends ConsumerWidget {
 
     return GradientScaffold(
       appBar: GlassAppBar(
-        title: 'Text Overlay',
+        title: l10n.textOverlayAppBarTitle,
         leading: Padding(
           padding: const EdgeInsets.only(left: 16),
           child: Align(
@@ -70,7 +72,7 @@ class TextOverlayScreen extends ConsumerWidget {
         ),
         children: [
           // ── Step 1: Pick GIF ───────────────────────────────────────────
-          const _SectionHeader(number: 1, title: 'Select GIF'),
+          _SectionHeader(number: 1, title: l10n.commonSelectGif),
           const SizedBox(height: 12),
           if (!state.fontReady) ...[
             const _FontWarningCard(),
@@ -80,16 +82,16 @@ class TextOverlayScreen extends ConsumerWidget {
             GlassContainer(
               borderRadius: 20,
               padding: const EdgeInsets.symmetric(vertical: 32),
-              child: const Column(children: [
-                CircularProgressIndicator(color: AppColors.accentB),
-                SizedBox(height: 12),
-                Text('Reading file…',
-                    style: TextStyle(color: AppColors.textLo, fontSize: 13)),
+              child: Column(children: [
+                const CircularProgressIndicator(color: AppColors.accentB),
+                const SizedBox(height: 12),
+                Text(l10n.commonReadingFile,
+                    style: const TextStyle(color: AppColors.textLo, fontSize: 13)),
               ]),
             )
           else if (!state.hasInput)
             FileDropZone(
-              hint: 'Tap to select GIF',
+              hint: l10n.commonTapToSelectGif,
               icon: Icons.gif_box_rounded,
               allowedExtensions: const ['gif'],
               onFilesSelected: (files) {
@@ -107,10 +109,10 @@ class TextOverlayScreen extends ConsumerWidget {
           // ── Step 2: Editor ─────────────────────────────────────────────
           if (state.hasInput && !state.isProbing && state.mediaInfo != null) ...[
             const SizedBox(height: 24),
-            const _SectionHeader(
+            _SectionHeader(
                 number: 2,
-                title: 'Edit Text',
-                subtitle: 'Drag to position · tap to select'),
+                title: l10n.textOverlayStepEditText,
+                subtitle: l10n.textOverlayStepEditTextSubtitle),
             const SizedBox(height: 12),
             _PreviewEditor(state: state, ctrl: ctrl),
             const SizedBox(height: 12),
@@ -138,7 +140,7 @@ class TextOverlayScreen extends ConsumerWidget {
 
             // ── Step 3: Generate / Preview ───────────────────────────────
             const SizedBox(height: 24),
-            const _SectionHeader(number: 3, title: 'Preview'),
+            _SectionHeader(number: 3, title: l10n.commonPreview),
             const SizedBox(height: 12),
             if (state.isProcessing)
               _ProgressCard(
@@ -151,7 +153,7 @@ class TextOverlayScreen extends ConsumerWidget {
                   OutlinedButton.icon(
                     onPressed: state.canGenerate ? ctrl.generate : null,
                     icon: const Icon(Icons.refresh_rounded, size: 16),
-                    label: const Text('Regenerate'),
+                    label: Text(l10n.commonRegenerate),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.textLo,
                       side: const BorderSide(color: AppColors.glassStroke),
@@ -192,11 +194,11 @@ class _PreviewEditor extends ConsumerWidget {
       child: LayoutBuilder(
         builder: (context, c) {
           if (mw <= 0 || mh <= 0) {
-            return const SizedBox(
+            return SizedBox(
               height: 120,
               child: Center(
-                child: Text('Cannot read dimensions',
-                    style: TextStyle(color: AppColors.textLo, fontSize: 13)),
+                child: Text(AppLocalizations.of(context)!.textOverlayCannotReadDims,
+                    style: const TextStyle(color: AppColors.textLo, fontSize: 13)),
               ),
             );
           }
@@ -378,13 +380,13 @@ class _FontWarningCard extends StatelessWidget {
       tint: Colors.orange,
       opacity: 0.08,
       child: Row(
-        children: const [
-          Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 20),
-          SizedBox(width: 10),
+        children: [
+          const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 20),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'No system font found. Text rendering may fail on Generate.',
-              style: TextStyle(color: Colors.orange, fontSize: 13),
+              AppLocalizations.of(context)!.textOverlayFontWarning,
+              style: const TextStyle(color: Colors.orange, fontSize: 13),
             ),
           ),
         ],
@@ -498,6 +500,7 @@ class _ProgressCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 20,
       child: Column(
@@ -517,14 +520,14 @@ class _ProgressCard extends StatelessWidget {
             children: [
               Text(
                 progress != null
-                    ? '${(progress! * 100).round()}%  processing…'
-                    : 'Processing…',
+                    ? l10n.commonProcessingPercent((progress! * 100).round())
+                    : l10n.commonProcessing,
                 style: const TextStyle(color: AppColors.textLo, fontSize: 13),
               ),
               TextButton(
                 onPressed: onCancel,
-                child: const Text('Cancel',
-                    style: TextStyle(color: AppColors.accentC)),
+                child: Text(l10n.commonCancel,
+                    style: const TextStyle(color: AppColors.accentC)),
               ),
             ],
           ),
@@ -560,7 +563,7 @@ class _GenerateButton extends StatelessWidget {
                   size: 20),
               const SizedBox(width: 8),
               Text(
-                'Generate Preview',
+                AppLocalizations.of(context)!.commonGeneratePreview,
                 style: TextStyle(
                   color: onTap != null ? Colors.white : AppColors.textLo,
                   fontSize: 15,
@@ -626,8 +629,8 @@ class _ExportBar extends StatelessWidget {
             onPressed: onExport,
             icon: const Icon(Icons.save_alt_rounded,
                 size: 18, color: Colors.white),
-            label: const Text('Export GIF',
-                style: TextStyle(
+            label: Text(AppLocalizations.of(context)!.commonExportGif,
+                style: const TextStyle(
                     color: Colors.white,
                     fontSize: 15,
                     fontWeight: FontWeight.w700)),

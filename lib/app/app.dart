@@ -6,9 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 import '../core/services/files/temp_file_service.dart';
+import '../core/services/providers.dart';
 import '../core/theme/app_theme.dart';
 import '../core/widgets/glass/glass_confirm_dialog.dart';
 import '../features/screen_record/controller/record_controller.dart';
+import '../l10n/app_localizations.dart';
 import '../router/app_router.dart';
 
 class GifolomoraApp extends ConsumerStatefulWidget {
@@ -108,12 +110,13 @@ class _GifolomoraAppState extends ConsumerState<GifolomoraApp>
     await _logExitStep('onWindowClose start, route=$location');
 
     if (!_noConfirmExitRoutes.contains(location)) {
+      final context = rootNavigatorKey.currentContext!;
+      final l10n = AppLocalizations.of(context)!;
       final confirmed = await GlassConfirmDialog.show(
-        rootNavigatorKey.currentContext!,
-        title: 'Exit Gifolomora?',
-        message:
-            'You have unsaved work in progress. Are you sure you want to exit?',
-        confirmLabel: 'Exit',
+        context,
+        title: l10n.exitDialogTitle,
+        message: l10n.exitDialogMessage,
+        confirmLabel: l10n.exitConfirmLabel,
       );
       if (confirmed != true) {
         _closing = false;
@@ -153,11 +156,15 @@ class _GifolomoraAppState extends ConsumerState<GifolomoraApp>
 
   @override
   Widget build(BuildContext context) {
+    final localeCode = ref.watch(appSettingsProvider).valueOrNull?.localeCode;
     return MaterialApp.router(
       title: 'Gifolomora',
       theme: AppTheme.dark,
       debugShowCheckedModeBanner: false,
       routerConfig: appRouter,
+      locale: localeCode == null ? null : Locale(localeCode),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
     );
   }
 }

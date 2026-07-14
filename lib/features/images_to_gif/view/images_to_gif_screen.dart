@@ -12,21 +12,31 @@ import '../../_shared/widgets/export_bottom_sheet.dart';
 import '../../_shared/widgets/file_drop_zone.dart';
 import '../../_shared/widgets/media_preview.dart';
 import '../../_shared/widgets/option_slider.dart';
+import '../../../l10n/app_localizations.dart';
 import '../controller/images_to_gif_controller.dart';
 import '../widgets/frame_strip.dart';
 
-const _kPositions = [
-  ('Top', 'top'),
-  ('Center', 'center'),
-  ('Bottom', 'bottom'),
+const _kPositionValues = ['top', 'center', 'bottom'];
+
+const _kFontColorValues = [
+  ('white', Color(0xFFF2F4FF)),
+  ('yellow', Color(0xFFFFE066)),
+  ('black', Color(0xFF22242E)),
+  ('red', Color(0xFFFF5CAA)),
 ];
 
-const _kFontColors = [
-  ('White', 'white', Color(0xFFF2F4FF)),
-  ('Yellow', 'yellow', Color(0xFFFFE066)),
-  ('Black', 'black', Color(0xFF22242E)),
-  ('Red', 'red', Color(0xFFFF5CAA)),
-];
+String _positionLabel(AppLocalizations l10n, String value) => switch (value) {
+      'top' => l10n.imagesPositionTop,
+      'center' => l10n.imagesPositionCenter,
+      _ => l10n.imagesPositionBottom,
+    };
+
+String _fontColorLabel(AppLocalizations l10n, String value) => switch (value) {
+      'white' => l10n.imagesColorWhite,
+      'yellow' => l10n.imagesColorYellow,
+      'black' => l10n.imagesColorBlack,
+      _ => l10n.imagesColorRed,
+    };
 
 class ImagesToGifScreen extends ConsumerStatefulWidget {
   const ImagesToGifScreen({super.key});
@@ -62,6 +72,7 @@ class _ImagesToGifScreenState extends ConsumerState<ImagesToGifScreen> {
 
   Future<void> _export() async {
     if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
     await ExportBottomSheet.show(
       context,
       onExport: () async {
@@ -70,7 +81,7 @@ class _ImagesToGifScreenState extends ConsumerState<ImagesToGifScreen> {
             .exportGif();
         if (!ok && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Export cancelled')),
+            SnackBar(content: Text(l10n.commonExportCancelled)),
           );
         }
       },
@@ -82,10 +93,11 @@ class _ImagesToGifScreenState extends ConsumerState<ImagesToGifScreen> {
     final state = ref.watch(imagesToGifControllerProvider).valueOrNull ??
         const ImagesToGifState();
     final ctrl = ref.read(imagesToGifControllerProvider.notifier);
+    final l10n = AppLocalizations.of(context)!;
 
     return GradientScaffold(
       appBar: GlassAppBar(
-        title: 'Images → GIF',
+        title: l10n.imagesToGifAppBarTitle,
         leading: Padding(
           padding: const EdgeInsets.only(left: 16),
           child: Align(
@@ -112,14 +124,14 @@ class _ImagesToGifScreenState extends ConsumerState<ImagesToGifScreen> {
           // ── Step 1: Pick frames ────────────────────────────────────────
           _SectionHeader(
             number: 1,
-            title: 'Select Frames',
-            subtitle: 'Pick images in the order you want them to play',
+            title: l10n.imagesStepSelectFrames,
+            subtitle: l10n.imagesStepSelectFramesSubtitle,
           ),
           const SizedBox(height: 12),
           if (!state.hasFrames)
             FileDropZone(
               allowMultiple: true,
-              hint: 'Tap to select images',
+              hint: l10n.imagesTapToSelectImages,
               icon: Icons.photo_library_rounded,
               allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp', 'bmp'],
               onFilesSelected: ctrl.addFrames,
@@ -135,14 +147,14 @@ class _ImagesToGifScreenState extends ConsumerState<ImagesToGifScreen> {
           // ── Step 2: Options ────────────────────────────────────────────
           if (state.hasFrames) ...[
             const SizedBox(height: 24),
-            const _SectionHeader(number: 2, title: 'Options'),
+            _SectionHeader(number: 2, title: l10n.commonOptions),
             const SizedBox(height: 12),
             GlassContainer(
               borderRadius: 20,
               child: Column(
                 children: [
                   OptionSlider(
-                    label: 'Frame rate',
+                    label: l10n.imagesFrameRateLabel,
                     value: state.fps.toDouble(),
                     min: 2,
                     max: 30,
@@ -152,13 +164,13 @@ class _ImagesToGifScreenState extends ConsumerState<ImagesToGifScreen> {
                   ),
                   const SizedBox(height: 8),
                   OptionSlider(
-                    label: 'Width',
+                    label: l10n.imagesWidthLabel,
                     value: (state.width ?? 0).toDouble(),
                     min: 0,
                     max: 1280,
                     divisions: 64,
                     displayValue: state.width == null || state.width == 0
-                        ? 'Original'
+                        ? l10n.commonOriginal
                         : '${state.width}px',
                     onChanged: (v) =>
                         ctrl.setWidth(v.round() == 0 ? null : v.round()),
@@ -169,19 +181,19 @@ class _ImagesToGifScreenState extends ConsumerState<ImagesToGifScreen> {
 
             // ── Step 3: Caption ────────────────────────────────────────
             const SizedBox(height: 24),
-            const _SectionHeader(
+            _SectionHeader(
                 number: 3,
-                title: 'Caption',
-                subtitle: 'Optional text drawn on every frame'),
+                title: l10n.imagesStepCaption,
+                subtitle: l10n.imagesStepCaptionSubtitle),
             const SizedBox(height: 12),
             _CaptionSection(state: state, ctrl: ctrl),
 
             // ── Step 4: Optimise GIF ───────────────────────────────────
             const SizedBox(height: 24),
-            const _SectionHeader(
+            _SectionHeader(
                 number: 4,
-                title: 'Optimise GIF',
-                subtitle: 'Reduce colors and file size'),
+                title: l10n.imagesStepOptimizeGif,
+                subtitle: l10n.imagesStepOptimizeGifSubtitle),
             const SizedBox(height: 12),
             _OptimizeSection(
               state: state,
@@ -190,7 +202,7 @@ class _ImagesToGifScreenState extends ConsumerState<ImagesToGifScreen> {
 
             // ── Step 5: Preview / Generate ─────────────────────────────
             const SizedBox(height: 24),
-            const _SectionHeader(number: 5, title: 'Preview'),
+            _SectionHeader(number: 5, title: l10n.commonPreview),
             const SizedBox(height: 12),
             if (state.isProcessing)
               _ProgressCard(
@@ -205,7 +217,7 @@ class _ImagesToGifScreenState extends ConsumerState<ImagesToGifScreen> {
                   OutlinedButton.icon(
                     onPressed: state.canGenerate ? ctrl.generate : null,
                     icon: const Icon(Icons.refresh_rounded, size: 16),
-                    label: const Text('Regenerate'),
+                    label: Text(l10n.commonRegenerate),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.textLo,
                       side: const BorderSide(color: AppColors.glassStroke),
@@ -291,6 +303,7 @@ class _ProgressCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 20,
       child: Column(
@@ -310,15 +323,15 @@ class _ProgressCard extends StatelessWidget {
             children: [
               Text(
                 progress != null
-                    ? '${(progress! * 100).round()}%  processing…'
-                    : 'Processing…',
+                    ? l10n.commonProcessingPercent((progress! * 100).round())
+                    : l10n.commonProcessing,
                 style: const TextStyle(color: AppColors.textLo, fontSize: 13),
               ),
               TextButton(
                 onPressed: onCancel,
-                child: const Text(
-                  'Cancel',
-                  style: TextStyle(color: AppColors.accentC),
+                child: Text(
+                  l10n.commonCancel,
+                  style: const TextStyle(color: AppColors.accentC),
                 ),
               ),
             ],
@@ -358,7 +371,7 @@ class _GenerateButton extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(
-                'Generate Preview',
+                AppLocalizations.of(context)!.commonGeneratePreview,
                 style: TextStyle(
                   color: onTap != null ? Colors.white : AppColors.textLo,
                   fontSize: 15,
@@ -426,9 +439,9 @@ class _ExportBar extends StatelessWidget {
           child: ElevatedButton.icon(
             onPressed: onExport,
             icon: const Icon(Icons.save_alt_rounded, size: 18, color: Colors.white),
-            label: const Text(
-              'Export GIF',
-              style: TextStyle(
+            label: Text(
+              AppLocalizations.of(context)!.commonExportGif,
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 15,
                 fontWeight: FontWeight.w700,
@@ -479,6 +492,7 @@ class _CaptionSectionState extends State<_CaptionSection> {
   Widget build(BuildContext context) {
     final s = widget.state;
     final ctrl = widget.ctrl;
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 20,
       child: Column(
@@ -490,10 +504,10 @@ class _CaptionSectionState extends State<_CaptionSection> {
                 const Icon(Icons.warning_amber_rounded,
                     color: Colors.orange, size: 15),
                 const SizedBox(width: 6),
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'No system font found. Text overlay may fail.',
-                    style: TextStyle(color: Colors.orange, fontSize: 12),
+                    l10n.imagesNoFontWarning,
+                    style: const TextStyle(color: Colors.orange, fontSize: 12),
                   ),
                 ),
               ],
@@ -506,7 +520,7 @@ class _CaptionSectionState extends State<_CaptionSection> {
             style: const TextStyle(color: AppColors.textHi, fontSize: 14),
             maxLines: 1,
             decoration: InputDecoration(
-              hintText: 'Leave empty to skip…',
+              hintText: l10n.imagesCaptionHint,
               hintStyle:
                   const TextStyle(color: AppColors.textLo, fontSize: 14),
               filled: true,
@@ -530,23 +544,23 @@ class _CaptionSectionState extends State<_CaptionSection> {
           ),
           if (s.overlayText.isNotEmpty) ...[
             const SizedBox(height: 14),
-            const Text('Position',
-                style: TextStyle(color: AppColors.textLo, fontSize: 12)),
+            Text(l10n.imagesPositionLabel,
+                style: const TextStyle(color: AppColors.textLo, fontSize: 12)),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
-              children: _kPositions.map((pos) {
-                final selected = pos.$2 == s.overlayPosition;
+              children: _kPositionValues.map((pos) {
+                final selected = pos == s.overlayPosition;
                 return _Chip(
-                  label: pos.$1,
+                  label: _positionLabel(l10n, pos),
                   selected: selected,
-                  onTap: () => ctrl.setOverlayPosition(pos.$2),
+                  onTap: () => ctrl.setOverlayPosition(pos),
                 );
               }).toList(),
             ),
             const SizedBox(height: 14),
             OptionSlider(
-              label: 'Font Size',
+              label: l10n.commonFontSizeLabel,
               value: s.overlayFontSize.toDouble(),
               min: 12,
               max: 96,
@@ -555,18 +569,18 @@ class _CaptionSectionState extends State<_CaptionSection> {
               onChanged: (v) => ctrl.setOverlayFontSize(v.round()),
             ),
             const SizedBox(height: 12),
-            const Text('Color',
-                style: TextStyle(color: AppColors.textLo, fontSize: 12)),
+            Text(l10n.imagesColorLabel,
+                style: const TextStyle(color: AppColors.textLo, fontSize: 12)),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
-              children: _kFontColors.map((entry) {
-                final selected = entry.$2 == s.overlayFontColor;
+              children: _kFontColorValues.map((entry) {
+                final selected = entry.$1 == s.overlayFontColor;
                 return _ColorChip(
-                  label: entry.$1,
-                  color: entry.$3,
+                  label: _fontColorLabel(l10n, entry.$1),
+                  color: entry.$2,
                   selected: selected,
-                  onTap: () => ctrl.setOverlayFontColor(entry.$2),
+                  onTap: () => ctrl.setOverlayFontColor(entry.$1),
                 );
               }).toList(),
             ),
@@ -589,6 +603,7 @@ class _OptimizeSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 20,
       child: Column(
@@ -601,14 +616,14 @@ class _OptimizeSection extends StatelessWidget {
                 activeThumbColor: AppColors.accentB,
               ),
               const SizedBox(width: 8),
-              const Text('Optimise output GIF',
-                  style: TextStyle(color: AppColors.textHi, fontSize: 14)),
+              Text(l10n.imagesOptimizeToggleLabel,
+                  style: const TextStyle(color: AppColors.textHi, fontSize: 14)),
             ],
           ),
           if (state.doOptimize) ...[
             const SizedBox(height: 10),
             OptionSlider(
-              label: 'Colors',
+              label: l10n.optimizeColorsLabel,
               value: state.optimizeColors.toDouble(),
               min: 16,
               max: 256,
@@ -618,13 +633,13 @@ class _OptimizeSection extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             OptionSlider(
-              label: 'Lossy',
+              label: l10n.optimizeLossyLabel,
               value: state.optimizeLossy.toDouble(),
               min: 0,
               max: 80,
               divisions: 16,
               displayValue: state.optimizeLossy == 0
-                  ? 'Off'
+                  ? l10n.commonOff
                   : '${state.optimizeLossy}',
               onChanged: (v) => ctrl.setOptimizeLossy(v.round()),
             ),

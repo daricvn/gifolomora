@@ -8,6 +8,7 @@ import '../../../core/theme/app_gradients.dart';
 import '../../../core/widgets/common/gradient_scaffold.dart';
 import '../../../core/widgets/glass/glass_app_bar.dart';
 import '../../../core/widgets/glass/glass_container.dart';
+import '../../../l10n/app_localizations.dart';
 import '../controller/record_controller.dart';
 import '../widgets/audio_options_card.dart';
 import '../widgets/hotkey_recorder_field.dart';
@@ -49,10 +50,11 @@ class _ScreenRecordScreenState extends ConsumerState<ScreenRecordScreen> {
   Widget build(BuildContext context) {
     final asyncState = ref.watch(recordControllerProvider);
     final ctrl = ref.read(recordControllerProvider.notifier);
+    final l10n = AppLocalizations.of(context)!;
 
     return GradientScaffold(
       appBar: GlassAppBar(
-        title: 'Screen Record',
+        title: l10n.recordAppBarTitle,
         leading: Padding(
           padding: const EdgeInsets.only(left: 16),
           child: Align(
@@ -70,14 +72,14 @@ class _ScreenRecordScreenState extends ConsumerState<ScreenRecordScreen> {
         loading: () => const Center(
             child: CircularProgressIndicator(color: AppColors.accentB)),
         error: (e, _) => Center(
-          child: Text('Failed to load Screen Record: $e',
+          child: Text(l10n.recordFailedToLoad('$e'),
               style: const TextStyle(color: AppColors.textLo)),
         ),
         data: (state) => ListView(
           padding: EdgeInsets.fromLTRB(
               16, 16 + MediaQuery.of(context).padding.top + 64, 16, 32),
           children: [
-            const _SectionHeader(number: 1, title: 'Select a monitor'),
+            _SectionHeader(number: 1, title: l10n.recordStepSelectMonitor),
             const SizedBox(height: 12),
             MonitorCard(
               monitors: state.monitors,
@@ -86,7 +88,7 @@ class _ScreenRecordScreenState extends ConsumerState<ScreenRecordScreen> {
               onSelect: ctrl.selectMonitor,
             ),
             const SizedBox(height: 24),
-            const _SectionHeader(number: 2, title: 'Options'),
+            _SectionHeader(number: 2, title: l10n.commonOptions),
             const SizedBox(height: 12),
             AudioOptionsCard(
               systemAudioEnabled: state.settings.captureSystemAudio,
@@ -108,7 +110,7 @@ class _ScreenRecordScreenState extends ConsumerState<ScreenRecordScreen> {
             ),
             const SizedBox(height: 16),
             HotkeyRecorderField(
-              label: 'Start',
+              label: l10n.recordHotkeyStart,
               hotkey: state.settings.hotkeys.start,
               onSave: (k) => ctrl.setHotkey(HotkeySlot.start, k),
               onEditStart: _recordController.suspendHotkeysForEditing,
@@ -116,7 +118,7 @@ class _ScreenRecordScreenState extends ConsumerState<ScreenRecordScreen> {
             ),
             const SizedBox(height: 8),
             HotkeyRecorderField(
-              label: 'Pause / Resume',
+              label: l10n.recordHotkeyPauseResume,
               hotkey: state.settings.hotkeys.pauseResume,
               onSave: (k) => ctrl.setHotkey(HotkeySlot.pauseResume, k),
               onEditStart: _recordController.suspendHotkeysForEditing,
@@ -124,14 +126,14 @@ class _ScreenRecordScreenState extends ConsumerState<ScreenRecordScreen> {
             ),
             const SizedBox(height: 8),
             HotkeyRecorderField(
-              label: 'Stop',
+              label: l10n.recordStop,
               hotkey: state.settings.hotkeys.stop,
               onSave: (k) => ctrl.setHotkey(HotkeySlot.stop, k),
               onEditStart: _recordController.suspendHotkeysForEditing,
               onEditEnd: _recordController.resumeHotkeysAfterEditing,
             ),
             const SizedBox(height: 24),
-            const _SectionHeader(number: 3, title: 'Record'),
+            _SectionHeader(number: 3, title: l10n.recordStepRecord),
             const SizedBox(height: 12),
             if (state.status == RecordStatus.idle) ...[
               _RecordButton(
@@ -139,9 +141,9 @@ class _ScreenRecordScreenState extends ConsumerState<ScreenRecordScreen> {
                 onTap: ctrl.startRecording,
               ),
               const SizedBox(height: 8),
-              const Center(
-                child: Text('Max 10:00',
-                    style: TextStyle(color: AppColors.textLo, fontSize: 12)),
+              Center(
+                child: Text(l10n.recordMaxDuration,
+                    style: const TextStyle(color: AppColors.textLo, fontSize: 12)),
               ),
             ] else
               _RecordingControlsCard(
@@ -219,7 +221,7 @@ class _RecordButton extends StatelessWidget {
               Icon(Icons.fiber_manual_record_rounded,
                   color: enabled ? Colors.white : AppColors.textLo, size: 20),
               const SizedBox(width: 8),
-              Text('Record',
+              Text(AppLocalizations.of(context)!.recordButtonLabel,
                   style: TextStyle(
                       color: enabled ? Colors.white : AppColors.textLo,
                       fontSize: 15,
@@ -256,6 +258,7 @@ class _RecordingControlsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 16,
       tint: paused ? Colors.amber : AppColors.accentC,
@@ -268,13 +271,13 @@ class _RecordingControlsCard extends StatelessWidget {
               Icon(Icons.fiber_manual_record_rounded,
                   color: paused ? Colors.amber : Colors.redAccent, size: 18),
               const SizedBox(width: 8),
-              Text(paused ? 'Paused' : 'Recording',
+              Text(paused ? l10n.recordPaused : l10n.recordRecording,
                   style: const TextStyle(
                       color: AppColors.textHi,
                       fontWeight: FontWeight.w700,
                       fontSize: 15)),
               const SizedBox(width: 10),
-              Text('${_fmt(elapsed)} / 10:00',
+              Text(l10n.recordElapsedOfMax(_fmt(elapsed)),
                   style: const TextStyle(color: AppColors.textLo, fontSize: 13)),
             ],
           ),
@@ -287,7 +290,7 @@ class _RecordingControlsCard extends StatelessWidget {
                   icon: Icon(
                       paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
                       size: 18),
-                  label: Text(paused ? 'Resume' : 'Pause'),
+                  label: Text(paused ? l10n.recordResume : l10n.recordPause),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.textHi,
                     side: const BorderSide(color: AppColors.glassStroke),
@@ -299,7 +302,7 @@ class _RecordingControlsCard extends StatelessWidget {
                 child: ElevatedButton.icon(
                   onPressed: onStop,
                   icon: const Icon(Icons.stop_rounded, size: 18, color: Colors.white),
-                  label: const Text('Stop', style: TextStyle(color: Colors.white)),
+                  label: Text(l10n.recordStop, style: const TextStyle(color: Colors.white)),
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
                 ),
               ),

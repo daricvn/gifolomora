@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/glass/glass_container.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Where the temp job dir goes ([saveDirectory], `null` = system temp) and
 /// whether it's deleted on app exit. Persisted via the controller immediately
@@ -21,22 +22,23 @@ class StorageOptionsCard extends StatelessWidget {
   final ValueChanged<String?> onSaveDirectoryChanged;
   final ValueChanged<bool> onDeleteTempOnExitChanged;
 
-  Future<void> _pickFolder() async {
+  Future<void> _pickFolder(BuildContext context) async {
     final dirPath = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Choose folder for recorded video',
+      dialogTitle: AppLocalizations.of(context)!.recordChooseFolderDialogTitle,
     );
     if (dirPath != null) onSaveDirectoryChanged(dirPath);
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 20,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Storage',
-              style: TextStyle(
+          Text(l10n.recordStorage,
+              style: const TextStyle(
                   color: AppColors.textHi,
                   fontWeight: FontWeight.w700,
                   fontSize: 15)),
@@ -50,12 +52,12 @@ class StorageOptionsCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Save location',
-                        style: TextStyle(
+                    Text(l10n.recordSaveLocation,
+                        style: const TextStyle(
                             color: AppColors.textHi,
                             fontWeight: FontWeight.w600,
                             fontSize: 13)),
-                    Text(saveDirectory ?? 'Default (temp folder)',
+                    Text(saveDirectory ?? l10n.recordDefaultTempFolder,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -65,12 +67,12 @@ class StorageOptionsCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               TextButton(
-                onPressed: _pickFolder,
-                child: const Text('Choose'),
+                onPressed: () => _pickFolder(context),
+                child: Text(l10n.recordChoose),
               ),
               if (saveDirectory != null)
                 IconButton(
-                  tooltip: 'Reset to default',
+                  tooltip: l10n.recordResetToDefault,
                   icon: const Icon(Icons.restart_alt_rounded,
                       color: AppColors.textLo, size: 20),
                   onPressed: () => onSaveDirectoryChanged(null),
@@ -85,9 +87,9 @@ class StorageOptionsCard extends StatelessWidget {
               const Icon(Icons.delete_outline_rounded,
                   color: AppColors.accentB, size: 20),
               const SizedBox(width: 12),
-              const Expanded(
-                child: Text('Delete temporary video on exit',
-                    style: TextStyle(
+              Expanded(
+                child: Text(l10n.recordDeleteTempOnExit,
+                    style: const TextStyle(
                         color: AppColors.textHi,
                         fontWeight: FontWeight.w600,
                         fontSize: 13)),

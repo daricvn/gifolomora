@@ -5,6 +5,7 @@ import '../../../core/theme/app_gradients.dart';
 import '../../../core/widgets/common/gradient_scaffold.dart';
 import '../../../core/widgets/glass/glass_app_bar.dart';
 import '../../../core/widgets/glass/glass_container.dart';
+import '../../../l10n/app_localizations.dart';
 import '../controller/video_studio_controller.dart';
 
 /// Compact page pushed before Export Video runs (PLAN.md §8): pick MP4 or
@@ -35,9 +36,10 @@ class _ExportFormatScreenState extends State<ExportFormatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GradientScaffold(
       appBar: GlassAppBar(
-        title: 'Export Format',
+        title: l10n.studioExportFormatTitle,
         leading: Padding(
           padding: const EdgeInsets.only(left: 16),
           child: Align(
@@ -60,8 +62,9 @@ class _ExportFormatScreenState extends State<ExportFormatScreen> {
         children: [
           if (widget.originalExt != null) ...[
             _FormatCard(
-              title: 'Original (${widget.originalExt!.toUpperCase()})',
-              subtitle: 'Save as-is · no re-encode · fastest',
+              title: l10n.studioFormatOriginalTitle(
+                  widget.originalExt!.toUpperCase()),
+              subtitle: l10n.studioFormatOriginalSubtitle,
               icon: Icons.file_copy_rounded,
               selected: _selected == ExportVideoFormat.original,
               onTap: () =>
@@ -71,7 +74,7 @@ class _ExportFormatScreenState extends State<ExportFormatScreen> {
           ],
           _FormatCard(
             title: 'MP4',
-            subtitle: 'H.264 · best compatibility · hardware-accelerated',
+            subtitle: l10n.studioFormatMp4Subtitle,
             icon: Icons.videocam_rounded,
             selected: _selected == ExportVideoFormat.mp4,
             onTap: () => setState(() => _selected = ExportVideoFormat.mp4),
@@ -79,16 +82,16 @@ class _ExportFormatScreenState extends State<ExportFormatScreen> {
           const SizedBox(height: 12),
           _FormatCard(
             title: 'WebM',
-            subtitle: 'VP9 · smaller files · web-friendly',
+            subtitle: l10n.studioFormatWebmSubtitle,
             icon: Icons.public_rounded,
             selected: _selected == ExportVideoFormat.webm,
             onTap: () => setState(() => _selected = ExportVideoFormat.webm),
           ),
           const SizedBox(height: 20),
-          const Text(
-            'You\'ll be asked to choose where to save the file.',
+          Text(
+            l10n.commonSaveLocationHint,
             textAlign: TextAlign.center,
-            style: TextStyle(color: AppColors.textLo, fontSize: 13),
+            style: const TextStyle(color: AppColors.textLo, fontSize: 13),
           ),
           const SizedBox(height: 24),
           GestureDetector(
@@ -98,12 +101,12 @@ class _ExportFormatScreenState extends State<ExportFormatScreen> {
                 gradient: AppGradients.primaryButton,
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
                 child: Center(
                   child: Text(
-                    'Export',
-                    style: TextStyle(
+                    l10n.studioExportButton,
+                    style: const TextStyle(
                         color: Colors.white,
                         fontSize: 15,
                         fontWeight: FontWeight.w700),

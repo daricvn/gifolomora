@@ -60,7 +60,7 @@ final nativeWindowChannelProvider = Provider<NativeWindowChannel>(
 
 /// Global user preferences (app-wide, not per-tool options).
 class AppSettings {
-  const AppSettings({this.softwareVideoPreview = false});
+  const AppSettings({this.softwareVideoPreview = false, this.localeCode});
 
   /// Windows: render the video preview through media_kit's software
   /// (pixel-buffer) path instead of the default D3D11/ANGLE hardware path.
@@ -69,6 +69,9 @@ class AppSettings {
   /// texture at 1080p. The player is configured once at preview mount, so a
   /// change applies the next time the editor is opened.
   final bool softwareVideoPreview;
+
+  /// ISO language code (e.g. 'en', 'vi'). Null = follow system locale.
+  final String? localeCode;
 }
 
 final appSettingsProvider =
@@ -79,19 +82,35 @@ final appSettingsProvider =
 
 class AppSettingsNotifier extends AsyncNotifier<AppSettings> {
   static const _kSoftwareVideoPreview = 'software_video_preview';
+  static const _kLocaleCode = 'locale_code';
 
   @override
   Future<AppSettings> build() async {
     final prefs = await SharedPreferences.getInstance();
     return AppSettings(
       softwareVideoPreview: prefs.getBool(_kSoftwareVideoPreview) ?? false,
+      localeCode: prefs.getString(_kLocaleCode),
     );
   }
 
   Future<void> setSoftwareVideoPreview(bool value) async {
-    state = AsyncData(AppSettings(softwareVideoPreview: value));
+    final current = state.valueOrNull ?? const AppSettings();
+    state = AsyncData(
+        AppSettings(softwareVideoPreview: value, localeCode: current.localeCode));
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kSoftwareVideoPreview, value);
+  }
+
+  Future<void> setLocale(String? code) async {
+    final current = state.valueOrNull ?? const AppSettings();
+    state = AsyncData(AppSettings(
+        softwareVideoPreview: current.softwareVideoPreview, localeCode: code));
+    final prefs = await SharedPreferences.getInstance();
+    if (code == null) {
+      await prefs.remove(_kLocaleCode);
+    } else {
+      await prefs.setString(_kLocaleCode, code);
+    }
   }
 }
 

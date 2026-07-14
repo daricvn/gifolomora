@@ -90,9 +90,6 @@ final appRouter = GoRouter(
     ),
     GoRoute(
       path: '/settings',
-      // Windows-only for now: its single option targets the desktop
-      // video-preview renderer (same gating pattern as /screen-record).
-      redirect: (context, state) => Platform.isWindows ? null : '/',
       pageBuilder: (context, state) =>
           _slide(state, const SettingsScreen()),
     ),

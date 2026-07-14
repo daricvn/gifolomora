@@ -11,6 +11,7 @@ import '../../_shared/widgets/export_bottom_sheet.dart';
 import '../../_shared/widgets/file_drop_zone.dart';
 import '../../_shared/widgets/media_preview.dart';
 import '../../_shared/widgets/option_slider.dart';
+import '../../../l10n/app_localizations.dart';
 import '../controller/effects_controller.dart';
 
 class EffectsScreen extends ConsumerWidget {
@@ -21,6 +22,7 @@ class EffectsScreen extends ConsumerWidget {
     final state =
         ref.watch(effectsControllerProvider).valueOrNull ?? const EffectsState();
     final ctrl = ref.read(effectsControllerProvider.notifier);
+    final l10n = AppLocalizations.of(context)!;
 
     Future<void> doExport() async {
       await ExportBottomSheet.show(
@@ -29,7 +31,7 @@ class EffectsScreen extends ConsumerWidget {
           final ok = await ctrl.exportGif();
           if (!ok && context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Export cancelled')),
+              SnackBar(content: Text(l10n.commonExportCancelled)),
             );
           }
         },
@@ -38,7 +40,7 @@ class EffectsScreen extends ConsumerWidget {
 
     return GradientScaffold(
       appBar: GlassAppBar(
-        title: 'Effects',
+        title: l10n.effectsAppBarTitle,
         leading: Padding(
           padding: const EdgeInsets.only(left: 16),
           child: Align(
@@ -62,22 +64,22 @@ class EffectsScreen extends ConsumerWidget {
         ),
         children: [
           // ── Step 1: Pick GIF ───────────────────────────────────────────
-          const _SectionHeader(number: 1, title: 'Select GIF'),
+          _SectionHeader(number: 1, title: l10n.commonSelectGif),
           const SizedBox(height: 12),
           if (state.isProbing)
             GlassContainer(
               borderRadius: 20,
               padding: const EdgeInsets.symmetric(vertical: 32),
-              child: const Column(children: [
-                CircularProgressIndicator(color: AppColors.accentB),
-                SizedBox(height: 12),
-                Text('Reading file…',
-                    style: TextStyle(color: AppColors.textLo, fontSize: 13)),
+              child: Column(children: [
+                const CircularProgressIndicator(color: AppColors.accentB),
+                const SizedBox(height: 12),
+                Text(l10n.commonReadingFile,
+                    style: const TextStyle(color: AppColors.textLo, fontSize: 13)),
               ]),
             )
           else if (!state.hasInput)
             FileDropZone(
-              hint: 'Tap to select GIF',
+              hint: l10n.commonTapToSelectGif,
               icon: Icons.auto_awesome_rounded,
               allowedExtensions: const ['gif'],
               onFilesSelected: (files) {
@@ -95,23 +97,23 @@ class EffectsScreen extends ConsumerWidget {
           // ── Step 2: Effect Options ─────────────────────────────────────
           if (state.hasInput && !state.isProbing) ...[
             const SizedBox(height: 24),
-            const _SectionHeader(number: 2, title: 'Effect'),
+            _SectionHeader(number: 2, title: l10n.effectsStepEffect),
             const SizedBox(height: 12),
             GlassContainer(
               borderRadius: 20,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Mode',
-                      style: TextStyle(color: AppColors.textLo, fontSize: 13)),
+                  Text(l10n.effectsModeLabel,
+                      style: const TextStyle(color: AppColors.textLo, fontSize: 13)),
                   const SizedBox(height: 10),
                   Row(
                     children: [
                       Expanded(
                         child: _ModeCard(
                           icon: Icons.swap_horiz_rounded,
-                          label: 'Reverse',
-                          subtitle: 'Play backwards',
+                          label: l10n.effectsReverseLabel,
+                          subtitle: l10n.effectsReverseSubtitle,
                           selected: state.mode == EffectMode.reverse,
                           onTap: () => ctrl.setMode(EffectMode.reverse),
                         ),
@@ -120,8 +122,8 @@ class EffectsScreen extends ConsumerWidget {
                       Expanded(
                         child: _ModeCard(
                           icon: Icons.speed_rounded,
-                          label: 'Speed',
-                          subtitle: 'Change tempo',
+                          label: l10n.commonSpeed,
+                          subtitle: l10n.effectsSpeedSubtitle,
                           selected: state.mode == EffectMode.speed,
                           onTap: () => ctrl.setMode(EffectMode.speed),
                         ),
@@ -131,12 +133,12 @@ class EffectsScreen extends ConsumerWidget {
                   if (state.mode == EffectMode.speed) ...[
                     const Divider(color: AppColors.glassStroke, height: 24),
                     OptionSlider(
-                      label: 'Speed',
+                      label: l10n.commonSpeed,
                       value: state.speedFactor,
                       min: 0.25,
                       max: 4.0,
                       divisions: 75,
-                      displayValue: _speedLabel(state.speedFactor),
+                      displayValue: _speedLabel(l10n, state.speedFactor),
                       onChanged: (v) => ctrl.setSpeedFactor(
                         _snapSpeed(v),
                       ),
@@ -145,11 +147,11 @@ class EffectsScreen extends ConsumerWidget {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('0.25×  slower',
-                            style: TextStyle(
+                        Text(l10n.effectsSpeedSlower,
+                            style: const TextStyle(
                                 color: AppColors.textLo, fontSize: 11)),
-                        const Text('4×  faster',
-                            style: TextStyle(
+                        Text(l10n.effectsSpeedFaster,
+                            style: const TextStyle(
                                 color: AppColors.textLo, fontSize: 11)),
                       ],
                     ),
@@ -160,7 +162,7 @@ class EffectsScreen extends ConsumerWidget {
 
             // ── Step 3: Preview / Generate ─────────────────────────────
             const SizedBox(height: 24),
-            const _SectionHeader(number: 3, title: 'Preview'),
+            _SectionHeader(number: 3, title: l10n.commonPreview),
             const SizedBox(height: 12),
             if (state.isProcessing)
               _ProgressCard(
@@ -173,7 +175,7 @@ class EffectsScreen extends ConsumerWidget {
                   OutlinedButton.icon(
                     onPressed: ctrl.generate,
                     icon: const Icon(Icons.refresh_rounded, size: 16),
-                    label: const Text('Regenerate'),
+                    label: Text(l10n.commonRegenerate),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.textLo,
                       side: const BorderSide(color: AppColors.glassStroke),
@@ -194,10 +196,10 @@ class EffectsScreen extends ConsumerWidget {
     );
   }
 
-  String _speedLabel(double v) {
-    if ((v - 1.0).abs() < 0.01) return '1× (original)';
-    if (v < 1.0) return '${v.toStringAsFixed(2)}× (slower)';
-    return '${v.toStringAsFixed(2)}× (faster)';
+  String _speedLabel(AppLocalizations l10n, double v) {
+    if ((v - 1.0).abs() < 0.01) return l10n.effectsSpeedLabelOriginal;
+    if (v < 1.0) return l10n.effectsSpeedLabelSlower(v.toStringAsFixed(2));
+    return l10n.effectsSpeedLabelFaster(v.toStringAsFixed(2));
   }
 
   double _snapSpeed(double v) {
@@ -354,6 +356,7 @@ class _ProgressCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 20,
       child: Column(
@@ -373,14 +376,14 @@ class _ProgressCard extends StatelessWidget {
             children: [
               Text(
                 progress != null
-                    ? '${(progress! * 100).round()}%  processing…'
-                    : 'Processing…',
+                    ? l10n.commonProcessingPercent((progress! * 100).round())
+                    : l10n.commonProcessing,
                 style: const TextStyle(color: AppColors.textLo, fontSize: 13),
               ),
               TextButton(
                 onPressed: onCancel,
-                child: const Text('Cancel',
-                    style: TextStyle(color: AppColors.accentC)),
+                child: Text(l10n.commonCancel,
+                    style: const TextStyle(color: AppColors.accentC)),
               ),
             ],
           ),
@@ -417,7 +420,7 @@ class _GenerateButton extends StatelessWidget {
                   size: 20),
               const SizedBox(width: 8),
               Text(
-                'Generate Preview',
+                AppLocalizations.of(context)!.commonGeneratePreview,
                 style: TextStyle(
                   color: onTap != null ? Colors.white : AppColors.textLo,
                   fontSize: 15,
@@ -482,8 +485,8 @@ class _ExportBar extends StatelessWidget {
             onPressed: onExport,
             icon: const Icon(Icons.save_alt_rounded,
                 size: 18, color: Colors.white),
-            label: const Text('Export GIF',
-                style: TextStyle(
+            label: Text(AppLocalizations.of(context)!.commonExportGif,
+                style: const TextStyle(
                     color: Colors.white,
                     fontSize: 15,
                     fontWeight: FontWeight.w700)),

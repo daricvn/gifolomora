@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Premium masthead built around the brand banner. The banner artwork already
 /// carries the wordmark + tagline, so instead of a glass card we let it sit
@@ -32,15 +33,15 @@ class HomeHero extends StatelessWidget {
               color: Colors.white.withValues(alpha: 0.05),
               border: Border.all(color: AppColors.glassStroke, width: 1),
             ),
-            child: const Row(
+            child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.file_upload_outlined,
+                const Icon(Icons.file_upload_outlined,
                     size: 16, color: AppColors.textLo),
-                SizedBox(width: 8),
+                const SizedBox(width: 8),
                 Text(
-                  'Drag & drop a file anywhere to begin',
-                  style: TextStyle(color: AppColors.textLo, fontSize: 12.5),
+                  AppLocalizations.of(context)!.homeDragDropHint,
+                  style: const TextStyle(color: AppColors.textLo, fontSize: 12.5),
                 ),
               ],
             ),

@@ -10,15 +10,10 @@ import '../../../core/widgets/glass/glass_container.dart';
 import '../../_shared/widgets/export_bottom_sheet.dart';
 import '../../_shared/widgets/file_drop_zone.dart';
 import '../../_shared/widgets/media_preview.dart';
+import '../../../l10n/app_localizations.dart';
 import '../controller/resize_controller.dart';
 
-const _kPresets = <(String, int?)>[
-  ('Original', null),
-  ('320px', 320),
-  ('480px', 480),
-  ('640px', 640),
-  ('960px', 960),
-];
+const _kPresetWidths = <int?>[null, 320, 480, 640, 960];
 
 class ResizeScreen extends ConsumerWidget {
   const ResizeScreen({super.key});
@@ -28,6 +23,7 @@ class ResizeScreen extends ConsumerWidget {
     final state =
         ref.watch(resizeControllerProvider).valueOrNull ?? const ResizeState();
     final ctrl = ref.read(resizeControllerProvider.notifier);
+    final l10n = AppLocalizations.of(context)!;
 
     Future<void> doExport() async {
       await ExportBottomSheet.show(
@@ -36,7 +32,7 @@ class ResizeScreen extends ConsumerWidget {
           final ok = await ctrl.exportGif();
           if (!ok && context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Export cancelled')),
+              SnackBar(content: Text(l10n.commonExportCancelled)),
             );
           }
         },
@@ -45,7 +41,7 @@ class ResizeScreen extends ConsumerWidget {
 
     return GradientScaffold(
       appBar: GlassAppBar(
-        title: 'Resize GIF',
+        title: l10n.resizeAppBarTitle,
         leading: Padding(
           padding: const EdgeInsets.only(left: 16),
           child: Align(
@@ -69,22 +65,22 @@ class ResizeScreen extends ConsumerWidget {
         ),
         children: [
           // ── Step 1: Pick GIF ───────────────────────────────────────────
-          const _SectionHeader(number: 1, title: 'Select GIF'),
+          _SectionHeader(number: 1, title: l10n.commonSelectGif),
           const SizedBox(height: 12),
           if (state.isProbing)
             GlassContainer(
               borderRadius: 20,
               padding: const EdgeInsets.symmetric(vertical: 32),
-              child: const Column(children: [
-                CircularProgressIndicator(color: AppColors.accentB),
-                SizedBox(height: 12),
-                Text('Reading file…',
-                    style: TextStyle(color: AppColors.textLo, fontSize: 13)),
+              child: Column(children: [
+                const CircularProgressIndicator(color: AppColors.accentB),
+                const SizedBox(height: 12),
+                Text(l10n.commonReadingFile,
+                    style: const TextStyle(color: AppColors.textLo, fontSize: 13)),
               ]),
             )
           else if (!state.hasInput)
             FileDropZone(
-              hint: 'Tap to select GIF',
+              hint: l10n.commonTapToSelectGif,
               icon: Icons.gif_box_rounded,
               allowedExtensions: const ['gif'],
               onFilesSelected: (files) {
@@ -102,31 +98,30 @@ class ResizeScreen extends ConsumerWidget {
           // ── Step 2: Options ────────────────────────────────────────────
           if (state.hasInput && !state.isProbing) ...[
             const SizedBox(height: 24),
-            const _SectionHeader(number: 2, title: 'Output Size'),
+            _SectionHeader(number: 2, title: l10n.resizeStepOutputSize),
             const SizedBox(height: 12),
             GlassContainer(
               borderRadius: 20,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Presets',
+                  Text(l10n.resizePresetsLabel,
                       style:
-                          TextStyle(color: AppColors.textLo, fontSize: 13)),
+                          const TextStyle(color: AppColors.textLo, fontSize: 13)),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
-                    children: _kPresets.map((preset) {
-                      final (label, w) = preset;
+                    children: _kPresetWidths.map((w) {
                       final selected = w == state.width;
                       return _PresetChip(
-                        label: label,
+                        label: w == null ? l10n.commonOriginal : '${w}px',
                         selected: selected,
                         onTap: () => ctrl.setWidth(w),
                       );
                     }).toList(),
                   ),
-                  if (!_kPresets.any((p) => p.$2 == state.width)) ...[
+                  if (!_kPresetWidths.contains(state.width)) ...[
                     const SizedBox(height: 16),
                     Divider(
                         color: AppColors.glassStroke.withValues(alpha: 0.5),
@@ -135,8 +130,8 @@ class ResizeScreen extends ConsumerWidget {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Custom width',
-                            style: TextStyle(
+                        Text(l10n.resizeCustomWidth,
+                            style: const TextStyle(
                                 color: AppColors.textHi, fontSize: 14)),
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -149,7 +144,7 @@ class ResizeScreen extends ConsumerWidget {
                                 width: 1),
                           ),
                           child: Text(
-                            state.width != null ? '${state.width}px' : 'Original',
+                            state.width != null ? '${state.width}px' : l10n.commonOriginal,
                             style: const TextStyle(
                                 color: AppColors.accentB,
                                 fontSize: 13,
@@ -183,7 +178,8 @@ class ResizeScreen extends ConsumerWidget {
                       state.originalHeight > 0) ...[
                     const SizedBox(height: 8),
                     Text(
-                      'Output: ${state.width}×${(state.width! * state.originalHeight / state.originalWidth).round()}px',
+                      l10n.resizeOutputLabel(state.width!,
+                          (state.width! * state.originalHeight / state.originalWidth).round()),
                       style: const TextStyle(
                           color: AppColors.textLo, fontSize: 12),
                     ),
@@ -194,7 +190,7 @@ class ResizeScreen extends ConsumerWidget {
 
             // ── Step 3: Preview / Generate ─────────────────────────────
             const SizedBox(height: 24),
-            const _SectionHeader(number: 3, title: 'Preview'),
+            _SectionHeader(number: 3, title: l10n.commonPreview),
             const SizedBox(height: 12),
             if (state.isProcessing)
               _ProgressCard(
@@ -207,7 +203,7 @@ class ResizeScreen extends ConsumerWidget {
                   OutlinedButton.icon(
                     onPressed: ctrl.generate,
                     icon: const Icon(Icons.refresh_rounded, size: 16),
-                    label: const Text('Regenerate'),
+                    label: Text(l10n.commonRegenerate),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.textLo,
                       side: const BorderSide(color: AppColors.glassStroke),
@@ -368,6 +364,7 @@ class _ProgressCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GlassContainer(
       borderRadius: 20,
       child: Column(
@@ -387,14 +384,14 @@ class _ProgressCard extends StatelessWidget {
             children: [
               Text(
                 progress != null
-                    ? '${(progress! * 100).round()}%  processing…'
-                    : 'Processing…',
+                    ? l10n.commonProcessingPercent((progress! * 100).round())
+                    : l10n.commonProcessing,
                 style: const TextStyle(color: AppColors.textLo, fontSize: 13),
               ),
               TextButton(
                 onPressed: onCancel,
-                child: const Text('Cancel',
-                    style: TextStyle(color: AppColors.accentC)),
+                child: Text(l10n.commonCancel,
+                    style: const TextStyle(color: AppColors.accentC)),
               ),
             ],
           ),
@@ -430,7 +427,7 @@ class _GenerateButton extends StatelessWidget {
                   size: 20),
               const SizedBox(width: 8),
               Text(
-                'Generate Preview',
+                AppLocalizations.of(context)!.commonGeneratePreview,
                 style: TextStyle(
                   color: onTap != null ? Colors.white : AppColors.textLo,
                   fontSize: 15,
@@ -496,8 +493,8 @@ class _ExportBar extends StatelessWidget {
             onPressed: onExport,
             icon: const Icon(Icons.save_alt_rounded,
                 size: 18, color: Colors.white),
-            label: const Text('Export GIF',
-                style: TextStyle(
+            label: Text(AppLocalizations.of(context)!.commonExportGif,
+                style: const TextStyle(
                     color: Colors.white,
                     fontSize: 15,
                     fontWeight: FontWeight.w700)),
